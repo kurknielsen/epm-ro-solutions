@@ -1,0 +1,177 @@
+CREATE OR REPLACE PACKAGE MM_PJM_ESCHED IS
+-- Author  : KCHOPRA
+-- Created : 12/4/2004 5:43:02 PM
+-- Purpose :
+-- $Revision: 1.40 $
+
+TYPE REF_CURSOR IS REF CURSOR;
+
+FUNCTION WHAT_VERSION RETURN VARCHAR2;
+
+PROCEDURE MARKET_SUBMIT_TRANSACTION_LIST
+    (
+    p_BEGIN_DATE     IN DATE,
+    p_END_DATE         IN DATE,
+    p_EXCHANGE_TYPE IN VARCHAR2,
+    p_STATUS         OUT NUMBER,
+    p_CURSOR         IN OUT REF_CURSOR
+    );
+
+PROCEDURE MARKET_SUBMIT
+    (
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE IN DATE,
+    p_EXCHANGE_TYPE IN VARCHAR2,
+    p_LOG_ONLY IN NUMBER :=0,
+    p_ENTITY_LIST IN VARCHAR2,
+    p_ENTITY_LIST_DELIMITER IN CHAR,
+    p_SUBMIT_HOURS IN VARCHAR2,
+    p_TIME_ZONE IN VARCHAR2,
+    p_LOG_TYPE IN NUMBER,
+    p_TRACE_ON    IN NUMBER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2
+    );
+
+PROCEDURE MARKET_EXCHANGE
+    (
+    p_BEGIN_DATE                IN DATE,
+    p_END_DATE                  IN DATE,
+    p_EXCHANGE_TYPE              IN VARCHAR2,
+    p_ENTITY_LIST               IN VARCHAR2,
+    p_ENTITY_LIST_DELIMITER     IN CHAR,
+    P_LOG_ONLY                    IN NUMBER :=0,
+    p_LOG_TYPE                     IN NUMBER,
+    p_TRACE_ON                     IN NUMBER,
+    p_STATUS                    OUT NUMBER,
+    p_MESSAGE                   OUT VARCHAR2
+    );
+
+  PROCEDURE MARKET_IMPORT_CLOB
+    (
+    p_BEGIN_DATE                IN DATE,
+    p_END_DATE                  IN DATE,
+    p_EXCHANGE_TYPE             IN VARCHAR2,
+    p_ENTITY_LIST               IN VARCHAR2,
+    p_ENTITY_LIST_DELIMITER     IN CHAR,
+    p_FILE_PATH                    IN VARCHAR2,
+    p_IMPORT_FILE                IN OUT NOCOPY CLOB,
+    p_LOG_ONLY                    IN NUMBER :=0,
+    p_LOG_TYPE                    IN NUMBER,
+    p_TRACE_ON                    IN NUMBER,
+    p_STATUS                    OUT NUMBER,
+    p_MESSAGE                   OUT VARCHAR2
+    );
+
+PROCEDURE MARKET_SUBMIT_WARNING
+    (
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE IN DATE,
+    p_EXCHANGE_TYPE IN VARCHAR,
+    p_LOG_ONLY IN NUMBER,
+    p_ENTITY_LIST IN VARCHAR2,
+    p_ENTITY_LIST_DELIMITER IN CHAR,
+    p_SUBMIT_HOURS IN VARCHAR,
+    p_TIME_ZONE IN VARCHAR,
+    p_SOMETHING_DONE OUT BOOLEAN,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR,
+    p_CONTINUE_BUTTON_CAPTION OUT VARCHAR,
+    p_CANCEL_BUTTON_CAPTION OUT VARCHAR,
+    p_MUST_CANCEL_SUBMIT OUT NUMBER
+    );
+
+PROCEDURE SYSTEM_ACTION_USES_HOURS
+    (
+    p_ACTION IN VARCHAR2,
+    p_SHOW_HOURS OUT NUMBER
+    );
+
+FUNCTION GET_TX_ID
+    (
+    p_EXT_ID IN VARCHAR2,
+    p_TRANS_TYPE IN VARCHAR2 := 'Market Result',
+    p_NAME IN VARCHAR2 := NULL,
+    p_INTERVAL IN VARCHAR2 := 'Hour',
+    p_COMMODITY_ID IN NUMBER := 0,
+    p_CONTRACT_ID IN NUMBER := 0,
+    p_ZOD_ID IN NUMBER := 0,
+    p_SERVICE_POINT_ID IN NUMBER := 0,
+    p_POOL_ID IN NUMBER := 0,
+    p_SELLER_ID IN NUMBER := 0,
+    p_DESC IN VARCHAR2 DEFAULT NULL
+    ) RETURN NUMBER;
+
+PROCEDURE IMPORT_REAL_TIME_DAILY_TX_BOTH
+    (
+    p_CRED   IN MEX_CREDENTIALS,
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE   IN DATE,
+    p_LOG_ONLY        IN NUMBER,
+    p_STATUS     OUT NUMBER,
+    p_MESSAGE    OUT VARCHAR2,
+    p_LOGGER     IN OUT   MM_LOGGER_ADAPTER
+    );
+
+PROCEDURE IMPORT_RESIDUAL_RECON_CHARGES
+   (
+   p_CREDENTIALS IN MEX_CREDENTIALS,
+   p_BEGIN_DATE IN DATE,
+   p_END_DATE IN DATE,
+   p_LOG_ONLY IN NUMBER,
+   p_STATUS OUT NUMBER,
+   p_MESSAGE OUT VARCHAR2,
+   p_LOGGER    IN OUT MM_LOGGER_ADAPTER
+   );
+
+FUNCTION GET_INTERCHANGE_CONTRACT(p_ISO_ACCOUNT_NAME IN VARCHAR2) RETURN NUMBER;
+
+PROCEDURE IMPORT_MSRS_W_WO_LOSSES
+    (
+    p_BEGIN_DATE                IN DATE,
+    p_END_DATE                  IN DATE,
+    p_EXCHANGE_TYPE             IN VARCHAR2,
+    p_LOG_TYPE                  IN NUMBER,
+    p_TRACE_ON                  IN NUMBER,
+    p_FILE_PATH                 IN VARCHAR2,
+    p_IMPORT_FILE               IN OUT NOCOPY CLOB,
+    p_STATUS                    OUT NUMBER,
+    p_MESSAGE                   OUT VARCHAR2
+    );
+
+g_TRACE_ON BOOLEAN := FALSE;
+g_UNCONFIRMED_CONTRACT_ALERT VARCHAR2(256) := 'Unconfirmed Contract';
+
+-- Exchange Types
+-- Market_exchange
+g_ET_QUERY_COMPANIES           CONSTANT VARCHAR2(64) := 'Query Companies';
+g_ET_QUERY_CONTRACTS           CONSTANT VARCHAR2(64) := 'Query Contracts';
+g_ET_QUERY_CONTR_TO_INTER      CONSTANT VARCHAR2(64) := 'Query Contracts To Internal';
+g_ET_QUERY_SCHEDULES           CONSTANT VARCHAR2(64) := 'Query Schedules';
+g_ET_QUERY_SCHED_TO_INTER      CONSTANT VARCHAR2(64) := 'Query Schedules To Internal';
+g_ET_QUERY_RECON_DATA          CONSTANT VARCHAR2(64) := 'Query Reconciliation Data';
+g_ET_QUERY_RL_TIME_DAILY_TXNS  CONSTANT VARCHAR2(64) := 'Query Real-Time Daily Transactions';
+g_ET_QUERY_LOAD                CONSTANT VARCHAR2(64) := 'Query Load With And Without Losses';
+--@@Begin Implementation Override --
+g_ET_QUERY_EDC_INADVERT_ALLOC  CONSTANT VARCHAR2(64) := 'Query EDC Inadvertent Allocations';
+g_ET_QUERY_METER_COR_CHG       CONSTANT VARCHAR2(64) := 'Query Meter Correction Charge Summary';
+g_ET_QUERY_METER_COR_ALLOC_CHG CONSTANT VARCHAR2(64) := 'Query Meter Correction Allocation Charge Summary';
+g_ET_IMPORT_LOAD               CONSTANT VARCHAR2(64) := 'Import Load With and Without Losses From File';
+
+g_RESIDUAL_ID                  NUMBER := TO_NUMBER(
+                             NVL(GET_DICTIONARY_VALUE('NODE_ID', 0, 'MarketExchange', 'PJM', 'LMP', 'Residual Price ID'), 116472935));
+                               ---CONSTANT NUMBER := 116472935;
+g_RESIDUAL_ORG_CODE            CONSTANT VARCHAR2(6) := 'CEDPH';
+--@@End Implementation Override --
+
+--Market Import
+g_ET_UPLOAD_FILE                    CONSTANT VARCHAR2(64) := 'Upload File';
+g_ET_IMPORT_SCHEDULES_CSV         CONSTANT VARCHAR2(64) := 'Import Schedules CSV';
+g_ET_IMPORT_RL_TIME_DAILY_CSV  CONSTANT VARCHAR2(64) := 'Import Real-Time Daily CSV';
+g_ET_QUERY_COMPANIES_FROM_FILE CONSTANT VARCHAR2(64) := 'Query Companies From File';
+
+--Market Submit
+g_ET_SUBMIT_SCHEDULE     CONSTANT VARCHAR2(64) := 'Submit Schedule';
+
+END MM_PJM_ESCHED;
+/
