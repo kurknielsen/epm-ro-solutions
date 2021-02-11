@@ -1,0 +1,78 @@
+--------------------------------------------------------
+--  File created - Friday-December-11-2020   
+--------------------------------------------------------
+--------------------------------------------------------
+--  DDL for Package CDI_MULTIACCOUNT_REPORTS
+--------------------------------------------------------
+
+CREATE OR REPLACE PACKAGE CDI_MULTI_ACCOUNT_REPORTS AS
+
+c_SERVICE_WITH_LOSSES  CONSTANT VARCHAR2(12) := 'With Losses';
+c_SERVICE_WO_LOSSES    CONSTANT VARCHAR2(15) := 'Without Losses';
+c_SERVICE_WITH_DETAILS CONSTANT VARCHAR2(15) := 'Loss Details';
+
+PROCEDURE POOL_ESP_ACCOUNT_TREE
+ (
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE IN DATE,
+    p_CURSOR OUT GA.REFCURSOR
+ );
+
+  PROCEDURE GET_MULTI_ACCOUNT_DETAILS
+    (
+    p_BEGIN_DATE        IN DATE,
+    p_END_DATE          IN DATE,
+    p_TIME_ZONE         IN VARCHAR2,
+    p_RUN_TYPE_ID       IN NUMBER,
+    p_INTERVAL          IN VARCHAR2,
+    p_DISPLAY_TYPE      IN VARCHAR2,
+    p_EDC_ID            IN NUMBER_COLLECTION,
+    p_PSE_ID            IN NUMBER_COLLECTION,
+    p_ESP_ID            IN NUMBER_COLLECTION,
+    p_POOL_ID           IN NUMBER_COLLECTION,
+    p_ACCOUNT_ID        IN NUMBER_COLLECTION,
+    P_AGGREGATE_ID      IN NUMBER_COLLECTION,
+    p_SERVICE_ID        IN NUMBER_COLLECTION,
+    P_UOM               OUT VARCHAR2,
+    P_CURSOR            OUT GA.REFCURSOR,
+    P_MESSAGE           OUT VARCHAR2
+    );
+
+PROCEDURE GET_LOAD_COMPARISON_M
+    (
+    p_BEGIN_DATE        IN DATE,
+    p_END_DATE          IN DATE,
+    p_TIME_ZONE         IN VARCHAR2,
+    p_SERVICE_ID        IN NUMBER,
+    p_RUN_TYPE_A_ID     IN NUMBER,
+    p_RUN_TYPE_B_ID     IN NUMBER,
+    p_INTERVAL          IN VARCHAR2,
+    p_ENTITY_TYPE       IN VARCHAR2,
+    p_ENTITY_ID         IN NUMBER,
+    p_ACCOUNT_ID        IN NUMBER,
+    p_SERVICE_LOCATION_ID IN NUMBER,
+    p_METER_ID          IN NUMBER,
+    p_DISPLAY_TYPE      IN VARCHAR2,
+    p_UOM               OUT VARCHAR2,
+    p_CURSOR            OUT GA.REFCURSOR
+    );
+    
+PROCEDURE GET_MULTI_ACCOUNT_STATS
+    (
+    p_BEGIN_DATE        IN DATE,
+    p_END_DATE          IN DATE,
+    p_TIME_ZONE         IN VARCHAR2,
+    p_RUN_TYPE_ID       IN NUMBER,
+    p_INTERVAL          IN VARCHAR2,
+    p_DISPLAY_TYPE      IN VARCHAR2,
+    p_EDC_ID                   IN NUMBER_COLLECTION,
+    p_PSE_ID                  IN NUMBER_COLLECTION,
+    p_ESP_ID                   IN NUMBER_COLLECTION,
+    p_POOL_ID                  IN NUMBER_COLLECTION,
+    p_ACCOUNT_ID        IN NUMBER_COLLECTION,
+    p_AGGREGATE_ID      IN NUMBER_COLLECTION,
+    p_CURSOR                OUT GA.REFCURSOR
+    );    
+    
+END CDI_MULTI_ACCOUNT_REPORTS;
+/

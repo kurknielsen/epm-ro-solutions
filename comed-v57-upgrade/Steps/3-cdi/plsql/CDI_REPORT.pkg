@@ -1,0 +1,251 @@
+CREATE OR REPLACE PACKAGE ROMO_CUSTOM.CDI_REPORT AS
+
+   /*============================================================================*
+   *                                DESCRIPTION                                 *
+   *============================================================================*
+   *                                                                            *
+   * This package contains a set of custom reports                              *
+   *                                                                            *
+   *----------------------------------------------------------------------------*/
+
+   /*============================================================================*
+   *                            MAINTENANCE HISTORY                             *
+   *============================================================================*
+   *    DATE    | AUTHOR |                    DESCRIPTION                       *
+   *============================================================================*
+   * 01/15/2007 | AB     | INITIAL RELEASE                                      *
+   *----------------------------------------------------------------------------*
+   * 01/27/2007 | AB     | CHANGED COLUMN ORDER TO PUT SUPPLIER FIRST           *
+   *----------------------------------------------------------------------------*
+   *            |        |                                                      *
+   *============================================================================*/
+
+   /*----------------------------------------------------------------------------*
+   *   TYPE DECLARATIONS                                                        *
+   *----------------------------------------------------------------------------*/
+
+   TYPE REF_CURSOR IS REF CURSOR;
+
+   /*----------------------------------------------------------------------------*
+   *   CONSTANTS                                                                *
+   *----------------------------------------------------------------------------*/
+
+   k_LOCAL_TIME_ZONE CONSTANT CHAR(3) := 'CDT';
+   k_HIGH_DATE       CONSTANT DATE := TO_DATE('31-DEC-9999', 'DD-MON-YYYY');
+
+   /*----------------------------------------------------------------------------*
+   *   EXCEPTIONS                                                               *
+   *----------------------------------------------------------------------------*/
+
+   /*----------------------------------------------------------------------------*
+   *   PUBLIC PROCEDURES                                                        *
+   *----------------------------------------------------------------------------*/
+
+   PROCEDURE USAGE_ALLOCATION_REPORT
+   (
+      P_MODEL_ID      IN NUMBER,
+      P_SCHEDULE_TYPE IN CHAR,
+      P_BEGIN_DATE    IN DATE,
+      P_END_DATE      IN DATE,
+      P_AS_OF_DATE    IN DATE,
+      P_TIME_ZONE     IN VARCHAR,
+      P_CONTEXT_ID1   IN NUMBER,
+      P_CONTEXT_ID2   IN NUMBER,
+      P_CONTEXT_ID3   IN NUMBER,
+      P_REPORT_NAME   IN VARCHAR2,
+      P_STATUS        OUT NUMBER,
+      P_CURSOR        IN OUT REF_CURSOR
+   );
+
+   PROCEDURE GET_UFE_PARTICIPANT_REPORT
+   (
+      P_BEGIN_DATE                  IN DATE,
+      P_END_DATE                    IN DATE,
+      P_TIME_ZONE                   IN VARCHAR2,
+      P_RATE_CLASS                  IN VARCHAR2 -- DSC
+     ,
+      P_ESP_ID                      IN NUMBER --SUPPLIER
+     ,
+      P_POOL_ID                     IN NUMBER,
+      P_ACCOUNT_EXTERNAL_IDENTIFIER IN VARCHAR2,
+      P_STATUS                      OUT NUMBER,
+      P_CURSOR                      OUT REF_CURSOR
+   );
+
+   PROCEDURE PUT_UFE_PARTICIPANT
+   (
+      P_ACCOUNT_EXTERNAL_IDENTIFIER IN VARCHAR2,
+      P_IS_UFE_PARTICIPANT          IN NUMBER,
+      P_STATUS                      OUT NUMBER,
+      P_MESSAGE                     OUT VARCHAR2
+   );
+
+   PROCEDURE GET_UFT_UFC_PARTICIPATION
+   (
+      P_STATUS OUT NUMBER,
+      P_CURSOR OUT REF_CURSOR
+   );
+
+   PROCEDURE PUT_UFT_UFC_PARTICIPATION
+   (
+      P_UFC_UFT_PART_ID            IN NUMBER,
+      P_PSE_NAME                   IN VARCHAR2,
+      P_POOL_NAME                  IN VARCHAR2,
+      P_IS_UFT_PARTICIPANT         IN NUMBER,
+      P_IS_PJM_TRANSMISSION_UPLOAD IN NUMBER,
+      P_IS_UFC_PARTICIPANT         IN NUMBER,
+      P_IS_PJM_CAPACITY_UPLOAD     IN NUMBER,
+      P_IS_SELF_SCHEDULING         IN NUMBER,
+      P_IS_UFE_PARTICIPANT         IN NUMBER,
+      P_BEGIN_DATE                 IN DATE,
+      P_END_DATE                   IN DATE,
+      P_STATUS                     OUT NUMBER,
+      P_MESSAGE                    OUT VARCHAR2
+   );
+
+   PROCEDURE DEL_UFT_UFC_PARTICIPATION
+   (
+      P_UFC_UFT_PART_ID IN NUMBER,
+      p_STATUS          OUT NUMBER,
+      P_MESSAGE         OUT VARCHAR2
+   );
+
+   PROCEDURE GET_ESTIMATED_USAGE_PERIOD
+   (
+      p_BEGIN_DATE    IN DATE,
+      p_END_DATE      IN DATE,
+      p_TIME_ZONE     IN VARCHAR2,
+      p_RATE_CLASS    IN VARCHAR2,
+      p_ESP_EXTERNAL  IN VARCHAR2,
+      p_POOL_EXTERNAL IN VARCHAR2,
+      p_ACCOUNT_ID    IN VARCHAR2,
+      p_METER_TYPE    IN VARCHAR2,
+      p_ACCOUNT_TYPE  IN VARCHAR2,
+      p_RUN_VERSION   IN VARCHAR2,
+      p_STATUS        OUT NUMBER,
+      p_CURSOR        OUT REF_CURSOR
+   );
+
+   PROCEDURE GET_ESTIMATED_USAGE_INTERVAL
+   (
+      P_BEGIN_DATE    IN DATE,
+      P_END_DATE      IN DATE,
+      P_TIME_ZONE     IN VARCHAR2,
+      P_POOL_EXTERNAL IN VARCHAR2,
+      P_ACCOUNT_ID    IN VARCHAR2,
+      p_RUN_VERSION   IN VARCHAR2,
+      P_STATUS        OUT NUMBER,
+      P_CURSOR        OUT REF_CURSOR
+   );
+   
+   PROCEDURE FC_GET_DATA_DAILY
+   (
+      p_MODEL_ID      IN NUMBER,      
+      p_DATE1         IN DATE,
+      p_DATE2         IN DATE,  
+      p_TIME_ZONE     IN VARCHAR,
+      p_REPORT_NAME   IN VARCHAR2, 
+      p_STATUS        OUT NUMBER,
+      p_CURSOR        IN OUT REF_CURSOR
+   );
+   
+    PROCEDURE FC_GET_DATA_HOURLY
+   (
+      p_MODEL_ID      IN NUMBER,       
+      p_DATE1         IN DATE,
+      p_DATE2         IN DATE,
+      p_TIME_ZONE     IN VARCHAR,
+      p_ESP_ID        IN NUMBER, 
+      p_ESP_NAME      IN VARCHAR, 
+      p_ESP_ALIAS     IN VARCHAR, 
+      p_STATUS        OUT NUMBER,
+      p_CURSOR        IN OUT REF_CURSOR
+   );
+   
+   -- --------------------------------------------------------------------------------------
+   -- da_rt_hourly_ufe
+   -- --------------------------------------------------------------------------------------
+   -- MODIFICATION HISTORY
+   -- Person         Date         Comments
+   -- -----------    -----------  ----------------------------------------------------------
+   --  KN           May 28 2014   Created
+   -- --------------------------------------------------------------------------------------
+   --  
+   -----------------------------------------------------------------------------------------
+   PROCEDURE da_rt_hourly_ufe
+   (
+      p_MODEL_ID      IN NUMBER,
+      p_SCHEDULE_TYPE IN CHAR,
+      p_BEGIN_DATE    IN DATE,
+      p_END_DATE      IN DATE,
+      p_TIME_ZONE     IN VARCHAR,
+      p_SCHEDULES     IN VARCHAR2,
+      p_UFE           IN VARCHAR2,
+      p_STATUS        OUT NUMBER,
+      p_CURSOR        IN OUT REF_CURSOR
+   );
+
+-- --------------------------------------------------------------------------------------
+-- GET_AGG_ENROLLMENT_DETAILS
+-- MODIFICATION HISTORY
+-- Person      Date          Comments
+-- -----------  -----------  ----------------------------------------------------------
+-- KN           Feb 8 2021   Created - Copied from Chip Fox BGE 5.7 upgrade 
+-- --------------------------------------------------------------------------------------
+PROCEDURE GET_AGG_ENROLLMENT_DETAILS
+   (
+   p_TIME_ZONE           IN VARCHAR2,
+   p_BEGIN_DATE          IN DATE,
+   p_END_DATE            IN DATE,
+   p_ENROLLMENT_CASE_ID  IN NUMBER,
+   p_FILTER_MODEL_ID     IN NUMBER,
+   p_FILTER_SC_ID        IN NUMBER,
+   p_SHOW_FILTER_SC_ID   IN NUMBER,
+   p_FILTER_EDC_ID       IN NUMBER,
+   p_SHOW_FILTER_EDC_ID  IN NUMBER,
+   p_FILTER_ESP_ID       IN NUMBER,
+   p_SHOW_FILTER_ESP_ID  IN NUMBER,
+   p_FILTER_PSE_ID       IN NUMBER,
+   p_SHOW_FILTER_PSE_ID  IN NUMBER,
+   p_FILTER_POOL_ID      IN NUMBER,
+   p_SHOW_FILTER_POOL_ID  IN NUMBER,
+   p_SHOW_USAGE_FACTORS  IN NUMBER,
+   p_SHOW_WEIGHTED_COUNT IN NUMBER,
+   p_CURSOR             OUT GA.REFCURSOR
+   );
+-- --------------------------------------------------------------------------------------
+-- PUT_AGG_ENROLLMENT_DETAILS
+-- MODIFICATION HISTORY
+-- Person      Date          Comments
+-- -----------  -----------  ----------------------------------------------------------
+-- KN           Feb 8 2021   Created - Copied from Chip Fox BGE 5.7 upgrade 
+-- --------------------------------------------------------------------------------------
+PROCEDURE PUT_AGG_ENROLLMENT_DETAILS
+   (
+   p_LOCAL_DATE         IN DATE,
+   p_ENROLLMENT_CASE_ID IN NUMBER,
+   p_AGGREGATE_ID       IN NUMBER,
+   p_AGG_COUNT          IN NUMBER,
+   p_USAGE_FACTOR       IN NUMBER,
+   p_STATUS            OUT NUMBER
+   );   
+-- --------------------------------------------------------------------------------------
+-- GET_SYSTEM_SUMMARY
+-- MODIFICATION HISTORY
+-- Person      Date          Comments
+-- -----------  -----------  ----------------------------------------------------------
+-- KN           Feb 8 2021   Created - Copied from Chip Fox BGE 5.7 upgrade 
+-- --------------------------------------------------------------------------------------
+PROCEDURE GET_SYSTEM_SUMMARY
+    (
+    p_BEGIN_DATE        IN DATE,
+    p_END_DATE          IN DATE,
+    p_RUN_TYPE_ID       IN NUMBER,
+    p_TIME_ZONE         IN VARCHAR2,
+    p_INTERVAL          IN VARCHAR2,
+    p_MODEL_ID          IN NUMBER,
+    p_EDC_ID            IN NUMBER,
+    p_CURSOR            OUT GA.REFCURSOR
+    );      
+END CDI_REPORT;
+/
