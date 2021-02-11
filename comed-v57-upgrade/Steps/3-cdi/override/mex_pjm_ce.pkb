@@ -73,7 +73,7 @@ CREATE OR REPLACE PACKAGE BODY MEX_PJM_CE IS
                       0);
       END IF;
 
-      v_parameter_map('url') := 'https://ssotrain.pjm.com/access/authenticate/'; -- v_url;
+      v_parameter_map('url') := v_url; -- 'https://ssotrain.pjm.com/access/authenticate/' 
 
       v_parameter_map('MEX-REQUEST-HEADER-X-OpenAM-Username') := p_cred.username;
       v_parameter_map('MEX-REQUEST-HEADER-X-OpenAM-Password') := security_controls.decode(p_cred.password);
