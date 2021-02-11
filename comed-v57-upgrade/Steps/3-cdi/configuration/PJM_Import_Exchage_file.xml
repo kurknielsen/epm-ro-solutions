@@ -1,0 +1,38 @@
+<SystemObjectConfiguration xmlns="http://www.newenergyassoc.com/mighty/configuration" scriptCreateDate="2021-02-09 19:51:54"><MainObjects>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>PJM_IMPORT_EXCHANGE_FILE</name>
+    <category>Data Exchange</category>
+    <displayName>&lt;html&gt;&lt;font color=&quot;blue&quot;&gt;&lt;b&gt;PJM: Import Exchange File&lt;/b&gt;&lt;/font&gt;&lt;/html&gt;</displayName>
+    <order>2</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">CDI_PJM.IMPORT_EXCHANGE_TYPE_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">1</Attribute>
+    <Object>
+      <name>PJM_IMPORT_EXCHANGE_FILE_ACTION</name>
+      <category>Action</category>
+      <order>0</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">12</Attribute>
+      <Attribute id="1007" name="Type Reference">CDI_PJM.IMPORT_EXCHANGE_FILE</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+</MainObjects>
+<ReferencedObjects/>
+<ConditionalFormats/>
+</SystemObjectConfiguration>

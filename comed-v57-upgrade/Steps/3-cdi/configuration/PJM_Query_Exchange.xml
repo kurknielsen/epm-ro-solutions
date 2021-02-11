@@ -1,0 +1,34 @@
+<SystemObjectConfiguration xmlns="http://www.newenergyassoc.com/mighty/configuration" scriptCreateDate="2021-02-09 19:52:15"><MainObjects>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>PJM_QUERY_EXCHANGE</name>
+    <category>Data Exchange</category>
+    <displayName>&lt;html&gt;&lt;font color=&quot;blue&quot;&gt;&lt;b&gt;PJM: Query Exchange&lt;/b&gt;&lt;/font&gt;&lt;/html&gt;</displayName>
+    <order>3</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">CDI_PJM.QUERY_EXCHANGE_TYPE_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">1</Attribute>
+    <Object>
+      <name>PJM_QUERY_EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <order>0</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">CDI_PJM.QUERY_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+</MainObjects>
+<ReferencedObjects/>
+<ConditionalFormats/>
+</SystemObjectConfiguration>
