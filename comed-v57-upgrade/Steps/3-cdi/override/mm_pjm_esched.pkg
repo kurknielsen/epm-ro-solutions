@@ -152,9 +152,12 @@ g_ET_QUERY_SCHED_TO_INTER      CONSTANT VARCHAR2(64) := 'Query Schedules To Inte
 g_ET_QUERY_RECON_DATA          CONSTANT VARCHAR2(64) := 'Query Reconciliation Data';
 g_ET_QUERY_RL_TIME_DAILY_TXNS  CONSTANT VARCHAR2(64) := 'Query Real-Time Daily Transactions';
 g_ET_QUERY_LOAD                CONSTANT VARCHAR2(64) := 'Query Load With And Without Losses';
+--@@Begin Implementation Override --
 g_ET_QUERY_DERATION_FACTORS    CONSTANT VARCHAR2(64) := 'Query Deration Factors';
-g_CONG_LOSS_LOAD_CHRG          CONSTANT VARCHAR2(64) := 'Congestion and Loss Load Recon Charges';
-g_CONG_LOSS_LOAD_CHRG_SETC     CONSTANT VARCHAR2(64) := 'Congestion and Loss Load Resettlement Charges';
+g_ET_QUERY_EDC_INADVERT_ALLOC  CONSTANT VARCHAR2(64) := 'Query EDC Inadvertent Allocations';
+g_ET_QUERY_METER_COR_CHG       CONSTANT VARCHAR2(64) := 'Query Meter Correction Charge Summary';
+g_ET_QUERY_METER_COR_ALLOC_CHG CONSTANT VARCHAR2(64) := 'Query Meter Correction Allocation Charge Summary';
+g_ET_IMPORT_LOAD               CONSTANT VARCHAR2(64) := 'Import Load With and Without Losses From File';
 
 g_RESIDUAL_ID                  NUMBER := TO_NUMBER(
                              NVL(GET_DICTIONARY_VALUE('NODE_ID', 0, 'MarketExchange', 'PJM', 'LMP', 'Residual Price ID'), 116472935));

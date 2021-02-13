@@ -62,7 +62,7 @@ PROCEDURE GET_DEFAULT_SYSTEM_ACTION
 --@@Begin Implementation Override--
    c_EDC_NAME              CONSTANT VARCHAR2(32) := 'COMED';
    c_COMPANY_NAME          CONSTANT VARCHAR2(32) := 'COMED';  
-   c_EXTERNAL_ACCOUNT_NAME CONSTANT VARCHAR2(32) := 'COMED';  --KN 2/10/2021: ComEd has multiple PJM Accounts, this my not work 
+   c_EXTERNAL_ACCOUNT_NAME CONSTANT VARCHAR2(32) := 'CERTOU';  --KN 2/10/2021: ComEd has multiple PJM Accounts, this my not work 
 --@@End Implementation Override--
 
 END MM_PJM;
