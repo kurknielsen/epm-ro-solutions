@@ -1,0 +1,10 @@
+DECLARE
+c_MARKET_EXCHANGE      CONSTANT VARCHAR2(32)  := 'MarketExchange';
+c_GA_SETTINGS          CONSTANT VARCHAR2(32)  := 'GA Settings';
+BEGIN
+   SECURITY_CONTROLS.SET_CURRENT_USER(SECURITY_CONTROLS.c_SUSER_SYSTEM);
+-- PJM PowerMeter Exchange Interface --
+    PUT_DICTIONARY_VALUE('Sandbox', '0', GA.GLOBAL_MODEL, c_MARKET_EXCHANGE, 'PJM', 'Browserless', 'powermeter');
+   COMMIT;
+END;
+/
