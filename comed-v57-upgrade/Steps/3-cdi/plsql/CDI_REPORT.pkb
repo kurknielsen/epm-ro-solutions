@@ -1817,6 +1817,30 @@ BEGIN
                 3;
 END DA_RT_HOURLY_UFE;
 -- --------------------------------------------------------------------------------------
+-- GET_ICAP_ALLOCATIONS
+-- MODIFICATION HISTORY
+-- Person      Date          Comments
+-- -----------  -----------  ----------------------------------------------------------
+-- KN           Feb 8 2021   Created - Copied from Chip Fox BGE 5.7 upgrade 
+-- --------------------------------------------------------------------------------------
+PROCEDURE GET_ICAP_ALLOCATIONS
+   (
+   p_ANCILLARY_SERVICE_ID IN NUMBER,
+   p_BEGIN_DATE           IN DATE,
+   p_END_DATE             IN DATE,
+   p_AREA_ID              IN NUMBER,
+   p_CURSOR              OUT GA.REFCURSOR
+   ) AS
+BEGIN
+   OPEN p_CURSOR FOR
+      SELECT ANCILLARY_SERVICE_NAME, ALLOCATION_NAME, BEGIN_DATE, END_DATE, ALLOCATION_VAL, DEFAULT_VAL
+      FROM ANCILLARY_SERVICE_ALLOCATION A
+         JOIN ANCILLARY_SERVICE B ON B.ANCILLARY_SERVICE_ID = A.ANCILLARY_SERVICE_ID
+      WHERE A.BEGIN_DATE <= p_END_DATE
+         AND A.END_DATE >= p_BEGIN_DATE
+      ORDER BY ANCILLARY_SERVICE_NAME, ALLOCATION_NAME;
+END GET_ICAP_ALLOCATIONS;
+-- --------------------------------------------------------------------------------------
 -- GET_AGG_ENROLLMENT_DETAILS
 -- MODIFICATION HISTORY
 -- Person      Date          Comments
