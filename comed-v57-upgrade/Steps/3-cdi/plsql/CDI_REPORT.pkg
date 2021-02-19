@@ -184,7 +184,21 @@ CREATE OR REPLACE PACKAGE ROMO_CUSTOM.CDI_REPORT AS
       p_STATUS        OUT NUMBER,
       p_CURSOR        IN OUT REF_CURSOR
    );
-
+-- --------------------------------------------------------------------------------------
+-- GET_ICAP_ALLOCATIONS
+-- MODIFICATION HISTORY
+-- Person      Date          Comments
+-- -----------  -----------  ----------------------------------------------------------
+-- KN           Feb 8 2021   Created - Copied from Chip Fox BGE 5.7 upgrade 
+-- --------------------------------------------------------------------------------------   
+PROCEDURE GET_ICAP_ALLOCATIONS
+   (
+   p_ANCILLARY_SERVICE_ID IN NUMBER,
+   p_BEGIN_DATE           IN DATE,
+   p_END_DATE             IN DATE,
+   p_AREA_ID              IN NUMBER,
+   p_CURSOR              OUT GA.REFCURSOR
+   );
 -- --------------------------------------------------------------------------------------
 -- GET_AGG_ENROLLMENT_DETAILS
 -- MODIFICATION HISTORY
