@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SubmitDemandBid xmlns="http://www.markets.iso-ne.com/MUI/eMkt/Messages">
+<DemandBid bidType="Fixed" day="2021-03-19" ID="4004">
+<HourlyProfile>
+<HourlyBid time="2021-03-19T00:00:00-04:00">
+<FixedMW>5</FixedMW>
+</HourlyBid>
+</HourlyProfile>
+</DemandBid>
+</SubmitDemandBid>
+
