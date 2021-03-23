@@ -1,0 +1,3591 @@
+CREATE OR REPLACE PACKAGE BODY RTO_ADMIN.CDI_COMPUTE_ANNUAL_PLC AS
+
+   /*============================================================================*
+   *   PACKAGE BODY                                                             *
+   *============================================================================*/
+
+  /*----------------------------------------------------------------------------*
+   *   INITIALIZE_PLOG                                                           *
+   *----------------------------------------------------------------------------*/
+   PROCEDURE INITIALIZE_PLOG
+   (
+      p_BEGIN_DATE IN DATE,
+      p_END_DATE   IN DATE,
+      p_PROCESS    IN VARCHAR2
+   ) IS
+   BEGIN
+      CDI_LOG.INITIALIZE(p_PROCESS_NAME      => k_PROCESS_NAME,
+                         P_TARGET_START_DATE => p_BEGIN_DATE,
+                         P_TARGET_STOP_DATE  => p_END_DATE,
+                         p_PROLOGUE          => k_PROCESS_NAME);
+
+      CDI_LOG.SET_ATTRIBUTES(P_STEP_NAME           => 'Initializing PLOG',
+                             P_SOURCE              => p_PROCESS,
+                             p_MESSAGE             => SQLERRM(SQLCODE),
+                             P_MESSAGE_DESCRIPTION => 'Initializing PLOG framework',
+                             P_SEVERITY_LEVEL      => PLOG.c_SEV_OK);
+   END INITIALIZE_PLOG;
+  /*----------------------------------------------------------------------------*
+   *   REPORT_ERROR_AND_FINISH                                                  *
+   *----------------------------------------------------------------------------*/
+   PROCEDURE REPORT_ERROR_AND_FINISH
+   (
+      p_STATUS  OUT NUMBER,
+      p_MESSAGE IN VARCHAR2 DEFAULT SQLERRM(SQLCODE)
+   ) IS
+   BEGIN
+      ROLLBACK WORK;
+      p_STATUS := SQLCODE;
+      CDI_LOG.SET_ATTRIBUTES(p_SEVERITY_LEVEL      => PLOG.c_SEV_ABORT,
+                             p_MESSAGE             => p_MESSAGE,
+                             p_MESSAGE_DESCRIPTION => p_MESSAGE);
+
+      DBMS_APPLICATION_INFO.SET_MODULE(MODULE_NAME => NULL,
+                                       ACTION_NAME => NULL);
+      CDI_LOG.LOG(p_STATUS, p_MESSAGE, TRUE);
+   END REPORT_ERROR_AND_FINISH;
+
+  /*----------------------------------------------------------------------------*
+   *   REPORT_NORMAL_AND_FINISH                                                 *
+   *----------------------------------------------------------------------------*/
+   PROCEDURE REPORT_NORMAL_AND_FINISH
+   (
+      p_STATUS  OUT NUMBER,
+      p_MESSAGE IN VARCHAR2 DEFAULT SQLERRM(SQLCODE)
+   ) IS
+   BEGIN
+      COMMIT WORK;
+      p_STATUS := SQLCODE;
+      -- TERMINATE THE ANNOUNCEMENT TO THE SESSION
+      DBMS_APPLICATION_INFO.SET_MODULE(MODULE_NAME => NULL,
+                                       ACTION_NAME => NULL);
+      CDI_LOG.SET_ATTRIBUTES(P_STEP_NAME           => 'Normal Process Completion',
+                             P_SEVERITY_LEVEL      => PLOG.C_SEV_OK,
+                             p_MESSAGE             => p_MESSAGE,
+                             P_MESSAGE_DESCRIPTION => 'Process Ran successfully. No Fatal Errors encountered.');
+      CDI_ERR.LOG_N_STOP;
+   END REPORT_NORMAL_AND_FINISH;
+
+   /*----------------------------------------------------------------------------*
+   *   CAN_PROCESS_RUN_NOW                                                       *
+   *----------------------------------------------------------------------------*/
+
+   PROCEDURE CAN_PROCESS_RUN_NOW(p_PROCESS_NAME IN VARCHAR2) IS
+   BEGIN
+      -- Check if process is currently running
+      IF NOT CDI_CAN_RUN(P_MODULE => p_PROCESS_NAME) THEN
+         CDI_ERR.RAISE(p_SQLCODE => CDI_X.k_NO_CONCURRENT_EXECUTION,
+                       p_SQLERRM => CDI_X.EXCEPTION_TEXT(CDI_X.k_NO_CONCURRENT_EXECUTION));
+      END IF;
+
+      -- Announce process to the session
+      DBMS_APPLICATION_INFO.SET_MODULE(MODULE_NAME => SUBSTR(p_PROCESS_NAME,1,48),
+                          ACTION_NAME => SUBSTR(CDI_GENERICS.k_DBMS_INFO_INI,1,32));
+      DBMS_APPLICATION_INFO.SET_CLIENT_INFO(CLIENT_INFO => CDI_GENERICS.k_DBMS_INFO_CLIENT);
+   END CAN_PROCESS_RUN_NOW;
+
+   /*----------------------------------------------------------------------------*
+   *   IS_VALID_INPUT                                                           *
+   *----------------------------------------------------------------------------*/
+   PROCEDURE IS_VALID_INPUT
+   (
+      p_BEGIN_DATE DATE,
+      p_END_DATE   DATE
+   ) IS
+   BEGIN
+      -- Make sure if Date Range is okay.
+      IF CDI_GENERICS.IS_VALID_DATE_RANGE(p_BEGIN_DATE, p_END_DATE) THEN
+         -- Is it within the permissible limit?
+         IF (p_END_DATE - p_BEGIN_DATE) > TO_NUMBER(k_MAX_DATE_RANGE) THEN
+            CDI_ERR.RAISE(P_SQLCODE => CDI_X.K_INVALID_DATE_RANGE,
+                          P_SQLERRM => CDI_X.EXCEPTION_TEXT(CDI_X.k_INVALID_DATE_RANGE));
+         END IF;
+      END IF;
+   END IS_VALID_INPUT;
+
+  /*----------------------------------------------------------------------------*
+   *   TRUNCATE TABLEs                                                              *
+   *----------------------------------------------------------------------------*/
+   PROCEDURE TRUNCATE_TABLES IS
+   BEGIN
+      EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_TOU_USAGE_FACTORS_SHORT';
+      EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_ICAP_DETAIL';
+      EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_TX_DETAIL';
+      EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_ICAP_INT_DETAIL ';
+      EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_TICKETS';
+      EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_ICAP_BUILDUPS';
+
+   END TRUNCATE_TABLES;
+
+PROCEDURE TRUNCATE_ICAP_TABLES IS
+   BEGIN
+      EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_TOU_USAGE_FACTORS_SHORT';
+      EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_ICAP_DETAIL';
+      EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_ICAP_INT_DETAIL';
+
+END TRUNCATE_ICAP_TABLES;
+
+
+PROCEDURE TRUNCATE_TX_TABLES IS
+
+BEGIN
+  EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_TOU_USAGE_FACTORS_SHORT';
+  EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_TX_DETAIL';
+  EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_TX_INT_DETAIL';
+  EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_ALM_PROFILE';
+  EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_ALM_VAL';
+
+END TRUNCATE_TX_TABLES;
+-------------------------------------------------------------------------------
+
+PROCEDURE DELETE_FROM_ICAP_TABLES IS
+   BEGIN
+
+      EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_TICKETS';
+      EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_ICAP_BUILDUPS';
+
+END DELETE_FROM_ICAP_TABLES;
+------------------------------------------------------------------------------
+PROCEDURE DELETE_FROM_TX_TABLES IS
+   BEGIN
+
+      --EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_TICKETS';
+      EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_TX_BUILDUPS';
+
+END DELETE_FROM_TX_TABLES;
+/*----------------------------------------------------------------------------*
+ *   DEFINE_PERIOD_TEMPLATE                                                   *
+ *----------------------------------------------------------------------------*/
+PROCEDURE DEFINE_PERIOD_TEMPLATE
+  (
+    p_PEAK_DATE   IN  DATE,
+    p_TEMPLATE_ID OUT NUMBER,
+    p_PERIOD_ID   OUT NUMBER
+  ) IS
+
+
+v_DAY_NAME  SEASON_TEMPLATE.DAY_NAME%TYPE;
+v_PEAK_HOUR NUMBER(2);
+
+BEGIN
+
+   v_DAY_NAME := TO_CHAR(p_PEAK_DATE,'Dy');
+   v_PEAK_HOUR := (TO_NUMBER(TO_CHAR(p_PEAK_DATE,'HH24')));
+   IF v_PEAK_HOUR = 0 THEN v_PEAK_HOUR := 24; END IF;
+
+   BEGIN
+     SELECT TEMPLATE_ID,  PERIOD_ID  INTO p_TEMPLATE_ID, p_PERIOD_ID
+         FROM   SEASON_TEMPLATE ST
+         INNER  JOIN SEASON A
+         USING  (SEASON_ID)
+         INNER  JOIN TEMPLATE T
+         USING  (TEMPLATE_ID)
+         INNER  JOIN PERIOD P
+         USING  (PERIOD_ID)
+         INNER  JOIN SEASON_DATES B
+         USING  (SEASON_ID)
+         WHERE  T.TEMPLATE_NAME IN ('Summer TOU Template','Winter TOU Template')
+         AND    TRUNC(p_PEAK_DATE) BETWEEN B.CUT_BEGIN_DATE AND B.CUT_END_DATE
+         AND    ST.DAY_NAME = v_DAY_NAME
+         AND    v_PEAK_HOUR BETWEEN ST.BEGIN_HOUR AND ST.END_HOUR
+         ORDER  BY SEASON_NAME, b.BEGIN_DATE, st.BEGIN_HOUR, st.END_HOUR;
+
+   EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+       p_TEMPLATE_ID := 1;
+       p_PERIOD_ID   := 1;
+   END;
+
+   BEGIN
+     SELECT TEMPLATE_ID,  PERIOD_ID  INTO g_ANY_TEMPLATE_ID, g_ANY_PERIOD_ID
+         FROM   SEASON_TEMPLATE ST
+         INNER  JOIN SEASON A
+         USING  (SEASON_ID)
+         INNER  JOIN TEMPLATE T
+         USING  (TEMPLATE_ID)
+         INNER  JOIN PERIOD P
+         USING  (PERIOD_ID)
+         INNER  JOIN SEASON_DATES B
+         USING  (SEASON_ID)
+         WHERE  T.TEMPLATE_NAME = 'Anytime'
+         AND    TRUNC(p_PEAK_DATE) BETWEEN B.CUT_BEGIN_DATE AND B.CUT_END_DATE
+         AND    ST.DAY_NAME = v_DAY_NAME
+         AND    v_PEAK_HOUR BETWEEN ST.BEGIN_HOUR AND ST.END_HOUR
+        ORDER  BY SEASON_NAME, b.BEGIN_DATE, st.BEGIN_HOUR, st.END_HOUR;
+   EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+       g_ANY_TEMPLATE_ID := 1;
+       g_ANY_PERIOD_ID   := 1;
+   END;
+
+    BEGIN
+     SELECT TEMPLATE_ID,  PERIOD_ID  INTO g_ALL_TEMPLATE_ID, g_ALL_PERIOD_ID
+         FROM   SEASON_TEMPLATE ST
+         INNER  JOIN SEASON A
+         USING  (SEASON_ID)
+         INNER  JOIN TEMPLATE T
+         USING  (TEMPLATE_ID)
+         INNER  JOIN PERIOD P
+         USING  (PERIOD_ID)
+         INNER  JOIN SEASON_DATES B
+         USING  (SEASON_ID)
+         WHERE  T.TEMPLATE_NAME = 'All All'
+         AND    TRUNC(p_PEAK_DATE) BETWEEN B.CUT_BEGIN_DATE AND B.CUT_END_DATE
+         AND    ST.DAY_NAME = v_DAY_NAME
+         AND    v_PEAK_HOUR BETWEEN ST.BEGIN_HOUR AND ST.END_HOUR
+        ORDER  BY SEASON_NAME, b.BEGIN_DATE, st.BEGIN_HOUR, st.END_HOUR;
+   EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+       g_ALL_TEMPLATE_ID := 1;
+       g_ALL_PERIOD_ID   := 1;
+   END;
+
+END DEFINE_PERIOD_TEMPLATE;
+ /*----------------------------------------------------------------------------*
+  *   GET ANCILLARY_SERVICE_ID                                                 *
+  *----------------------------------------------------------------------------*/
+PROCEDURE GET_AN_ID
+
+IS
+
+v_MESSAGE VARCHAR2(164);
+
+BEGIN
+
+  BEGIN
+
+   SELECT ANCILLARY_SERVICE_ID INTO g_ICAP_ID
+     FROM ANCILLARY_SERVICE
+    WHERE ANCILLARY_SERVICE_NAME = k_ICAP;
+
+   EXCEPTION
+   WHEN NO_DATA_FOUND THEN
+       v_MESSAGE := k_PROCESS_NAME || ' ANCILLARY_SERVICE NOT FOUND FOR '|| k_ICAP;
+       CDI_ERR.LOG_N_GO(-4, '** ERROR **: '|| v_MESSAGE);
+       g_ICAP_ID := NULL;
+  END;
+
+  BEGIN
+
+   SELECT ANCILLARY_SERVICE_ID INTO g_TX_ID
+     FROM ANCILLARY_SERVICE
+    WHERE ANCILLARY_SERVICE_NAME = k_TX;
+
+  EXCEPTION
+   WHEN NO_DATA_FOUND THEN
+       v_MESSAGE := k_PROCESS_NAME || ' ANCILLARY_SERVICE NOT FOUND FOR '|| k_TX;
+       g_TX_ID := NULL;
+  END;
+
+END GET_AN_ID;
+
+-------------------------------------------------------------------------------
+PROCEDURE POPULATE_SHORT_CDI_TOU_UF
+  (
+    p_PEAK_DATE IN DATE,
+    p_TEMPLATE_ID IN NUMBER,
+    p_PERIOD_ID   IN NUMBER
+  )
+ IS
+
+v_DAY_NAME  SEASON_TEMPLATE.DAY_NAME%TYPE;
+v_PEAK_HOUR    NUMBER(2);
+
+BEGIN
+
+
+   EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_TOU_USAGE_FACTORS_SHORT';
+
+   INSERT INTO CDI_TOU_USAGE_FACTORS_SHORT
+    SELECT * FROM CDI_TOU_USAGE_FACTORS
+     WHERE TRUNC(p_PEAK_DATE) BETWEEN BEGIN_DATE AND END_DATE
+       AND TEMPLATE_ID IN (p_TEMPLATE_ID, g_ANY_TEMPLATE_ID, g_ALL_TEMPLATE_ID)
+       AND PERIOD_ID IN (p_PERIOD_ID, g_ANY_PERIOD_ID, g_ALL_PERIOD_ID);
+
+     COMMIT;
+
+END POPULATE_SHORT_CDI_TOU_UF;
+/*----------------------------------------------------------------------------*
+ *   POPULATE_CDI_PLC_TX_INT                                               *
+ *----------------------------------------------------------------------------*/
+PROCEDURE POPULATE_CDI_PLC_TX_INT
+  (
+    p_PEAK_DATE IN DATE
+  )
+ IS
+
+BEGIN
+
+  INSERT INTO CDI_PLC_TX_INT_DETAIL
+    (SELECT /*+ ORDERED FULL(A) */
+         A.BILL_ACCOUNT, A.SERVICE_POINT, A.PREMISE_NUMBER, A.IDR_STATUS, A.RATE_CLASS, A.VOLTAGE_LEVEL, F.PROFILE_ID,
+         F.PROFILE_NAME, L.POINT_DATE,L.POINT_VAL, NULL,NULL,NULL, NULL,NULL, SYSDATE, SYSDATE,1, NULL
+           FROM BGE_MASTER_ACCOUNT A, LOAD_PROFILE F, LOAD_PROFILE_POINT L
+              WHERE TRUNC(p_PEAK_DATE) BETWEEN A.EFFECTIVE_DATE AND NVL(A.TERMINATION_DATE, c_HI_DATE)
+              AND   A.IDR_STATUS = 'Y'--CDI_GENERICS.k_AGGREGATE_ACCOUNT_FLAG
+              AND   A.STUDY_ID = F.PROFILE_NAME
+              AND   F.PROFILE_ID = L.PROFILE_ID
+              AND   L.POINT_DATE = p_PEAK_DATE
+      --
+      UNION ALL
+      SELECT /*+ ORDERED FULL(A) */
+           A.BILL_ACCOUNT, A.SERVICE_POINT, A.PREMISE_NUMBER, A.IDR_STATUS, A.RATE_CLASS, A.VOLTAGE_LEVEL, F.PROFILE_ID,
+           F.PROFILE_NAME, L.POINT_DATE,L.POINT_VAL, NULL,NULL,NULL, NULL,NULL, SYSDATE, SYSDATE, 1, NULL
+        FROM  BGE_MASTER_ACCOUNT A, LOAD_PROFILE F, LOAD_PROFILE_POINT L
+       WHERE  A.BILL_ACCOUNT IN
+        (SELECT DISTINCT AA.BILL_ACCOUNT
+           FROM BGE_MASTER_ACCOUNT AA
+           WHERE TRUNC(p_PEAK_DATE) BETWEEN AA.EFFECTIVE_DATE AND NVL(AA.TERMINATION_DATE, c_HI_DATE)
+             AND   AA.IDR_STATUS = 'Y'--CDI_GENERICS.k_AGGREGATE_ACCOUNT_FLAG
+             AND   AA.STUDY_ID NOT IN (SELECT F.PROFILE_NAME FROM LOAD_PROFILE F)
+         )
+        AND p_PEAK_DATE BETWEEN A.EFFECTIVE_DATE AND NVL(A.TERMINATION_DATE, c_HI_DATE)
+        AND F.PROFILE_NAME = 'P'
+        AND F.PROFILE_ID = L.PROFILE_ID
+        AND L.POINT_DATE = p_PEAK_DATE);
+
+  COMMIT;
+
+
+END POPULATE_CDI_PLC_TX_INT;
+/*----------------------------------------------------------------------------*
+ *   POPULATE_CDI_PLC_TX_DETAIL                                               *
+ *----------------------------------------------------------------------------*/
+PROCEDURE POPULATE_CDI_PLC_TX_DETAIL
+  (
+    p_PEAK_DATE IN DATE,
+    p_TEMPLATE_ID IN NUMBER,
+    p_PERIOD_ID   IN NUMBER
+  )
+ IS
+
+BEGIN
+
+  INSERT INTO CDI_PLC_TX_DETAIL
+  SELECT AA.BILL_ACCOUNT, AA.SERVICE_POINT, AA.PREMISE_NUMBER, AA.IDR_STATUS, AA.RATE_CLASS, AA.VOLTAGE_LEVEL, AA.PROFILE_ID,
+         AA.PROFILE_NAME, AA.POINT_DATE,AA.POINT_VAL, NULL,NULL,NULL,NULL, AA.BILLED_KW,  SYSDATE, SYSDATE,NULL,NULL
+  FROM
+   (SELECT /*+ ORDERED PARALLEL(Z,8) FULL(A) USE_HASH(Z,A) USE_HASH(A,B) USE_HASH(B,C) USE_HASH(C,D) USE_HASH(D,E)  USE_HASH(E,F) */
+         A.BILL_ACCOUNT, A.SERVICE_POINT, A.PREMISE_NUMBER, A.IDR_STATUS, A.RATE_CLASS, A.VOLTAGE_LEVEL, F.PROFILE_ID,
+         F.PROFILE_NAME, L.POINT_DATE,L.POINT_VAL, Z.BILLED_KW,
+         ROW_NUMBER() OVER(PARTITION BY A.BILL_ACCOUNT, A.SERVICE_POINT, A.PREMISE_NUMBER, A.IDR_STATUS, A.RATE_CLASS, A.VOLTAGE_LEVEL, F.PROFILE_ID,
+         F.PROFILE_NAME, L.POINT_DATE,L.POINT_VAL,Z.BILLED_KW ORDER BY Z.BILLED_KW) AS RN
+              FROM   BGE_RTO_MONTHLY_USAGE Z,
+                     BGE_MASTER_ACCOUNT    A,
+                     ACCOUNT               B,
+                     ACCOUNT_CALENDAR      C,
+                     CALENDAR_PROFILE      D,
+                     CALENDAR              E,
+                     LOAD_PROFILE          F,   LOAD_PROFILE_POINT    L
+              WHERE TRUNC(p_PEAK_DATE) BETWEEN A.EFFECTIVE_DATE AND NVL(A.TERMINATION_DATE, c_HI_DATE)
+              AND   A.IDR_STATUS = 'N'--CDI_GENERICS.k_AGGREGATE_ACCOUNT_FLAG
+              AND   Z.BILL_ACCOUNT = A.BILL_ACCOUNT
+              AND   Z.SERVICE_POINT = A.SERVICE_POINT
+              AND   SUBSTR(TRIM(Z.READ_CODE),2,1) <> 'X'
+              AND   SUBSTR(TRIM(Z.READ_CODE),1,2) <> 'AL'
+              AND   TRUNC(p_PEAK_DATE) BETWEEN Z.BEGIN_DATE AND NVL(Z.END_DATE, c_HI_DATE)
+              AND   Z.TEMPLATE_ID IN (p_TEMPLATE_ID, g_ANY_TEMPLATE_ID,g_ALL_TEMPLATE_ID)
+              AND   Z.PERIOD_ID IN (p_PERIOD_ID, g_ANY_PERIOD_ID, g_ALL_PERIOD_ID)
+              AND   Z.END_DATE - Z.BEGIN_DATE <= k_MAX_USAGE_DAYS
+              AND   UPPER(NVL(Z.PROCESS_CODE,' ')) NOT IN ('CANCEL', 'ERROR')
+              AND   A.RTO_ACCOUNT_ID = B.ACCOUNT_EXTERNAL_IDENTIFIER
+              AND   B.ACCOUNT_ID = C.ACCOUNT_ID
+              AND   C.CALENDAR_ID = D.CALENDAR_ID
+              AND   C.CALENDAR_TYPE = CDI_GENERICS.k_MODULE_SETTLEMENT
+              AND   C.CALENDAR_ID = E.CALENDAR_ID
+              AND   D.PROFILE_ID = F.PROFILE_ID
+              AND   C.CASE_ID = 1
+              --cnavalta Case 63917 consider account_calendar begin and end dates
+              AND   TRUNC(p_PEAK_DATE) BETWEEN C.BEGIN_DATE AND NVL(C.END_DATE, c_HI_DATE)
+              AND   F.PROFILE_ID = L.PROFILE_ID
+              AND   L.POINT_DATE = p_PEAK_DATE) AA
+   WHERE RN =1;
+   COMMIT;
+
+END POPULATE_CDI_PLC_TX_DETAIL;
+/*----------------------------------------------------------------------------*
+ *   POPULATE_CDI_PLC_ICAP_INT                                               *
+ *----------------------------------------------------------------------------*/
+PROCEDURE POPULATE_CDI_PLC_ICAP_INT
+  (
+    p_PEAK_DATE IN DATE
+  )
+ IS
+
+BEGIN
+
+  INSERT INTO CDI_PLC_ICAP_INT_DETAIL
+    (SELECT /*+ ORDERED FULL(A) */
+         A.BILL_ACCOUNT, A.SERVICE_POINT, A.PREMISE_NUMBER, A.IDR_STATUS, A.RATE_CLASS, A.VOLTAGE_LEVEL, F.PROFILE_ID,
+         F.PROFILE_NAME, L.POINT_DATE,L.POINT_VAL, NULL,NULL,NULL, NULL,  SYSDATE, SYSDATE,1, NULL
+           FROM BGE_MASTER_ACCOUNT A, LOAD_PROFILE F, LOAD_PROFILE_POINT L
+              WHERE TRUNC(p_PEAK_DATE) BETWEEN A.EFFECTIVE_DATE AND NVL(A.TERMINATION_DATE, c_HI_DATE)
+              AND   A.IDR_STATUS = 'Y'--CDI_GENERICS.k_AGGREGATE_ACCOUNT_FLAG
+              AND   A.STUDY_ID = F.PROFILE_NAME
+              AND   F.PROFILE_ID = L.PROFILE_ID
+              AND   L.POINT_DATE = p_PEAK_DATE
+      --
+      UNION ALL
+      SELECT /*+ ORDERED FULL(A) */
+           A.BILL_ACCOUNT, A.SERVICE_POINT, A.PREMISE_NUMBER, A.IDR_STATUS, A.RATE_CLASS, A.VOLTAGE_LEVEL, F.PROFILE_ID,
+           F.PROFILE_NAME, L.POINT_DATE,L.POINT_VAL, NULL,NULL,NULL, NULL,  SYSDATE, SYSDATE, 1, NULL
+        FROM  BGE_MASTER_ACCOUNT A, LOAD_PROFILE F, LOAD_PROFILE_POINT L
+       WHERE  A.BILL_ACCOUNT IN
+        (SELECT DISTINCT AA.BILL_ACCOUNT
+           FROM BGE_MASTER_ACCOUNT AA
+           WHERE TRUNC(p_PEAK_DATE) BETWEEN AA.EFFECTIVE_DATE AND NVL(AA.TERMINATION_DATE, c_HI_DATE)
+             AND   AA.IDR_STATUS = 'Y'--CDI_GENERICS.k_AGGREGATE_ACCOUNT_FLAG
+             AND   AA.STUDY_ID NOT IN (SELECT F.PROFILE_NAME FROM LOAD_PROFILE F)
+         )
+        AND TRUNC(p_PEAK_DATE) BETWEEN A.EFFECTIVE_DATE AND NVL(A.TERMINATION_DATE, c_HI_DATE)
+        AND F.PROFILE_NAME = 'P'
+        AND F.PROFILE_ID = L.PROFILE_ID
+        AND L.POINT_DATE = p_PEAK_DATE);
+
+  COMMIT;
+
+
+END POPULATE_CDI_PLC_ICAP_INT;
+/*----------------------------------------------------------------------------*
+ *   UPDATE_ALM_ICAP_INT                                           *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_ALM_ICAP_INTERVAL
+  (
+    p_PEAK_DATE IN DATE
+  )
+ IS
+
+v_HOUR  NUMBER(2);
+v_COUNT NUMBER;
+v_COUNT_BIG NUMBER := 0;
+
+BEGIN
+
+  SELECT COUNT(1) INTO v_COUNT FROM CDI_PLC_ALMBACKS
+  WHERE ADD_DATE = TRUNC(p_PEAK_DATE);
+
+  IF v_COUNT = 0 THEN
+
+    CDI_LOG.SET_ATTRIBUTES(p_MESSAGE =>'No ALM AddBacks available for '||TO_CHAR(p_PEAK_DATE,'MM/DD/YYYY HH24'),
+                           p_MESSAGE_DESCRIPTION => 'Warning');
+    CDI_LOG.LOG(0,'No ALM AddBacks available');
+
+  ELSE
+
+      v_HOUR := TO_NUMBER(TO_CHAR(p_PEAK_DATE, 'HH24')) ;
+      v_COUNT:=0;
+
+      FOR v_DATA IN
+           (SELECT BILL_ACCOUNT, SERVICE_POINT, PREMISE_NUMBER,
+                     DECODE(v_HOUR, 1, HOUR_1, 2, HOUR_2,   3,HOUR_3,   4,HOUR_4,   5,HOUR_5,   6,HOUR_6,
+                           7, HOUR_7, 8, HOUR_8,   9,HOUR_9,  10,HOUR_10, 11,HOUR_11, 12,HOUR_12,
+                           13,HOUR_13, 14,HOUR_14, 15,HOUR_15, 16,HOUR_16, 17,HOUR_17, 18,HOUR_18,
+                           19,HOUR_19, 20,HOUR_20, 21,HOUR_21, 22,HOUR_22, 23,HOUR_23, 24,HOUR_24, HOUR_1) ALM_VAL
+             FROM CDI_PLC_ALMBACKS
+             WHERE ADD_DATE =  TRUNC(p_PEAK_DATE))
+       LOOP
+
+          UPDATE CDI_PLC_ICAP_INT_DETAIL
+             SET ALM_VAL = v_DATA.ALM_VAL
+           WHERE BILL_ACCOUNT   = v_DATA.BILL_ACCOUNT
+             AND SERVICE_POINT  = v_DATA.SERVICE_POINT
+             AND PREMISE_NUMBER = v_DATA.PREMISE_NUMBER
+             AND PEAK_DATE = p_PEAK_DATE;
+
+          v_COUNT := v_COUNT+1;
+          IF v_COUNT >= 5000 THEN
+            COMMIT;
+            v_COUNT_BIG := v_COUNT_BIG + v_COUNT;
+            v_COUNT := 0;
+            CDI_LOG.LOG(0,'ALM Updates '||TO_CHAR(SYSDATE,'MM/DD/YYYY HH24:MI')|| ' v_COUNT='||v_COUNT_BIG);
+          END IF;
+
+       END LOOP;
+
+      COMMIT;
+
+  END IF;
+
+END UPDATE_ALM_ICAP_INTERVAL ;
+/*----------------------------------------------------------------------------*
+ *   POPULATE_CDI_TOU_UF_SHORT                                                 *
+ *----------------------------------------------------------------------------*/
+PROCEDURE POPULATE_CDI_PLC_ICAP_DETAIL
+  (
+    p_PEAK_DATE IN DATE,
+    p_TEMPLATE_ID IN NUMBER,
+    p_PERIOD_ID   IN NUMBER
+  )
+ IS
+
+BEGIN
+
+
+-- ABX
+  INSERT INTO CDI_PLC_ICAP_DETAIL
+  SELECT AA.BILL_ACCOUNT, AA.SERVICE_POINT, AA.PREMISE_NUMBER, AA.IDR_STATUS, AA.RATE_CLASS, AA.VOLTAGE_LEVEL, AA.PROFILE_ID,
+         AA.PROFILE_NAME, AA.POINT_DATE,AA.POINT_VAL, NULL,NULL,NULL,  AA.BILLED_KW,  SYSDATE, SYSDATE,NULL,NULL
+  FROM
+   (SELECT /*+ ORDERED PARALLEL(Z,8) FULL(A) USE_HASH(Z,A) USE_HASH(A,B) USE_HASH(B,C) USE_HASH(C,D) USE_HASH(D,E)  USE_HASH(E,F) */
+         A.BILL_ACCOUNT, A.SERVICE_POINT, A.PREMISE_NUMBER, A.IDR_STATUS, A.RATE_CLASS, A.VOLTAGE_LEVEL, F.PROFILE_ID,
+         F.PROFILE_NAME, L.POINT_DATE,L.POINT_VAL, Z.BILLED_KW,
+         ROW_NUMBER() OVER(PARTITION BY A.BILL_ACCOUNT, A.SERVICE_POINT, A.PREMISE_NUMBER, A.IDR_STATUS, A.RATE_CLASS, A.VOLTAGE_LEVEL, F.PROFILE_ID,
+         F.PROFILE_NAME, L.POINT_DATE,L.POINT_VAL,Z.BILLED_KW ORDER BY Z.BILLED_KW) AS RN
+              FROM   BGE_RTO_MONTHLY_USAGE Z,
+                     BGE_MASTER_ACCOUNT    A,
+                     ACCOUNT               B,
+                     ACCOUNT_CALENDAR      C,
+                     CALENDAR_PROFILE      D,
+                     CALENDAR              E,
+                     LOAD_PROFILE          F,   LOAD_PROFILE_POINT    L
+             WHERE TRUNC(p_PEAK_DATE) BETWEEN A.EFFECTIVE_DATE AND NVL(A.TERMINATION_DATE, c_HI_DATE)
+              AND   A.IDR_STATUS = 'N'--CDI_GENERICS.k_AGGREGATE_ACCOUNT_FLAG
+              AND   Z.BILL_ACCOUNT = A.BILL_ACCOUNT
+              AND   Z.SERVICE_POINT = A.SERVICE_POINT
+              AND   SUBSTR(TRIM(Z.READ_CODE),2,1) <> 'X'
+              AND   SUBSTR(TRIM(Z.READ_CODE),1,2) <> 'AL'
+              AND   TRUNC(p_PEAK_DATE) BETWEEN Z.BEGIN_DATE AND NVL(Z.END_DATE, c_HI_DATE)
+              AND   Z.TEMPLATE_ID IN (p_TEMPLATE_ID, g_ANY_TEMPLATE_ID, g_ALL_TEMPLATE_ID)
+              AND   Z.PERIOD_ID IN (p_PERIOD_ID, g_ANY_PERIOD_ID, g_ALL_PERIOD_ID)
+              AND   Z.END_DATE - Z.BEGIN_DATE <= k_MAX_USAGE_DAYS
+              AND   UPPER(NVL(Z.PROCESS_CODE,' ')) NOT IN ('CANCEL', 'ERROR')
+              AND   A.RTO_ACCOUNT_ID = B.ACCOUNT_EXTERNAL_IDENTIFIER
+              AND   B.ACCOUNT_ID = C.ACCOUNT_ID
+              AND   C.CALENDAR_ID = D.CALENDAR_ID
+              AND   C.CALENDAR_TYPE = CDI_GENERICS.k_MODULE_SETTLEMENT
+              AND   C.CALENDAR_ID = E.CALENDAR_ID
+              AND   D.PROFILE_ID = F.PROFILE_ID
+              AND   C.CASE_ID = 1
+              --cnavalta Case 63917 consider account_calendar begin and end dates
+              AND   TRUNC(p_PEAK_DATE) BETWEEN C.BEGIN_DATE AND NVL(C.END_DATE, c_HI_DATE)
+              AND   F.PROFILE_ID = L.PROFILE_ID
+              AND   L.POINT_DATE = p_PEAK_DATE) AA
+  WHERE AA.RN=1;
+
+
+
+   COMMIT;
+
+END POPULATE_CDI_PLC_ICAP_DETAIL;
+
+/*----------------------------------------------------------------------------*
+ *   GENERATE_TX_BUILDUPS                                                  *
+ *----------------------------------------------------------------------------*/
+PROCEDURE GENERATE_TX_BUILDUPS
+  (p_START_DATE  IN DATE)
+ IS
+
+BEGIN
+
+    EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_TX_BUILDUPS';
+
+
+    INSERT INTO CDI_PLC_TX_BUILDUPS
+    (
+    SELECT A.PEAK_DATE, 'PROFILE_LOAD', 'N', RATE_CLASS, VOLTAGE_LEVEL, POINT_VAL, SUM(ALM_VAL), AV_LOSS_FACTOR,
+           PEAK_LOSS_FACTOR, SUM(USAGE_FACTOR),
+           SUM(DEMAND_KW), ((POINT_VAL*SUM(USAGE_FACTOR))-(NVL(SUM(ALM_VAL),0)))*AV_LOSS_FACTOR "BOTTOM_SUM",
+           NVL(SUM(ALM_VAL),0)*PEAK_LOSS_FACTOR,   P.PEAK_VAL,SYSDATE, NULL,NULL
+    FROM CDI_PLC_TX_DETAIL A,
+     (SELECT FROM_CUT(PEAK_DATE,'EDT') PEAK_DATE, PEAK_VAL FROM ANCILLARY_SERVICE_AREA_PEAK
+          WHERE ANCILLARY_SERVICE_ID = g_TX_ID
+          AND   p_START_DATE  BETWEEN BEGIN_DATE AND END_DATE) P
+     WHERE DEMAND_KW = 0
+      AND  A. RATE_CLASS <> 'GL'
+      AND  A.PEAK_DATE =  P.PEAK_DATE
+    GROUP BY A.PEAK_DATE, RATE_CLASS, VOLTAGE_LEVEL, POINT_VAL, AV_LOSS_FACTOR, PEAK_LOSS_FACTOR, P.PEAK_VAL
+    UNION ALL
+    SELECT A.PEAK_DATE, 'PROFILE_DEMAND', 'N',RATE_CLASS, VOLTAGE_LEVEL, POINT_VAL, SUM(ALM_VAL), AV_LOSS_FACTOR,
+           PEAK_LOSS_FACTOR, SUM(USAGE_FACTOR),
+           SUM(DEMAND_KW), ((POINT_VAL*SUM(USAGE_FACTOR))- NVL(SUM(ALM_VAL),0))*AV_LOSS_FACTOR "BOTTOM_SUM",
+           NVL(SUM(ALM_VAL),0)*PEAK_LOSS_FACTOR,
+           P.PEAK_VAL,SYSDATE, NULL,NULL
+    FROM CDI_PLC_TX_DETAIL A,
+     (SELECT FROM_CUT(PEAK_DATE,'EDT') PEAK_DATE, PEAK_VAL FROM ANCILLARY_SERVICE_AREA_PEAK
+          WHERE ANCILLARY_SERVICE_ID = g_TX_ID
+          AND  p_START_DATE  BETWEEN BEGIN_DATE AND END_DATE) P
+    WHERE (DEMAND_KW > 0 OR RATE_CLASS = 'GL')
+    AND  A.PEAK_DATE =  P.PEAK_DATE
+    GROUP BY A.PEAK_DATE, RATE_CLASS, VOLTAGE_LEVEL, POINT_VAL,  AV_LOSS_FACTOR, PEAK_LOSS_FACTOR, P.PEAK_VAL
+   -------------
+    UNION ALL
+    SELECT A.PEAK_DATE, 'INTERVAL', 'Y', RATE_CLASS, VOLTAGE_LEVEL, SUM(POINT_VAL), SUM(ALM_VAL), AV_LOSS_FACTOR,
+           PEAK_LOSS_FACTOR, 1,
+           SUM(DEMAND_KW), ((SUM(POINT_VAL)*1)-SUM(NVL(ALM_VAL,0)))*AV_LOSS_FACTOR "BOTTOM_SUM",
+           SUM(NVL(ALM_VAL,0))*PEAK_LOSS_FACTOR,
+           P.PEAK_VAL,SYSDATE, NULL,1
+    FROM CDI_PLC_TX_INT_DETAIL A,
+     (SELECT FROM_CUT(PEAK_DATE,'EDT') PEAK_DATE, PEAK_VAL FROM ANCILLARY_SERVICE_AREA_PEAK
+          WHERE ANCILLARY_SERVICE_ID = g_TX_ID
+          AND   p_START_DATE  BETWEEN BEGIN_DATE AND END_DATE) P
+    WHERE A.PEAK_DATE =  P.PEAK_DATE
+    GROUP BY A.PEAK_DATE, RATE_CLASS, VOLTAGE_LEVEL, AV_LOSS_FACTOR, PEAK_LOSS_FACTOR, P.PEAK_VAL );
+
+    COMMIT;
+
+END GENERATE_TX_BUILDUPS;
+
+/*----------------------------------------------------------------------------*
+ *   GENERATE_PLC_BUILDUPS                                                  *
+ *----------------------------------------------------------------------------*/
+PROCEDURE GENERATE_PLC_BUILDUPS
+  (p_START_DATE  IN DATE)
+ IS
+
+BEGIN
+
+    EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_ICAP_BUILDUPS';
+
+    INSERT INTO CDI_PLC_ICAP_BUILDUPS
+    (
+     SELECT A.PEAK_DATE, 'PROFILE_LOAD', 'N', RATE_CLASS, VOLTAGE_LEVEL, POINT_VAL, NULL, AV_LOSS_FACTOR, SUM(USAGE_FACTOR),
+           SUM(DEMAND_KW), POINT_VAL*SUM(USAGE_FACTOR)*AV_LOSS_FACTOR  "BOTTOM_SUM",P.PEAK_VAL,SYSDATE, NULL,NULL
+      FROM CDI_PLC_ICAP_DETAIL A,
+     (SELECT FROM_CUT(PEAK_DATE,'EDT') PEAK_DATE, PEAK_VAL FROM ANCILLARY_SERVICE_AREA_PEAK
+          WHERE ANCILLARY_SERVICE_ID = g_ICAP_ID
+          AND   p_START_DATE  BETWEEN BEGIN_DATE AND END_DATE) P
+     WHERE DEMAND_KW = 0
+      AND  A. RATE_CLASS <> 'GL'
+      AND  A.PEAK_DATE =  P.PEAK_DATE
+     GROUP BY A.PEAK_DATE, RATE_CLASS, VOLTAGE_LEVEL, POINT_VAL, AV_LOSS_FACTOR, P.PEAK_VAL
+
+    UNION ALL
+    SELECT A.PEAK_DATE, 'PROFILE_DEMAND', 'N', RATE_CLASS, VOLTAGE_LEVEL, POINT_VAL, NULL, AV_LOSS_FACTOR, SUM(USAGE_FACTOR),
+           SUM(DEMAND_KW),  POINT_VAL*SUM(USAGE_FACTOR)*AV_LOSS_FACTOR "BOTTOM_SUM" ,P.PEAK_VAL, SYSDATE, NULL,NULL
+    FROM CDI_PLC_ICAP_DETAIL A,
+     (SELECT FROM_CUT(PEAK_DATE,'EDT') PEAK_DATE, PEAK_VAL FROM ANCILLARY_SERVICE_AREA_PEAK
+          WHERE ANCILLARY_SERVICE_ID = g_ICAP_ID
+          AND  p_START_DATE  BETWEEN BEGIN_DATE AND END_DATE) P
+    WHERE (DEMAND_KW > 0 OR RATE_CLASS = 'GL')
+      AND A.PEAK_DATE =  P.PEAK_DATE
+    GROUP BY A.PEAK_DATE, RATE_CLASS, VOLTAGE_LEVEL, POINT_VAL, AV_LOSS_FACTOR, P.PEAK_VAL
+   -------------
+    UNION ALL
+    SELECT A.PEAK_DATE, 'INTERVAL', 'Y', RATE_CLASS, VOLTAGE_LEVEL, SUM(POINT_VAL), SUM(NVL(ALM_VAL,0)), AV_LOSS_FACTOR, 1,
+           NULL,  (SUM(POINT_VAL+NVL(ALM_VAL,0))*AVG(AV_LOSS_FACTOR)) "BOTTOM_SUM" ,P.PEAK_VAL, SYSDATE, NULL,1
+    FROM CDI_PLC_ICAP_INT_DETAIL A,
+     (SELECT FROM_CUT(PEAK_DATE,'EDT') PEAK_DATE, PEAK_VAL FROM ANCILLARY_SERVICE_AREA_PEAK
+          WHERE ANCILLARY_SERVICE_ID = g_ICAP_ID
+          AND   p_START_DATE  BETWEEN BEGIN_DATE AND END_DATE) P
+    WHERE A.PEAK_DATE =  P.PEAK_DATE
+    GROUP BY A.PEAK_DATE, RATE_CLASS, VOLTAGE_LEVEL, AV_LOSS_FACTOR, P.PEAK_VAL );
+
+    COMMIT;
+
+END GENERATE_PLC_BUILDUPS;
+/*----------------------------------------------------------------------------*
+ *  CALCULATE_PLC_SF                                                          *
+ *----------------------------------------------------------------------------*/
+PROCEDURE CALCULATE_PLC_SF
+  (
+   p_START_DATE IN DATE
+  )
+ IS
+
+BEGIN
+
+ FOR v_DATA IN
+    (SELECT PEAK_DATE, ROUND((AVG(PJM_LOAD)*1000/SUM(BOTTOM_SUM)),7) SF
+     FROM  CDI_PLC_ICAP_BUILDUPS
+     GROUP BY PEAK_DATE)
+   LOOP
+
+     UPDATE CDI_PLC_ICAP_BUILDUPS
+      SET SCALING_FACTOR = v_DATA.SF
+      WHERE PEAK_DATE = v_DATA.PEAK_DATE;
+
+   END LOOP;
+
+   COMMIT;
+
+END CALCULATE_PLC_SF;
+/*----------------------------------------------------------------------------*
+ *  CALCULATE_TX_SF                                                          *
+ *----------------------------------------------------------------------------*/
+PROCEDURE CALCULATE_TX_SF
+  (
+   p_START_DATE IN DATE
+  )
+ IS
+
+BEGIN
+
+ FOR v_DATA IN
+    (SELECT PEAK_DATE, ROUND((AVG(PJM_LOAD)*1000/SUM(BOTTOM_SUM)),7) SF
+     FROM  CDI_PLC_TX_BUILDUPS
+     GROUP BY PEAK_DATE)
+   LOOP
+
+     UPDATE CDI_PLC_TX_BUILDUPS
+      SET SCALING_FACTOR = v_DATA.SF
+      WHERE PEAK_DATE = v_DATA.PEAK_DATE;
+
+   END LOOP;
+
+   COMMIT;
+
+END CALCULATE_TX_SF;
+/*----------------------------------------------------------------------------*
+ *  CALCULATE_PLC_OBLGATION_FAC                                                 *
+ *----------------------------------------------------------------------------*/
+PROCEDURE CALCULATE_PLC_OBLIGATION_FAC
+  (
+   p_START_DATE IN DATE
+  )
+ IS
+
+BEGIN
+
+ FOR v_DATA IN
+    (SELECT PEAK_DATE, RATE_CLASS, VOLTAGE_LEVEL,  SUM(BOTTOM_SUM)*SCALING_FACTOR BOTTOM, SUM(USAGE_FACTOR_SUM) UF
+     FROM  CDI_PLC_ICAP_BUILDUPS
+     WHERE GROUP_NAME = 'PROFILE_LOAD'
+     GROUP BY PEAK_DATE,GROUP_NAME, RATE_CLASS, VOLTAGE_LEVEL, SCALING_FACTOR)
+   LOOP
+
+     IF v_DATA.UF IS NOT NULL AND v_DATA.UF <> 0 THEN
+        UPDATE CDI_PLC_ICAP_BUILDUPS
+          SET OBLIGATION_FACTOR = v_DATA.BOTTOM/v_DATA.UF
+          WHERE PEAK_DATE  = v_DATA.PEAK_DATE
+            AND GROUP_NAME = 'PROFILE_LOAD'
+            AND RATE_CLASS = v_DATA.RATE_CLASS
+            AND VOLTAGE_LEVEL = v_DATA.VOLTAGE_LEVEL;
+     END IF;
+
+   END LOOP;
+
+   COMMIT;
+
+
+   FOR v_DATA IN
+    (SELECT PEAK_DATE, RATE_CLASS, VOLTAGE_LEVEL, (SUM(BOTTOM_SUM)*AVG(SCALING_FACTOR)) BOTTOM, SUM(DEMAND_SUM) DEMAND_SUM
+     FROM  CDI_PLC_ICAP_BUILDUPS
+     WHERE GROUP_NAME = 'PROFILE_DEMAND'
+     GROUP BY PEAK_DATE,GROUP_NAME,RATE_CLASS,VOLTAGE_LEVEL,SCALING_FACTOR)
+   LOOP
+
+     IF v_DATA.DEMAND_SUM IS NOT NULL AND v_DATA.DEMAND_SUM <> 0 THEN
+        UPDATE CDI_PLC_ICAP_BUILDUPS
+          SET OBLIGATION_FACTOR = v_DATA.BOTTOM/v_DATA.DEMAND_SUM
+          WHERE PEAK_DATE  = v_DATA.PEAK_DATE
+            AND GROUP_NAME = 'PROFILE_DEMAND'
+            AND RATE_CLASS = v_DATA.RATE_CLASS
+            AND VOLTAGE_LEVEL = v_DATA.VOLTAGE_LEVEL;
+     END IF;
+
+   END LOOP;
+
+   COMMIT;
+
+END CALCULATE_PLC_OBLIGATION_FAC;
+/*----------------------------------------------------------------------------*
+ *  CALCULATE_TX_OBLGATION_FAC                                                 *
+ *----------------------------------------------------------------------------*/
+PROCEDURE CALCULATE_TX_OBLIGATION_FAC
+  (
+   p_START_DATE IN DATE
+  )
+ IS
+
+BEGIN
+
+ FOR v_DATA IN
+    (SELECT PEAK_DATE, RATE_CLASS, VOLTAGE_LEVEL, (SUM(BOTTOM_SUM)*AVG(SCALING_FACTOR)+SUM(ALM_WITH_LOSSES)) BOTTOM, SUM(USAGE_FACTOR_SUM) UF
+     FROM  CDI_PLC_TX_BUILDUPS
+     WHERE GROUP_NAME = 'PROFILE_LOAD'
+     GROUP BY PEAK_DATE,GROUP_NAME,RATE_CLASS, VOLTAGE_LEVEL)
+   LOOP
+
+     IF v_DATA.UF IS NOT NULL AND v_DATA.UF <> 0 THEN
+        UPDATE CDI_PLC_TX_BUILDUPS
+          SET OBLIGATION_FACTOR = v_DATA.BOTTOM/v_DATA.UF
+          WHERE PEAK_DATE  = v_DATA.PEAK_DATE
+            AND GROUP_NAME = 'PROFILE_LOAD'
+            AND RATE_CLASS = v_DATA.RATE_CLASS
+            AND VOLTAGE_LEVEL = v_DATA.VOLTAGE_LEVEL;
+     END IF;
+
+   END LOOP;
+
+   COMMIT;
+
+
+   FOR v_DATA IN
+    (SELECT PEAK_DATE, RATE_CLASS, VOLTAGE_LEVEL,(SUM(BOTTOM_SUM)*AVG(SCALING_FACTOR)+SUM(ALM_WITH_LOSSES)) BOTTOM, SUM(DEMAND_SUM) DEMAND_SUM
+     FROM  CDI_PLC_TX_BUILDUPS
+     WHERE GROUP_NAME = 'PROFILE_DEMAND'
+     GROUP BY PEAK_DATE,GROUP_NAME,RATE_CLASS, VOLTAGE_LEVEL)
+   LOOP
+
+     IF v_DATA.DEMAND_SUM IS NOT NULL AND v_DATA.DEMAND_SUM <> 0 THEN
+        UPDATE CDI_PLC_TX_BUILDUPS
+          SET OBLIGATION_FACTOR = v_DATA.BOTTOM/v_DATA.DEMAND_SUM
+          WHERE PEAK_DATE  = v_DATA.PEAK_DATE
+            AND GROUP_NAME = 'PROFILE_DEMAND'
+            AND RATE_CLASS = v_DATA.RATE_CLASS
+            AND VOLTAGE_LEVEL = v_DATA.VOLTAGE_LEVEL;
+     END IF;
+
+   END LOOP;
+
+   COMMIT;
+
+END CALCULATE_TX_OBLIGATION_FAC;
+/*----------------------------------------------------------------------------*
+ *  UPDATE_DETAIL_PLC                                                 *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_DETAIL_PLC
+  (
+   p_START_DATE IN DATE
+  )
+ IS
+
+BEGIN
+
+ FOR v_DATA IN
+     (SELECT DISTINCT PEAK_DATE, GROUP_NAME, RATE_CLASS, VOLTAGE_LEVEL, OBLIGATION_FACTOR
+        FROM  CDI_PLC_ICAP_BUILDUPS
+        WHERE GROUP_NAME <> 'INTERVAL'
+        AND SCALING_FACTOR IS NOT NULL
+       ORDER BY PEAK_DATE )
+   LOOP
+
+     IF v_DATA.GROUP_NAME = 'PROFILE_LOAD'  THEN
+
+        UPDATE CDI_PLC_ICAP_DETAIL
+           SET OBLIGATION_FACTOR = v_DATA.OBLIGATION_FACTOR,
+               HOURLY_PLC = v_DATA.OBLIGATION_FACTOR*USAGE_FACTOR
+            WHERE PEAK_DATE = v_DATA.PEAK_DATE
+            AND DEMAND_KW = 0
+            AND RATE_CLASS =  v_DATA.RATE_CLASS
+            AND VOLTAGE_LEVEL = v_DATA.VOLTAGE_LEVEL;
+     ELSE
+
+        UPDATE CDI_PLC_ICAP_DETAIL
+           SET OBLIGATION_FACTOR = v_DATA.OBLIGATION_FACTOR,
+               HOURLY_PLC = v_DATA.OBLIGATION_FACTOR*DEMAND_KW
+            WHERE PEAK_DATE = v_DATA.PEAK_DATE
+              AND DEMAND_KW >= 0
+              AND RATE_CLASS = v_DATA.RATE_CLASS
+              AND VOLTAGE_LEVEL = v_DATA.VOLTAGE_LEVEL;
+
+     END IF;
+
+   END LOOP;
+
+   COMMIT;
+
+END UPDATE_DETAIL_PLC;
+/*----------------------------------------------------------------------------*
+ *  UPDATE_DETAIL_TX                                                *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_DETAIL_TX
+  (
+   p_START_DATE IN DATE
+  )
+ IS
+
+BEGIN
+
+ FOR v_DATA IN
+     (SELECT DISTINCT PEAK_DATE, GROUP_NAME, RATE_CLASS, VOLTAGE_LEVEL, OBLIGATION_FACTOR
+        FROM  CDI_PLC_TX_BUILDUPS
+        WHERE GROUP_NAME <> 'INTERVAL'
+        AND SCALING_FACTOR IS NOT NULL
+       ORDER BY PEAK_DATE )
+   LOOP
+
+     IF v_DATA.GROUP_NAME = 'PROFILE_LOAD'  THEN
+
+        UPDATE CDI_PLC_TX_DETAIL
+           SET OBLIGATION_FACTOR = v_DATA.OBLIGATION_FACTOR,
+               HOURLY_PLC =
+               CASE WHEN (v_DATA.OBLIGATION_FACTOR*USAGE_FACTOR - NVL(ALM_VAL,0)*PEAK_LOSS_FACTOR )<=0
+                THEN 0
+               ELSE
+                 (v_DATA.OBLIGATION_FACTOR*USAGE_FACTOR - NVL(ALM_VAL,0)*PEAK_LOSS_FACTOR)
+               END
+            WHERE PEAK_DATE = v_DATA.PEAK_DATE
+            AND DEMAND_KW = 0
+            AND RATE_CLASS =  v_DATA.RATE_CLASS
+            AND VOLTAGE_LEVEL = v_DATA.VOLTAGE_LEVEL;
+     ELSE
+
+        UPDATE CDI_PLC_TX_DETAIL
+           SET OBLIGATION_FACTOR = v_DATA.OBLIGATION_FACTOR,
+               HOURLY_PLC =
+               CASE WHEN (v_DATA.OBLIGATION_FACTOR*DEMAND_KW - NVL(ALM_VAL,0)*PEAK_LOSS_FACTOR )<=0
+                THEN 0
+               ELSE
+                 (v_DATA.OBLIGATION_FACTOR*DEMAND_KW - NVL(ALM_VAL,0)*PEAK_LOSS_FACTOR)
+               END
+            WHERE PEAK_DATE = v_DATA.PEAK_DATE
+              AND DEMAND_KW >= 0
+              AND RATE_CLASS =  v_DATA.RATE_CLASS
+              AND VOLTAGE_LEVEL = v_DATA.VOLTAGE_LEVEL;
+
+     END IF;
+
+   END LOOP;
+
+   COMMIT;
+
+END UPDATE_DETAIL_TX;
+/*----------------------------------------------------------------------------*
+ *  UPDATE_DETAIL_TX                                                *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_DETAIL_TX_INTERVAL
+
+ IS
+
+BEGIN
+
+   UPDATE CDI_PLC_TX_INT_DETAIL
+      SET OBLIGATION_FACTOR = 1 ;
+
+   COMMIT;
+
+   FOR v_PLC IN
+     (SELECT DISTINCT PEAK_DATE, SCALING_FACTOR
+        FROM  CDI_PLC_TX_BUILDUPS
+        WHERE GROUP_NAME = 'INTERVAL'
+        AND SCALING_FACTOR IS NOT NULL
+       ORDER BY PEAK_DATE )
+   LOOP
+
+      UPDATE CDI_PLC_TX_INT_DETAIL
+         SET HOURLY_PLC=
+            CASE WHEN (POINT_VAL - NVL(ALM_VAL,0)*AV_LOSS_FACTOR )<=0
+                THEN 0
+            ELSE
+               ((POINT_VAL - NVL(ALM_VAL,0))*AV_LOSS_FACTOR)*v_PLC.SCALING_FACTOR
+            END
+      WHERE PEAK_DATE = v_PLC.PEAK_DATE;
+
+      COMMIT;
+
+   END LOOP;
+
+   COMMIT;
+
+END UPDATE_DETAIL_TX_INTERVAL;
+/*----------------------------------------------------------------------------*
+ *   UPDATE_INT_LOSS_FACTOR                                                  *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_INT_LOSS_FACTOR
+ IS
+
+BEGIN
+
+FOR v_DATA IN
+   (SELECT DISTINCT VOLTAGE_LEVEL
+    FROM CDI_PLC_ICAP_INT_DETAIL)
+   LOOP
+
+     UPDATE CDI_PLC_ICAP_INT_DETAIL A
+        SET AV_LOSS_FACTOR = 1.0 +
+            (SELECT DISTINCT D.PATTERN_VAL VAL
+            FROM   LOSS_FACTOR B, LOSS_FACTOR_MODEL C, LOSS_FACTOR_PATTERN D
+            WHERE  B.LOSS_FACTOR_NAME = v_DATA.VOLTAGE_LEVEL--||' ALM Peak Uplift'
+            AND    B.LOSS_FACTOR_ID = C.LOSS_FACTOR_ID
+            AND    C.PATTERN_ID     = D.PATTERN_ID)
+        WHERE VOLTAGE_LEVEL = v_DATA.VOLTAGE_LEVEL;
+
+     COMMIT;
+
+   END LOOP;
+
+
+   COMMIT;
+
+END UPDATE_INT_LOSS_FACTOR;
+/*----------------------------------------------------------------------------*
+ *   UPDATE_INT_HOURLY_PLC                                                 *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_INT_HOURLY_PLC
+ IS
+
+BEGIN
+
+   FOR v_PLC IN
+     (SELECT DISTINCT PEAK_DATE, SCALING_FACTOR
+        FROM  CDI_PLC_ICAP_BUILDUPS
+        WHERE GROUP_NAME = 'INTERVAL'
+        AND SCALING_FACTOR IS NOT NULL
+       ORDER BY PEAK_DATE )
+   LOOP
+
+      UPDATE CDI_PLC_ICAP_INT_DETAIL
+          SET HOURLY_PLC= ((POINT_VAL+ NVL(ALM_VAL,0.0))*AV_LOSS_FACTOR*v_PLC.SCALING_FACTOR)
+      WHERE PEAK_DATE = v_PLC.PEAK_DATE;
+
+      COMMIT;
+
+   END LOOP;
+
+   COMMIT;
+
+END UPDATE_INT_HOURLY_PLC;
+
+/*----------------------------------------------------------------------------*
+ *   UPDATE_INT_NEW_PLC                                                 *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_INT_NEW_ICAP
+ IS
+
+v_MAX_DATE DATE;
+
+BEGIN
+
+
+  BEGIN
+
+  SELECT MAX(DISTINCT PEAK_DATE) INTO v_MAX_DATE
+    FROM CDI_PLC_ICAP_INT_DETAIL;
+
+  EXCEPTION WHEN NO_DATA_FOUND THEN
+     RETURN;
+  END;
+
+  FOR v_PLC IN
+
+       (SELECT A.BILL_ACCOUNT, A.SERVICE_POINT, A.PREMISE_NUMBER, C.OLD_BILL_ACCOUNT OLD_BILL_ACCOUNT,
+               C.OLD_SERVICE_POINT OLD_SERVICE_POINT, OLD_RATE_CLASS, OLD_VOLTAGE_LEVEL
+         FROM BGE_MASTER_ACCOUNT A, CDI_METER_CHANGE_CROSSREF C
+        WHERE A.EFFECTIVE_DATE > v_MAX_DATE
+          AND A.METER_TYPE = 'I'
+          AND C.BILL_ACCOUNT  = A.BILL_ACCOUNT
+          AND NOT EXISTS
+        (SELECT * FROM CDI_PLC_ICAP_INT_DETAIL B
+          WHERE B.BILL_ACCOUNT = A.BILL_ACCOUNT))
+   LOOP
+
+      -- get plc value from non-interval old meter
+      -- insert into CDI_PLC_ICAP_INT_DETAIL for all peak hours
+      INSERT INTO CDI_PLC_ICAP_INT_DETAIL
+       (SELECT v_PLC.BILL_ACCOUNT, v_PLC.SERVICE_POINT, v_PLC.PREMISE_NUMBER, 'Y',
+               RATE_CLASS, VOLTAGE_LEVEL, PROFILE_ID, PROFILE_NAME, PEAK_DATE,
+               POINT_VAL, NULL, NULL, USAGE_FACTOR, DEMAND_KW,
+               SYSDATE, SYSDATE, OBLIGATION_FACTOR, HOURLY_PLC
+          FROM CDI_PLC_ICAP_DETAIL
+         WHERE BILL_ACCOUNT = v_PLC.OLD_BILL_ACCOUNT
+           AND SERVICE_POINT = v_PLC.OLD_SERVICE_POINT
+          AND PREMISE_NUMBER = v_PLC.PREMISE_NUMBER);
+
+      COMMIT;
+
+   END LOOP;
+
+END UPDATE_INT_NEW_ICAP;
+/*----------------------------------------------------------------------------*
+ *   UPDATE_DETAIL_INT_NEW_TX                                                 *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_DETAIL_INT_NEW_TX
+ IS
+
+v_MAX_DATE DATE;
+
+BEGIN
+
+
+  BEGIN
+
+  SELECT MAX(DISTINCT PEAK_DATE) INTO v_MAX_DATE
+    FROM CDI_PLC_TX_INT_DETAIL;
+
+  EXCEPTION WHEN NO_DATA_FOUND THEN
+     RETURN;
+  END;
+
+  FOR v_PLC IN
+
+       (SELECT A.BILL_ACCOUNT, A.SERVICE_POINT, A.PREMISE_NUMBER, C.OLD_BILL_ACCOUNT OLD_BILL_ACCOUNT,
+                                                                  C.OLD_SERVICE_POINT OLD_SERVICE_POINT
+         FROM BGE_MASTER_ACCOUNT A, CDI_METER_CHANGE_CROSSREF C
+        WHERE A.EFFECTIVE_DATE > v_MAX_DATE
+          AND A.METER_TYPE = 'I'
+          AND C.BILL_ACCOUNT  = A.BILL_ACCOUNT
+          AND NOT EXISTS
+        (SELECT * FROM CDI_PLC_TX_INT_DETAIL B
+          WHERE B.BILL_ACCOUNT = A.BILL_ACCOUNT))
+   LOOP
+
+      -- get plc value from non-interval old meter
+      -- insert into CDI_PLC_ICAP_INT_DETAIL for all peak hours
+      INSERT INTO CDI_PLC_TX_INT_DETAIL
+       (SELECT v_PLC.BILL_ACCOUNT, v_PLC.SERVICE_POINT, v_PLC.PREMISE_NUMBER, 'Y',
+               RATE_CLASS, VOLTAGE_LEVEL, PROFILE_ID, PROFILE_NAME, PEAK_DATE,
+               POINT_VAL, NULL, NULL, PEAK_LOSS_FACTOR, USAGE_FACTOR, DEMAND_KW,
+               SYSDATE, SYSDATE, OBLIGATION_FACTOR, HOURLY_PLC
+          FROM CDI_PLC_TX_DETAIL
+         WHERE BILL_ACCOUNT = v_PLC.OLD_BILL_ACCOUNT
+           AND SERVICE_POINT = v_PLC.OLD_SERVICE_POINT
+          AND PREMISE_NUMBER = v_PLC.PREMISE_NUMBER);
+
+      COMMIT;
+
+   END LOOP;
+
+   COMMIT;
+
+END UPDATE_DETAIL_INT_NEW_TX;
+/*----------------------------------------------------------------------------*
+ *   UPDATE_TX_INT_LOSS_FACTOR                                                *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_TX_INT_LOSS_FACTOR
+ IS
+
+BEGIN
+
+FOR v_DATA IN
+   (SELECT DISTINCT VOLTAGE_LEVEL
+    FROM CDI_PLC_TX_INT_DETAIL)
+   LOOP
+
+     UPDATE CDI_PLC_TX_INT_DETAIL A
+        SET AV_LOSS_FACTOR = 1.0 +
+            (SELECT DISTINCT D.PATTERN_VAL VAL
+            FROM   LOSS_FACTOR B, LOSS_FACTOR_MODEL C, LOSS_FACTOR_PATTERN D
+            WHERE  B.LOSS_FACTOR_NAME = v_DATA.VOLTAGE_LEVEL--||' ALM Peak Uplift'
+            AND    B.LOSS_FACTOR_ID = C.LOSS_FACTOR_ID
+            AND    C.PATTERN_ID     = D.PATTERN_ID),
+          ----
+          PEAK_LOSS_FACTOR = 1.0 +
+            (SELECT DISTINCT DD.PATTERN_VAL VAL
+            FROM   LOSS_FACTOR BB, LOSS_FACTOR_MODEL CC, LOSS_FACTOR_PATTERN DD
+            WHERE  BB.LOSS_FACTOR_NAME = v_DATA.VOLTAGE_LEVEL||' ALM Peak Uplift'
+            AND    BB.LOSS_FACTOR_ID = CC.LOSS_FACTOR_ID
+            AND    CC.PATTERN_ID     = DD.PATTERN_ID)
+        WHERE VOLTAGE_LEVEL = v_DATA.VOLTAGE_LEVEL;
+
+     COMMIT;
+
+   END LOOP;
+
+END UPDATE_TX_INT_LOSS_FACTOR;
+/*----------------------------------------------------------------------------*
+ *   UPDATE TX_LOSS_FACTOR                                                   *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_TX_LOSS_FACTOR
+ IS
+
+BEGIN
+
+FOR v_DATA IN
+   (SELECT DISTINCT VOLTAGE_LEVEL
+    FROM CDI_PLC_TX_DETAIL)
+   LOOP
+
+     UPDATE CDI_PLC_TX_DETAIL A
+        SET AV_LOSS_FACTOR = 1.0 +
+            (SELECT DISTINCT D.PATTERN_VAL VAL
+            FROM   LOSS_FACTOR B, LOSS_FACTOR_MODEL C, LOSS_FACTOR_PATTERN D
+            WHERE  B.LOSS_FACTOR_NAME = v_DATA.VOLTAGE_LEVEL--||' ALM Peak Uplift'
+            AND    B.LOSS_FACTOR_ID = C.LOSS_FACTOR_ID
+            AND    C.PATTERN_ID     = D.PATTERN_ID),
+          ----
+          PEAK_LOSS_FACTOR = 1.0 +
+            (SELECT DISTINCT DD.PATTERN_VAL VAL
+            FROM   LOSS_FACTOR BB, LOSS_FACTOR_MODEL CC, LOSS_FACTOR_PATTERN DD
+            WHERE  BB.LOSS_FACTOR_NAME = v_DATA.VOLTAGE_LEVEL||' ALM Peak Uplift'
+            AND    BB.LOSS_FACTOR_ID = CC.LOSS_FACTOR_ID
+            AND    CC.PATTERN_ID     = DD.PATTERN_ID)
+        WHERE VOLTAGE_LEVEL = v_DATA.VOLTAGE_LEVEL;
+
+     COMMIT;
+
+   END LOOP;
+
+END UPDATE_TX_LOSS_FACTOR;
+/*----------------------------------------------------------------------------*
+ *   UPDATE ICAP LOSS_FACTOR                                                   *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_ICAP_LOSS_FACTOR
+ IS
+
+BEGIN
+
+FOR v_DATA IN
+   (SELECT DISTINCT VOLTAGE_LEVEL
+    FROM CDI_PLC_ICAP_DETAIL)
+   LOOP
+
+     UPDATE CDI_PLC_ICAP_DETAIL A
+        SET AV_LOSS_FACTOR = 1.0 +
+            (SELECT DISTINCT D.PATTERN_VAL VAL
+            FROM   LOSS_FACTOR B, LOSS_FACTOR_MODEL C, LOSS_FACTOR_PATTERN D
+            WHERE  B.LOSS_FACTOR_NAME = v_DATA.VOLTAGE_LEVEL--||' ALM Peak Uplift'
+            AND    B.LOSS_FACTOR_ID = C.LOSS_FACTOR_ID
+            AND    C.PATTERN_ID     = D.PATTERN_ID)
+        WHERE VOLTAGE_LEVEL = v_DATA.VOLTAGE_LEVEL;
+
+     COMMIT;
+
+   END LOOP;
+
+END UPDATE_ICAP_LOSS_FACTOR;
+/*----------------------------------------------------------------------------*
+ *   UPDATE_ICAP_USAGE_FACTOR                                                 *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_ICAP_USAGE_FACTOR
+  (
+   p_PEAK_HOUR   IN DATE,
+   p_CUT_PEAK    IN DATE
+  )
+IS
+
+ v_PEAK_DATE VARCHAR2(16);
+ v_COUNT     NUMBER := 0;
+-- v_COUNT_BIG NUMBER := 0;
+
+BEGIN
+
+  v_PEAK_DATE := TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI');
+  --UT.DEBUG_TRACE('UPDATE_FOR_USAGE_FACTOR v_PEAK_DATE='||v_PEAK_DATE);
+
+  SELECT COUNT(1) INTO v_COUNT FROM CDI_TOU_USAGE_FACTORS_SHORT;
+
+  IF v_COUNT = 0 THEN
+
+    CDI_LOG.SET_ATTRIBUTES(p_MESSAGE =>'No Usage Factor for updates',
+                           p_MESSAGE_DESCRIPTION => 'Warning');
+    CDI_LOG.LOG(0,'No Usage Factor for updates');
+
+  ELSE
+
+    COMMIT;
+    EXECUTE IMMEDIATE ('ALTER SESSION ENABLE PARALLEL DML');
+
+    MERGE /*+ FULL(A) PARALLEL(A,8) */ INTO CDI_PLC_ICAP_DETAIL A USING
+    (
+        SELECT /*+ FULL(BB) PARALLEL(BB,8) USE_HASH(A,BB) */ BILL_ACCOUNT, SERVICE_POINT, AVG(USAGE_FACTOR) AS USAGE_FACTOR
+        FROM  CDI_TOU_USAGE_FACTORS_SHORT BB WHERE TRUNC(p_PEAK_HOUR) BETWEEN BEGIN_DATE AND END_DATE
+        GROUP BY BILL_ACCOUNT, SERVICE_POINT
+    ) B
+    ON (A.BILL_ACCOUNT=B.BILL_ACCOUNT AND A.SERVICE_POINT=B.SERVICE_POINT AND A.PEAK_DATE = p_PEAK_HOUR)
+    WHEN MATCHED THEN UPDATE SET A.USAGE_FACTOR=B.USAGE_FACTOR;
+
+    v_COUNT := SQL%ROWCOUNT;
+
+    COMMIT;
+    EXECUTE IMMEDIATE ('ALTER SESSION DISABLE PARALLEL DML');
+
+    CDI_LOG.LOG(0,'ICAP UF UPDATE - '||TO_CHAR(SYSDATE,'MM/DD/YYYY HH24:MI')|| ' v_COUNT='||v_COUNT);
+
+-- ABX
+--    v_COUNT := 0;
+--    FOR C IN
+--         (
+--           SELECT /*+ ORDERED */
+--                BILL_ACCOUNT, SERVICE_POINT, USAGE_FACTOR
+--            FROM  CDI_TOU_USAGE_FACTORS_SHORT
+--             WHERE TRUNC(p_PEAK_HOUR) BETWEEN BEGIN_DATE AND END_DATE
+--         ) LOOP
+--            UPDATE CDI_PLC_ICAP_DETAIL A
+--               SET A.USAGE_FACTOR = C.USAGE_FACTOR
+--            WHERE  A.BILL_ACCOUNT = C.BILL_ACCOUNT
+--              AND  A.SERVICE_POINT = C.SERVICE_POINT
+--              AND  A.PEAK_DATE     = p_PEAK_HOUR;
+--
+--            v_COUNT := v_COUNT+1;
+--            IF v_COUNT >= 5000 THEN
+--               COMMIT;
+--               v_COUNT_BIG := v_COUNT_BIG + v_COUNT;
+--               v_COUNT := 0;
+--               CDI_LOG.LOG(0,TO_CHAR(SYSDATE,'MM/DD/YYYY HH24:MI')|| ' v_COUNT='||v_COUNT_BIG);
+--            END IF;
+--
+--         END LOOP;
+--
+--    COMMIT;
+
+  END IF;
+
+END UPDATE_ICAP_USAGE_FACTOR;
+/*----------------------------------------------------------------------------*
+ *   UPDATE TX_LOSS_FACTOR                                                   *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_TX_USAGE_FACTOR
+  (
+   p_PEAK_HOUR   IN DATE,
+   p_CUT_PEAK    IN DATE
+  )
+IS
+
+ v_PEAK_DATE VARCHAR2(16);
+ v_COUNT     NUMBER := 0;
+-- v_COUNT_BIG NUMBER := 0;
+
+BEGIN
+
+  v_PEAK_DATE := TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI');
+--  UT.DEBUG_TRACE('UPDATE_FOR_USAGE_FACTOR v_PEAK_DATE='||v_PEAK_DATE);
+--
+
+  SELECT COUNT(1) INTO v_COUNT FROM CDI_TOU_USAGE_FACTORS_SHORT;
+
+  IF v_COUNT = 0 THEN
+    CDI_LOG.SET_ATTRIBUTES(p_MESSAGE_DESCRIPTION => 'Warning');
+    CDI_LOG.LOG(0,'No Usage Factor for updates');
+  ELSE
+
+    COMMIT;
+    EXECUTE IMMEDIATE ('ALTER SESSION ENABLE PARALLEL DML');
+
+    MERGE /*+ FULL(A) PARALLEL(A,8) */ INTO CDI_PLC_TX_DETAIL A USING
+    (
+        SELECT /*+ FULL(BB) PARALLEL(BB,8) USE_HASH(A,BB) */ BILL_ACCOUNT, SERVICE_POINT, AVG(USAGE_FACTOR) AS USAGE_FACTOR
+        FROM  CDI_TOU_USAGE_FACTORS_SHORT BB WHERE TRUNC(p_PEAK_HOUR) BETWEEN BEGIN_DATE AND END_DATE
+        GROUP BY BILL_ACCOUNT, SERVICE_POINT
+    ) B
+    ON (A.BILL_ACCOUNT=B.BILL_ACCOUNT AND A.SERVICE_POINT=B.SERVICE_POINT AND A.PEAK_DATE = p_PEAK_HOUR)
+    WHEN MATCHED THEN UPDATE SET A.USAGE_FACTOR=B.USAGE_FACTOR;
+
+    v_COUNT := SQL%ROWCOUNT;
+
+    COMMIT;
+    EXECUTE IMMEDIATE ('ALTER SESSION DISABLE PARALLEL DML');
+
+    CDI_LOG.LOG(0,'TX UF UPDATE - '||TO_CHAR(SYSDATE,'MM/DD/YYYY HH24:MI')|| ' v_COUNT='||v_COUNT);
+
+-- ABX
+--    v_COUNT := 0;
+--
+--    FOR C IN
+--     (
+--       SELECT /*+ ORDERED */
+--            BILL_ACCOUNT, SERVICE_POINT, USAGE_FACTOR
+--        FROM  CDI_TOU_USAGE_FACTORS_SHORT
+--         WHERE TRUNC(p_PEAK_HOUR) BETWEEN BEGIN_DATE AND END_DATE
+--     ) LOOP
+--        UPDATE CDI_PLC_TX_DETAIL A
+--           SET A.USAGE_FACTOR = C.USAGE_FACTOR
+--        WHERE  A.BILL_ACCOUNT = C.BILL_ACCOUNT
+--          AND  A.SERVICE_POINT = C.SERVICE_POINT
+--          AND  A.PEAK_DATE     = p_PEAK_HOUR;
+--
+--        v_COUNT := v_COUNT+1;
+--        IF v_COUNT >= 5000 THEN
+--           COMMIT;
+--           v_COUNT_BIG := v_COUNT_BIG + v_COUNT;
+--           v_COUNT := 0;
+--           CDI_LOG.LOG(0,TO_CHAR(SYSDATE,'MM/DD/YYYY HH24:MI')|| ' v_COUNT='||v_COUNT_BIG);
+--        END IF;
+--
+--     END LOOP;
+--
+--    COMMIT;
+
+  END IF;
+
+END UPDATE_TX_USAGE_FACTOR;
+
+/*----------------------------------------------------------------------------*
+ *   UPDATE_ALM_MONTHLY                                                 *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_ALM_MONTHLY
+  (
+   p_PEAK_HOUR   IN DATE,
+   p_CUT_PEAK    IN DATE,
+   p_MESSAGE    OUT VARCHAR2
+  )
+IS
+
+ v_PEAK_DATE VARCHAR2(16);
+ v_COUNT     NUMBER := 0;
+ v_COUNT_BIG NUMBER := 0;
+ v_PROFILE_LIBRARY_ID NUMBER(9);
+
+BEGIN
+
+  v_PEAK_DATE := TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI');
+  --UT.DEBUG_TRACE('UPDATE_FOR_UALM v_PEAK_DATE='||v_PEAK_DATE);
+
+  BEGIN
+
+     SELECT PROFILE_LIBRARY_ID INTO v_PROFILE_LIBRARY_ID FROM LOAD_PROFILE_LIBRARY
+       WHERE PROFILE_LIBRARY_NAME = k_LIBRARY_NAME;
+
+  EXCEPTION
+   WHEN NO_DATA_FOUND THEN
+        p_MESSAGE := 'There is no PROFILE_LIBRAY '||k_LIBRARY_NAME||' in system';
+        CDI_LOG.SET_ATTRIBUTES(p_SEVERITY_LEVEL      => PLOG.c_SEV_ABORT,
+                             p_MESSAGE             => p_MESSAGE,
+                             p_MESSAGE_DESCRIPTION => p_MESSAGE);
+
+        CDI_LOG.LOG(SQLCODE, p_MESSAGE, TRUE);
+        v_PROFILE_LIBRARY_ID := NULL;
+
+  END;
+
+  IF v_PROFILE_LIBRARY_ID IS NOT NULL THEN
+     FOR v_DATA IN
+      (SELECT DISTINCT A.BILL_ACCOUNT BILL_ACCOUNT ,A.SERVICE_POINT SERVICE_POINT,
+               A.PREMISE_NUMBER PREMISE_NUMBER,
+               SUM(B.SWITCH_NO*P.POINT_VAL)  POINT_VAL
+            FROM CDI_PLC_TX_DETAIL A, CDI_ALM_ACCOUNT B, LOAD_PROFILE L, LOAD_PROFILE_POINT P
+            WHERE A.PEAK_DATE  = p_PEAK_HOUR
+             AND  A.BILL_ACCOUNT = B.BILL_ACCOUNT
+             AND  A.SERVICE_POINT = B.SERVICE_POINT
+             AND  A.PREMISE_NUMBER = B.PREMISE_NUMBER
+             AND  TRUNC(p_PEAK_HOUR) BETWEEN B.BEGIN_DATE AND B.END_DATE
+             AND  L.PROFILE_NAME LIKE 'ALM'||B.RIDER||'%'
+             AND L.PROFILE_NAME NOT LIKE '%Forecast%'
+             AND L.PROFILE_LIBRARY_ID = v_PROFILE_LIBRARY_ID
+             AND L.PROFILE_ID = P.PROFILE_ID
+             AND P.POINT_DATE = (p_PEAK_HOUR)--TO_DATE('7/9/2007 16:00','MM/DD/YYYY HH24:MI')
+             AND P.POINT_VAL <> 0
+           GROUP BY A.BILL_ACCOUNT, A.SERVICE_POINT,  A.PREMISE_NUMBER
+           ORDER BY 1,2,3)
+       LOOP
+
+--         UT.DEBUG_TRACE('UPDATE_FOR_ALM p_PEAK_HOUR='||TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI'));
+--         UT.DEBUG_TRACE('UPDATE_FOR_ALM v_DATA.POINT_VAL='||v_DATA.POINT_VAL);
+--         UT.DEBUG_TRACE('UPDATE_FOR_ALM v_DATA.SWITCH_NO='||v_DATA.SWITCH_NO);
+--         UT.DEBUG_TRACE('UPDATE_FOR_ALM v_DATA.POINT_VAL*v_DATA.SWITCH_NO='||v_DATA.POINT_VAL*v_DATA.SWITCH_NO);
+--         UT.DEBUG_TRACE('UPDATE_FOR_ALM v_DATA.BILL_ACCOUNT='||v_DATA.BILL_ACCOUNT);
+--         UT.DEBUG_TRACE('UPDATE_FOR_ALM v_DATA.SERVICE_POINT='||v_DATA.SERVICE_POINT);
+
+         UPDATE CDI_PLC_TX_DETAIL CC
+            SET ALM_VAL = -1*v_DATA.POINT_VAL
+          WHERE CC.BILL_ACCOUNT = v_DATA.BILL_ACCOUNT
+            AND CC.SERVICE_POINT = v_DATA.SERVICE_POINT
+            AND CC.PREMISE_NUMBER = v_DATA.PREMISE_NUMBER
+            AND CC.PEAK_DATE = p_PEAK_HOUR;--p_PEAK_HOUR;
+
+         v_COUNT := v_COUNT+1;
+         IF v_COUNT >= 5000 THEN
+            COMMIT;
+            v_COUNT_BIG := v_COUNT_BIG + v_COUNT;
+            v_COUNT := 0;
+            CDI_LOG.LOG(0,'ALM Updates '||TO_CHAR(SYSDATE,'MM/DD/YYYY HH24:MI')|| ' v_COUNT='||v_COUNT_BIG);
+         END IF;
+
+       END LOOP;
+
+       COMMIT;
+  END IF;
+
+END UPDATE_ALM_MONTHLY;
+
+/*----------------------------------------------------------------------------*
+ *   PREPARE_WORK                                                             *
+ *----------------------------------------------------------------------------*/
+PROCEDURE PREPARE_WORK
+  (
+   p_PEAK_HOUR   IN DATE,
+   p_MESSAGE    IN OUT VARCHAR2
+  )
+IS
+
+v_NAME LOAD_PROFILE.PROFILE_NAME%TYPE;
+v_SEG NUMBER;
+v_TRUNC_PEAK DATE := TRUNC(p_PEAK_HOUR);
+
+BEGIN
+
+   CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Collect temp data For '||
+                                              TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+
+  CDI_LOG.LOG(0,'Inserting into CDI_ALM_PROFILE '||TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+  -- EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_ALM_PROFILE';
+  -- EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_ALM_VAL';
+  -- DELETE CDI_ALM_PROFILE WHERE peak_hour = p_PEAK_HOUR;
+  -- DELETE CDI_ALM_VAL WHERE peak_hour = p_PEAK_HOUR;
+  -- COMMIT;
+
+/*   INSERT INTO CDI_ALM_PROFILE
+        (SELECT DISTINCT C.PREMISE_NUMBER, BAI.BEGIN_DATE, BAI.END_DATE, 1,
+                            BAI.PROFILE_ID, B.RIDER, B.SWITCH_NO, P.POINT_VAL, -1*B.SWITCH_NO*P.POINT_VAL VAL, p_PEAK_HOUR PEAK_HOUR
+                        FROM BGE_ALM_INPUT BAI, CDI_PREMISE_SUBSTATION_FEEDER C, CDI_ALM_ACCOUNT B, LOAD_PROFILE_POINT P
+                        WHERE p_PEAK_HOUR BETWEEN  BAI.BEGIN_DATE  AND BAI.END_DATE
+                          AND BAI.ENABLE_EVENT = 1
+                          AND BAI.PROCESS_EVENT = 1
+                          AND EVENT_TYPE <> 'Forecast'
+                          AND BAI.SUBSTATION_FEEDER = C.SUBSTATION_FEEDER
+                          AND TRUNC(p_PEAK_HOUR) BETWEEN C.BEGIN_DATE AND C.END_DATE
+                          AND C.PREMISE_NUMBER = B.PREMISE_NUMBER
+                          AND TRUNC(p_PEAK_HOUR) BETWEEN B.BEGIN_DATE AND B.END_DATE
+                          AND B.SWITCH_NO > 0
+                          AND BAI.PROGRAM||'R' = B.RIDER
+                          AND BAI.PROFILE_ID = P.PROFILE_ID
+                          AND P.POINT_DATE = p_PEAK_HOUR
+        UNION
+        SELECT  AA.PREMISE_NUMBER, AA.BEGIN_DATE, AA.END_DATE, 1, BB.PROFILE_ID, AA.RIDER, AA.SWITCH_NO,
+                POINT_VAL,  (-1*AA.SWITCH_NO*POINT_VAL) VAL, p_PEAK_HOUR
+        FROM
+        (
+          SELECT DISTINCT B.PREMISE_NUMBER, B.EFFECTIVE_DATE BEGIN_DATE, B.TERMINATION_DATE END_DATE, A.RIDER, A.SWITCH_NO
+            FROM CDI_ALM_ACCOUNT A, BGE_MASTER_ACCOUNT B
+            WHERE A.SWITCH_NO <> 0
+            AND A.BILL_ACCOUNT =B.BILL_ACCOUNT
+            AND A.SERVICE_POINT=B.SERVICE_POINT
+            AND A.PREMISE_NUMBER=B.PREMISE_NUMBER
+            AND TRUNC(p_PEAK_HOUR) BETWEEN A.BEGIN_DATE AND A.END_DATE
+            AND TRUNC(p_PEAK_HOUR) BETWEEN B.EFFECTIVE_DATE AND B.TERMINATION_DATE
+         ) AA,
+         ---
+        (SELECT PROGRAM||'R' PROGRAM, PROFILE_ID
+           FROM BGE_ALM_INPUT
+          WHERE SUBSTATION_FEEDER IN ('All','None')
+            AND p_PEAK_HOUR BETWEEN BEGIN_DATE AND END_DATE
+            AND ENABLE_EVENT = 1
+            AND PROCESS_EVENT = 1 AND EVENT_TYPE <> 'Forecast'
+         ) BB
+         ,
+        (SELECT PROFILE_ID, POINT_VAL
+           FROM LOAD_PROFILE_POINT
+          WHERE POINT_DATE = p_PEAK_HOUR
+            --AND POINT_VAL <>0
+        ) L
+        ---
+        WHERE AA.RIDER = BB.PROGRAM
+        AND   BB.PROFILE_ID = L.PROFILE_ID
+        );
+ */
+   INSERT INTO CDI_ALM_PROFILE
+  (
+  SELECT /*+ USE_HASH(AA,P) */
+   AA.PREMISE_NUMBER, AA.BEGIN_DATE, AA.END_DATE, P.SEQ, NULL, AA.RIDER, AA.SWITCH_NO,NULL,NULL,p_PEAK_HOUR PEAK_HOUR
+   FROM
+    (SELECT /*+ USE_HASH(A,B) */
+     DISTINCT B.PREMISE_NUMBER, B.EFFECTIVE_DATE BEGIN_DATE, B.TERMINATION_DATE END_DATE, A.RIDER, A.SWITCH_NO
+            FROM  CDI_ALM_ACCOUNT A, BGE_MASTER_ACCOUNT B
+            WHERE A.SWITCH_NO <> 0
+            AND A.BILL_ACCOUNT =B.BILL_ACCOUNT
+            AND A.SERVICE_POINT=B.SERVICE_POINT
+            AND A.PREMISE_NUMBER=B.PREMISE_NUMBER
+            AND v_TRUNC_PEAK BETWEEN A.BEGIN_DATE AND A.END_DATE
+            AND v_TRUNC_PEAK BETWEEN B.EFFECTIVE_DATE AND B.TERMINATION_DATE) AA,
+     (SELECT PROGRAM, substation_feeder, SEQ FROM
+       (SELECT DISTINCT PROGRAM, event_type, substation_feeder,
+                             DENSE_RANK() OVER ( PARTITION BY PROGRAM, v_TRUNC_PEAK ORDER BY begin_date) seq
+         FROM BGE_ALM_INPUT BAI
+         WHERE p_PEAK_HOUR BETWEEN  BAI.BEGIN_DATE  AND BAI.END_DATE+1
+         AND BAI.BEGIN_DATE >= TRUNC(p_PEAK_HOUR)    -- 07-20-2011
+         AND BAI.ENABLE_EVENT = 1
+         AND BAI.PROCESS_EVENT = 1
+         AND EVENT_TYPE <> 'Forecast' )
+         WHERE UPPER(SUBSTATION_FEEDER) IN ('ALL','NONE')) P
+  WHERE ((AA.rider = P.program ||'R') or (AA.rider = P.program ||'C'))
+  --
+   UNION
+   SELECT /*+ USE_HASH(AA,P) */
+     AA.PREMISE_NUMBER, AA.BEGIN_DATE, AA.END_DATE, P.SEQ, NULL, AA.RIDER, AA.SWITCH_NO,NULL,NULL,p_PEAK_HOUR
+     FROM
+      (SELECT
+        DISTINCT B.PREMISE_NUMBER, B.EFFECTIVE_DATE BEGIN_DATE, B.TERMINATION_DATE END_DATE,  A.RIDER, A.SWITCH_NO,
+                                   bb.substation_feeder SUBSTATION_FEEDER
+            FROM  CDI_ALM_ACCOUNT A, BGE_MASTER_ACCOUNT B, CDI_PREMISE_SUBSTATION_FEEDER BB
+            WHERE A.SWITCH_NO <> 0
+            AND A.BILL_ACCOUNT =B.BILL_ACCOUNT
+            AND A.SERVICE_POINT=B.SERVICE_POINT
+            AND A.PREMISE_NUMBER=B.PREMISE_NUMBER
+            AND v_TRUNC_PEAK BETWEEN A.BEGIN_DATE AND A.END_DATE
+            AND v_TRUNC_PEAK BETWEEN B.EFFECTIVE_DATE AND B.TERMINATION_DATE
+            AND v_TRUNC_PEAK BETWEEN BB.BEGIN_DATE AND BB.END_DATE
+            AND BB.PREMISE_NUMBER = A.PREMISE_NUMBER
+       ) AA,
+    (SELECT PROGRAM, substation_feeder, seq  FROM
+       (SELECT DISTINCT PROGRAM, event_type, substation_feeder,
+                             DENSE_RANK() OVER ( PARTITION BY PROGRAM, v_TRUNC_PEAK ORDER BY begin_date) seq
+         FROM BGE_ALM_INPUT BAI
+         WHERE p_PEAK_HOUR BETWEEN  BAI.BEGIN_DATE  AND BAI.END_DATE+1
+         AND BAI.BEGIN_DATE >= TRUNC(p_PEAK_HOUR)    -- 07-20-2011
+         AND BAI.ENABLE_EVENT = 1
+         AND BAI.PROCESS_EVENT = 1
+         AND EVENT_TYPE <> 'Forecast' )
+         WHERE UPPER(SUBSTATION_FEEDER) NOT IN ('ALL','NONE')) P
+   WHERE AA.SUBSTATION_FEEDER = P.SUBSTATION_FEEDER
+     AND ((AA.rider = P.program ||'R') or (AA.rider = P.program ||'C'))
+   );
+
+   COMMIT;
+
+   CDI_LOG.LOG(0,'Begin the v_DATA loop: '||TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+   ---Adding the ALM value
+  FOR v_DATA IN
+    (SELECT L.PROFILE_ID PROFILE_ID, L.PROFILE_NAME PROFILE_NAME, LENGTH(L.PROFILE_NAME) LEN, LP.POINT_VAL POINT_VAL
+           FROM LOAD_PROFILE L, LOAD_PROFILE_POINT LP
+          WHERE  profile_name LIKE 'ALM%_BWI'
+            and (profile_name like  '%Economic%' or profile_name like  '%Reliability%')
+            AND l.profile_id = lp.profile_id
+            AND LP.POINT_DATE = p_PEAK_HOUR
+            AND POINT_VAL <>0
+   ) LOOP
+
+     v_NAME := v_DATA.PROFILE_NAME;
+     v_NAME := SUBSTR(v_NAME,4,32);
+     v_NAME := SUBSTR(v_NAME,1,(INSTR(v_NAME,'_')-1));
+     v_SEG := TO_NUMBER(SUBSTR(v_DATA.PROFILE_NAME, (v_DATA.LEN-4),1));
+
+     UPDATE CDI_ALM_PROFILE
+       SET PROFILE_ID = v_DATA.PROFILE_ID,
+           POINT_VAL = v_DATA.POINT_VAL,
+           VAL = -1*SWITCH_NO*v_DATA.POINT_VAL
+       WHERE RIDER = v_NAME
+       AND SEQ=v_SEG
+       AND PEAK_HOUR = p_PEAK_HOUR;
+
+   CDI_LOG.LOG(0,'Update CDI_ALM_PROFILE for '||v_NAME);
+
+   END LOOP;
+
+   COMMIT;
+
+   CDI_LOG.LOG(0,'Delete from CDI_ALM_PROFILE '||TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+   DELETE FROM CDI_ALM_PROFILE WHERE PROFILE_ID IS NULL;
+
+   CDI_LOG.LOG(0,'Inserting into CDI_ALM_VAL '||TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+   INSERT INTO CDI_ALM_VAL
+   (SELECT PREMISE_NUMBER, SUM(VAL), PEAK_HOUR
+      FROM CDI_ALM_PROFILE
+     GROUP BY PREMISE_NUMBER, PEAK_HOUR);
+
+   CDI_LOG.LOG(0,'Done Population of CDI_ALMs table For '||TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+
+   COMMIT;
+
+END PREPARE_WORK;
+
+/*----------------------------------------------------------------------------*
+ *   UPDATE_ALM_MONTHLY_UP                                                    *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_ALM_MONTHLY_UP
+  (
+   p_PEAK_HOUR   IN DATE,
+   p_CUT_PEAK    IN DATE,
+   p_MESSAGE    OUT VARCHAR2
+  )
+IS
+
+ v_PEAK_DATE VARCHAR2(16);
+ v_COUNT NUMBER:=0;
+
+BEGIN
+
+  v_PEAK_DATE := TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI');
+  --UT.DEBUG_TRACE('UPDATE_FOR_ALM v_PEAK_DATE='||v_PEAK_DATE);
+
+  PREPARE_WORK(p_PEAK_HOUR,  p_MESSAGE );
+  SELECT COUNT(1) INTO v_COUNT FROM CDI_ALM_PROFILE;
+  IF v_COUNT > 0 THEN
+    CDI_LOG.LOG(0,'Merge Monthly ALM Updates');
+
+    MERGE INTO CDI_PLC_TX_DETAIL A
+    USING (SELECT
+         DISTINCT  PREMISE_NUMBER,  VAL, PEAK_HOUR
+             FROM CDI_ALM_VAL B
+            WHERE PEAK_HOUR = p_PEAK_HOUR ) b---TO_DATE('07/23/2010 17:00', 'MM/DD/YYYY HH24:MI')
+    ON (a.premise_number = b.premise_number AND a.peak_date = b.peak_hour
+                                            AND RATE_CLASS NOT IN ('PL', 'SL'))
+    WHEN MATCHED THEN
+      UPDATE
+        SET a.alm_val = b.val,
+            a.LAST_UPDATE_DTS = SYSDATE;
+
+    --CDI_LOG.LOG(0,'Total Monthly ALM Updates are '||TO_CHAR(SQL%ROWCOUNT));
+    CDI_LOG.LOG(0,'Total Monthly ALM Updates done');
+
+    COMMIT;
+  END IF;
+END UPDATE_ALM_MONTHLY_UP;
+
+
+/*----------------------------------------------------------------------------*
+ *   UPDATE_ALM_INTERVAL                                                *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_ALM_INTERVAL
+  (
+   p_PEAK_HOUR   IN DATE,
+   p_CUT_PEAK    IN DATE,
+   p_MESSAGE    OUT VARCHAR2
+  )
+IS
+
+ v_PEAK_DATE VARCHAR2(16);
+ v_COUNT     NUMBER := 0;
+ v_COUNT_BIG NUMBER := 0;
+ v_PROFILE_LIBRARY_ID NUMBER(9);
+
+BEGIN
+
+  v_PEAK_DATE := TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI');
+  -- UT.DEBUG_TRACE('UPDATE_alm_Interval v_PEAK_DATE='||v_PEAK_DATE);
+
+  BEGIN
+
+     SELECT PROFILE_LIBRARY_ID INTO v_PROFILE_LIBRARY_ID FROM LOAD_PROFILE_LIBRARY
+       WHERE PROFILE_LIBRARY_NAME = k_LIBRARY_NAME;
+
+  EXCEPTION
+   WHEN NO_DATA_FOUND THEN
+        p_MESSAGE := 'There is no PROFILE_LIBRAY '||k_LIBRARY_NAME||' in system';
+        CDI_LOG.SET_ATTRIBUTES(p_SEVERITY_LEVEL      => PLOG.c_SEV_ABORT,
+                             p_MESSAGE             => p_MESSAGE,
+                             p_MESSAGE_DESCRIPTION => p_MESSAGE);
+
+        CDI_LOG.LOG(SQLCODE, p_MESSAGE, TRUE);
+        v_PROFILE_LIBRARY_ID := NULL;
+
+  END;
+
+  IF v_PROFILE_LIBRARY_ID IS NOT NULL THEN
+     FOR v_DATA IN
+      (SELECT DISTINCT A.BILL_ACCOUNT BILL_ACCOUNT ,A.SERVICE_POINT SERVICE_POINT,
+               A.PREMISE_NUMBER PREMISE_NUMBER,  SUM(B.SWITCH_NO * P.POINT_VAL) POINT_VAL
+            FROM CDI_PLC_TX_INT_DETAIL  A, CDI_ALM_ACCOUNT B, LOAD_PROFILE L, LOAD_PROFILE_POINT P
+            WHERE A.PEAK_DATE  = p_PEAK_HOUR
+             AND  A.BILL_ACCOUNT = B.BILL_ACCOUNT
+             AND  A.SERVICE_POINT = B.SERVICE_POINT
+             AND  A.PREMISE_NUMBER = B.PREMISE_NUMBER
+             AND  TRUNC(p_PEAK_HOUR) BETWEEN B.BEGIN_DATE AND B.END_DATE
+             AND  L.PROFILE_NAME LIKE 'ALM'||B.RIDER||'%'
+             AND L.PROFILE_NAME NOT LIKE '%Forecast%'
+             AND L.PROFILE_LIBRARY_ID = v_PROFILE_LIBRARY_ID
+             AND L.PROFILE_ID = P.PROFILE_ID
+             AND P.POINT_DATE = p_PEAK_HOUR--TO_DATE('7/9/2007 16:00','MM/DD/YYYY HH24:MI')
+             AND P.POINT_VAL <> 0
+           GROUP BY A.BILL_ACCOUNT, A.SERVICE_POINT,  A.PREMISE_NUMBER
+           ORDER BY 1,2,3)
+       LOOP
+
+         UPDATE CDI_PLC_TX_INT_DETAIL CC
+            SET ALM_VAL = -1*v_DATA.POINT_VAL
+          WHERE CC.BILL_ACCOUNT = v_DATA.BILL_ACCOUNT
+            AND CC.SERVICE_POINT = v_DATA.SERVICE_POINT
+            AND CC.PREMISE_NUMBER = v_DATA.PREMISE_NUMBER
+            AND CC.PEAK_DATE = p_PEAK_HOUR;
+
+         v_COUNT := v_COUNT+1;
+         IF v_COUNT >= 5000 THEN
+            COMMIT;
+            v_COUNT_BIG := v_COUNT_BIG + v_COUNT;
+            v_COUNT := 0;
+            CDI_LOG.LOG(0,'ALM Updates '||TO_CHAR(SYSDATE,'MM/DD/YYYY HH24:MI')|| ' v_COUNT='||v_COUNT_BIG);
+         END IF;
+
+       END LOOP;
+
+       COMMIT;
+  END IF;
+
+END UPDATE_ALM_INTERVAL;
+/*----------------------------------------------------------------------------*
+ *   UPDATE_ALM_INTERVAL_UP                                                *
+ *----------------------------------------------------------------------------*/
+PROCEDURE UPDATE_ALM_INTERVAL_UP
+  (
+   p_PEAK_HOUR   IN DATE,
+   p_CUT_PEAK    IN DATE,
+   p_MESSAGE    OUT VARCHAR2
+  )
+IS
+
+ v_PEAK_DATE VARCHAR2(16);
+ v_COUNT     NUMBER := 0;
+ v_COUNT_BIG NUMBER := 0;
+ v_PROFILE_LIBRARY_ID NUMBER(9);
+
+BEGIN
+
+  --v_PEAK_DATE := TO_CHAR(p_PEAK_HOUR,'MM/DD/YYYY HH24:MI');
+  -- UT.DEBUG_TRACE('UPDATE_alm_Interval v_PEAK_DATE='||v_PEAK_DATE);
+   FOR v_DATA IN
+       (SELECT DISTINCT B.PREMISE_NUMBER, VAL, B.PEAK_HOUR
+            FROM CDI_PLC_TX_INT_DETAIL A,  CDI_ALM_VAL B
+            WHERE  A.PEAK_DATE = p_PEAK_HOUR---TO_DATE('07/23/2010 17:00', 'MM/DD/YYYY HH24:MI')
+              AND A.PREMISE_NUMBER = B.PREMISE_NUMBER
+              AND A.PEAK_DATE = B.PEAK_HOUR
+            ORDER BY B.PREMISE_NUMBER)
+
+    LOOP
+
+       --  UT.DEBUG_TRACE('UPDATE_FOR_ALM PREMISE_NUMBER/VAL= '||v_DATA.PREMISE_NUMBER||'/'||v_DATA.VAL);
+        UPDATE CDI_PLC_TX_INT_DETAIL CC
+            SET ALM_VAL = v_DATA.VAL
+          WHERE CC.PEAK_DATE = p_PEAK_HOUR
+            AND CC.PREMISE_NUMBER = v_DATA.PREMISE_NUMBER;
+
+          v_COUNT := v_COUNT+1;
+          IF v_COUNT >= 5000 THEN
+            COMMIT;
+            v_COUNT_BIG := v_COUNT_BIG + v_COUNT;
+            v_COUNT := 0;
+            CDI_LOG.LOG(0,'ALM Updates '||TO_CHAR(SYSDATE,'MM/DD/YYYY HH24:MI')|| ' v_COUNT='||v_COUNT_BIG);
+          END IF;
+
+    END LOOP;
+    IF v_COUNT_BIG > 0 THEN
+       CDI_LOG.LOG(0,'Total Interval ALM Updates are '||v_COUNT_BIG);
+    END IF;
+
+    COMMIT;
+
+END UPDATE_ALM_INTERVAL_UP;
+
+/*----------------------------------------------------------------------------*
+ *  GENERATE_PLC_TICKETS                                                *
+ *----------------------------------------------------------------------------*/
+PROCEDURE GENERATE_PLC_TICKETS
+  (
+   p_START_DATE IN DATE,
+   p_STATUS   OUT NUMBER,
+   p_MESSAGE  OUT VARCHAR2
+  )
+ IS
+
+v_TAG        VARCHAR2(16);
+v_TAG_NEXT   VARCHAR2(16);
+v_BEGIN_DATE DATE;
+v_END_DATE   DATE;
+
+BEGIN
+
+ v_TAG        := TO_CHAR((p_START_DATE+370), 'YYYY');
+ v_TAG_NEXT   := TO_CHAR((p_START_DATE+740), 'YYYY');
+ v_BEGIN_DATE := TO_DATE(('06/01/'||v_TAG),'MM/DD/YYYY');
+ v_END_DATE := TO_DATE( ('05/31/'||v_TAG_NEXT),'MM/DD/YYYY');
+
+ BEGIN
+
+  SELECT PLC_BEGIN_DATE, PLC_END_DATE INTO v_BEGIN_DATE, v_END_DATE
+  FROM CDI_POLR_TO_PLC_MAP
+  WHERE PLC_BEGIN_DATE BETWEEN (p_START_DATE+365) AND (p_START_DATE+700);
+
+  v_TAG      := TO_CHAR((v_BEGIN_DATE), 'YYYY')||'C';
+
+  EXCEPTION
+   WHEN NO_DATA_FOUND THEN
+        p_MESSAGE := 'There is no DATEs in CDI_POLR_TO_PLC_MAP for selected year';
+        p_STATUS  := SQLCODE;
+        CDI_LOG.SET_ATTRIBUTES(p_SEVERITY_LEVEL      => PLOG.c_SEV_ABORT,
+                             p_MESSAGE             => p_MESSAGE,
+                             p_MESSAGE_DESCRIPTION => p_MESSAGE);
+
+        CDI_LOG.LOG(p_STATUS, p_MESSAGE, TRUE);
+        v_BEGIN_DATE := NULL;
+
+ END;
+
+ IF v_BEGIN_DATE IS NOT NULL THEN
+
+   DELETE FROM CDI_PLC_TICKETS WHERE TAG_ID LIKE '%C';
+
+   INSERT INTO CDI_PLC_TICKETS
+    (SELECT BILL_ACCOUNT, SERVICE_POINT, PREMISE_NUMBER, v_TAG, v_BEGIN_DATE, v_END_DATE, AVG(HOURLY_PLC)
+      FROM CDI_PLC_ICAP_DETAIL
+      WHERE HOURLY_PLC IS NOT NULL
+      GROUP BY BILL_ACCOUNT, SERVICE_POINT, PREMISE_NUMBER
+    ---
+    UNION ALL
+    SELECT BILL_ACCOUNT, SERVICE_POINT, PREMISE_NUMBER, v_TAG, v_BEGIN_DATE, v_END_DATE, AVG(HOURLY_PLC)
+    FROM CDI_PLC_ICAP_INT_DETAIL
+    WHERE HOURLY_PLC IS NOT NULL
+      GROUP BY BILL_ACCOUNT, SERVICE_POINT, PREMISE_NUMBER);
+
+    COMMIT;
+ ELSE
+   p_MESSAGE := 'Problem to define BEGI_DATE for tag '||v_TAG;
+   CDI_LOG.SET_ATTRIBUTES(p_SEVERITY_LEVEL      => PLOG.c_SEV_ABORT,
+                             p_MESSAGE             => p_MESSAGE,
+                             p_MESSAGE_DESCRIPTION => p_MESSAGE);
+
+   CDI_LOG.LOG(SQLCODE, p_MESSAGE, TRUE);
+ END IF;
+
+END GENERATE_PLC_TICKETS;
+/*----------------------------------------------------------------------------*
+ *  GENERATE_TX_TICKETS                                                *
+ *----------------------------------------------------------------------------*/
+PROCEDURE GENERATE_TX_TICKETS
+  (
+   p_START_DATE IN DATE,
+   p_STATUS   OUT NUMBER,
+   p_MESSAGE  OUT VARCHAR2
+  )
+ IS
+
+v_TAG        VARCHAR2(16);
+v_BEGIN_DATE DATE;
+v_END_DATE   DATE;
+
+BEGIN
+
+ v_TAG        := TO_CHAR((p_START_DATE+370), 'YYYY');
+ v_BEGIN_DATE := TO_DATE(('01/01/'||v_TAG),'MM/DD/YYYY');
+ v_END_DATE := TO_DATE( ('12/31/'||v_TAG),'MM/DD/YYYY');
+ v_TAG      := v_TAG||'T';
+
+ IF v_BEGIN_DATE IS NOT NULL THEN
+
+   DELETE FROM CDI_PLC_TICKETS WHERE TAG_ID LIKE '%T';
+
+   INSERT INTO CDI_PLC_TICKETS
+    (SELECT BILL_ACCOUNT, SERVICE_POINT, PREMISE_NUMBER, v_TAG, v_BEGIN_DATE, v_END_DATE, AVG(HOURLY_PLC)
+      FROM CDI_PLC_TX_DETAIL
+      WHERE HOURLY_PLC IS NOT NULL
+      GROUP BY BILL_ACCOUNT, SERVICE_POINT, PREMISE_NUMBER
+    ---
+    UNION ALL
+    SELECT BILL_ACCOUNT, SERVICE_POINT, PREMISE_NUMBER, v_TAG, v_BEGIN_DATE, v_END_DATE, AVG(HOURLY_PLC)
+      FROM CDI_PLC_TX_INT_DETAIL
+      WHERE HOURLY_PLC IS NOT NULL
+      GROUP BY BILL_ACCOUNT, SERVICE_POINT, PREMISE_NUMBER);
+
+    COMMIT;
+ ELSE
+   p_MESSAGE := 'Problem to define BEGI_DATE for tag '||v_TAG;
+   CDI_LOG.SET_ATTRIBUTES(p_SEVERITY_LEVEL      => PLOG.c_SEV_ABORT,
+                             p_MESSAGE             => p_MESSAGE,
+                             p_MESSAGE_DESCRIPTION => p_MESSAGE);
+
+   CDI_LOG.LOG(SQLCODE, p_MESSAGE, TRUE);
+ END IF;
+
+END GENERATE_TX_TICKETS;
+/*----------------------------------------------------------------------------*
+ *   PREPROCESSOR_ICAP                                                        *
+ *----------------------------------------------------------------------------*/
+ PROCEDURE PREPROCESSOR_ICAP
+ (
+   p_START_DATE IN DATE,
+   p_MESSAGE    IN OUT VARCHAR2
+ ) IS
+
+  v_CURRENT_DATE DATE;
+  v_ANCILLARY_SERVICE_ID NUMBER(9);
+  v_MIN_DATE     DATE := c_HI_DATE;
+  v_MAX_DATE     DATE := c_LOW_DATE;
+  v_TEMPLATE_ID  NUMBER(9);
+  v_PERIOD_ID    NUMBER(9);
+  v_END_DATE     DATE;
+  v_BEGIN_DATE   DATE;
+
+BEGIN
+
+
+v_END_DATE   := TO_DATE(TO_CHAR(p_START_DATE,'YYYY')||'1231','YYYYMMDD');
+v_BEGIN_DATE := TO_DATE(TO_CHAR(p_START_DATE,'YYYY')||'0101','YYYYMMDD');
+
+CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor ICAP: Get MIN and MAX PEAK Dates');
+BEGIN
+
+  SELECT TRUNC(MIN(PEAK_DATE)), TRUNC(MAX(PEAK_DATE)) INTO v_MIN_DATE, v_MAX_DATE
+          FROM ANCILLARY_SERVICE_AREA_PEAK
+          WHERE ANCILLARY_SERVICE_ID = g_ICAP_ID
+          AND   PEAK_DATE BETWEEN v_BEGIN_DATE AND END_DATE; --TO_DATE('01/01/2007','MM/DD/YYYY'); --p_start_date Will be Start date --
+
+   EXCEPTION
+   WHEN NO_DATA_FOUND THEN
+        p_MESSAGE := 'There is no PEAK_DATEs in ANCILLARY_SERVICE_AREA_PEAK(ICAP) for selected year';
+        CDI_LOG.SET_ATTRIBUTES(p_SEVERITY_LEVEL      => PLOG.c_SEV_ABORT,
+                             p_MESSAGE             => p_MESSAGE,
+                             p_MESSAGE_DESCRIPTION => p_MESSAGE);
+
+        CDI_LOG.LOG(SQLCODE, p_MESSAGE, TRUE);
+        v_ANCILLARY_SERVICE_ID := NULL;
+END;
+
+IF g_ICAP_ID IS NOT NULL THEN
+   -- Collect data for Capacity --27154
+    FOR v_HOUR IN
+        (SELECT FROM_CUT(PEAK_DATE,CDI_GENERICS.k_LOCAL_TIME_ZONE) PEAK_HOUR, PEAK_DATE CUT_PEAK
+          FROM ANCILLARY_SERVICE_AREA_PEAK
+          WHERE ANCILLARY_SERVICE_ID = g_ICAP_ID
+          AND   PEAK_DATE BETWEEN v_BEGIN_DATE AND END_DATE --TO_DATE('01/01/2007','MM/DD/YYYY')
+          ORDER BY PEAK_DATE        )
+     LOOP
+
+        DEFINE_PERIOD_TEMPLATE(v_HOUR.PEAK_HOUR, v_TEMPLATE_ID, v_PERIOD_ID);
+        CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Populate CDI_PLC_ICAP_DETAIL For '||
+                                              TO_CHAR(v_HOUR.PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+        CDI_LOG.LOG(0,'Populate CDI_PLC_ICAP_DETAIL For '||
+                                              TO_CHAR(v_HOUR.PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+        POPULATE_CDI_PLC_ICAP_DETAIL(v_HOUR.PEAK_HOUR, v_TEMPLATE_ID, v_PERIOD_ID);
+
+        CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Extract data to CDI_TOU_USAGE_FACTORS_SHORT');
+        CDI_LOG.LOG(0,'Get data to CDI_TOU_USAGE_FACTORS_SHORT');
+        POPULATE_SHORT_CDI_TOU_UF(v_HOUR.PEAK_HOUR, v_TEMPLATE_ID, v_PERIOD_ID);
+
+        CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Update CDI_PLC_ICAP_DETAIL For Usage_factor',
+                               p_MESSAGE_DESCRIPTION => 'Log');
+        CDI_LOG.LOG(0,'Update CDI_PLC_ICAP_DETAIL For Usage_factor');
+
+        UPDATE_ICAP_USAGE_FACTOR(v_HOUR.PEAK_HOUR, v_HOUR.CUT_PEAK);
+
+        CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Populate CDI_PLC_ICAP_INT_DETAIL For '||
+                                              TO_CHAR(v_HOUR.PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'),
+                               p_MESSAGE_DESCRIPTION => 'Log' );
+        CDI_LOG.LOG(0,'Populate CDI_PLC_ICAP_INT_DETAIL For '||
+                                              TO_CHAR(v_HOUR.PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+        POPULATE_CDI_PLC_ICAP_INT(v_HOUR.PEAK_HOUR);
+
+        CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Update CDI_PLC_ICAP_INT_DETAIL for ALM AddBacks',
+                               p_MESSAGE_DESCRIPTION => 'Log' );
+        CDI_LOG.LOG(0,'Update CDI_PLC_ICAP_INT_DETAIL for ALM AddBacks');
+        UPDATE_ALM_ICAP_INTERVAL(v_HOUR.PEAK_HOUR);
+
+     END LOOP;
+
+     CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Update CDI_PLC_ICAP_DETAIL For Loss_factor');
+     CDI_LOG.LOG(0,'Update CDI_PLC_ICAP_DETAIL For Loss_factor');
+     UPDATE_ICAP_LOSS_FACTOR;
+
+     CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Update CDI_PLC_ICAP_INT_DETAIL For Loss_factor');
+     CDI_LOG.LOG(0,'Preprocessor:Update CDI_PLC_ICAP_INT_DETAIL For Loss_factor');
+     UPDATE_INT_LOSS_FACTOR;
+
+END IF;
+
+
+END PREPROCESSOR_ICAP;
+/*----------------------------------------------------------------------------*
+ *   PREPROCESSOR_TX                                                          *
+ *----------------------------------------------------------------------------*/
+ PROCEDURE PREPROCESSOR_TX
+ (
+   p_START_DATE IN DATE,
+   p_MESSAGE    IN OUT VARCHAR2
+ ) IS
+
+  v_CURRENT_DATE DATE;
+  v_ANCILLARY_SERVICE_ID NUMBER(9);
+  v_MIN_DATE     DATE := c_HI_DATE;
+  v_MAX_DATE     DATE := c_LOW_DATE;
+  v_END_DATE     DATE;
+  v_TEMPLATE_ID  NUMBER(9);
+  v_PERIOD_ID    NUMBER(9);
+  v_COUNT NUMBER;
+
+  TYPE t_ALM_DAYS_TBL IS TABLE OF CHAR(1) INDEX BY VARCHAR2(10);
+  v_ALM_DAYS t_ALM_DAYS_TBL;
+
+  FUNCTION IS_ALM_DAY (p_DAY IN DATE) RETURN BOOLEAN
+   IS
+  BEGIN
+
+      ut.DEBUG_TRACE('IS_ALM_DAY for: '||TO_CHAR(p_DAY,'YYYYMMDDHH24'));
+      RETURN v_ALM_DAYS.EXISTS(TO_CHAR(p_DAY,'YYYYMMDDHH24'));
+  END IS_ALM_DAY;
+
+BEGIN
+
+  CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor TX: Get MIN and MAX PEAK Dates');
+  BEGIN
+
+     v_END_DATE := TO_DATE(TO_CHAR(ADD_MONTHS(p_START_DATE,12),'YYYY')||'0101','YYYYMMDD');
+
+     SELECT TRUNC(MIN(PEAK_DATE)), TRUNC(MAX(PEAK_DATE)) INTO v_MIN_DATE, v_MAX_DATE
+          FROM ANCILLARY_SERVICE_AREA_PEAK
+          WHERE ANCILLARY_SERVICE_ID = g_TX_ID
+          AND   PEAK_DATE BETWEEN p_START_DATE AND v_END_DATE;
+
+  EXCEPTION
+   WHEN NO_DATA_FOUND THEN
+        p_MESSAGE := 'There is no PEAK_DATEs in ANCILLARY_SERVICE_AREA_PEAK(TX) for selected year';
+        CDI_LOG.SET_ATTRIBUTES(p_SEVERITY_LEVEL      => PLOG.c_SEV_ABORT,
+                             p_MESSAGE             => p_MESSAGE,
+                             p_MESSAGE_DESCRIPTION => p_MESSAGE);
+
+        CDI_LOG.LOG(SQLCODE, p_MESSAGE, TRUE);
+        v_ANCILLARY_SERVICE_ID := NULL;
+  END;
+
+  CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:GET ALL POSSIBLE ALM DAYS ');
+  CDI_LOG.LOG(0,'GET ALL POSSIBLE ALM DAYS ');
+  FOR v_DATA IN
+      (SELECT DISTINCT LOAD_DATE FROM CDI_ALM_IMPACT_DETAILS
+         WHERE LOAD_DATE BETWEEN (v_MIN_DATE-1) AND (v_MAX_DATE+2)
+         order by 1 DESC)
+  LOOP
+
+      --ut.DEBUG_TRACE('ALM DAYs for: '||TO_CHAR(v_DATA.LOAD_DATE,'YYYYMMDDHH24'));
+      v_ALM_DAYS(TO_CHAR(v_DATA.LOAD_DATE,'YYYYMMDDHH24')) := 'Y';
+  END LOOP;
+
+
+IF g_TX_ID IS NOT NULL THEN
+   -- Collect data for ransmission--27155
+   FOR v_HOUR IN
+        (SELECT FROM_CUT(PEAK_DATE,CDI_GENERICS.k_LOCAL_TIME_ZONE) PEAK_HOUR, PEAK_DATE CUT_PEAK
+          FROM ANCILLARY_SERVICE_AREA_PEAK
+          WHERE ANCILLARY_SERVICE_ID = g_TX_ID
+          AND   PEAK_DATE BETWEEN p_START_DATE AND v_END_DATE
+          ORDER BY PEAK_DATE        )
+     LOOP
+
+        DEFINE_PERIOD_TEMPLATE(v_HOUR.PEAK_HOUR, v_TEMPLATE_ID, v_PERIOD_ID);
+
+        CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Populate CDI_PLC_TX_DETAIL For '||
+                                              TO_CHAR(v_HOUR.PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+        CDI_LOG.LOG(0,'Populate CDI_PLC_TX_DETAIL For '||
+                                              TO_CHAR(v_HOUR.PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+        POPULATE_CDI_PLC_TX_DETAIL(v_HOUR.PEAK_HOUR, v_TEMPLATE_ID, v_PERIOD_ID);
+
+        SELECT COUNT(1) INTO v_COUNT FROM CDI_PLC_TX_DETAIL;
+        --RSS 2011-04-18 --
+        IF v_COUNT = 0 THEN
+           CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor TX:CDI_PLC_TX_DETAIL empty');
+           CDI_LOG.LOG(0,'Preprocessor TX:CDI_PLC_TX_DETAIL empty');
+        ELSE
+        CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor TX:Extract data to CDI_TOU_USAGE_FACTORS_SHORT');
+        CDI_LOG.LOG(0,'Get data to CDI_TOU_USAGE_FACTORS_SHORT');
+        POPULATE_SHORT_CDI_TOU_UF(v_HOUR.PEAK_HOUR, v_TEMPLATE_ID, v_PERIOD_ID);
+
+        CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Update CDI_PLC_TX_DETAIL For Usage_factor',
+                               p_MESSAGE_DESCRIPTION => 'Log');
+        CDI_LOG.LOG(0,'Update CDI_PLC_TX_DETAIL For Usage_factor');
+        UPDATE_TX_USAGE_FACTOR(v_HOUR.PEAK_HOUR, v_HOUR.CUT_PEAK);
+
+        CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Populate CDI_PLC_TX_INT_DETAIL For '||
+                                              TO_CHAR(v_HOUR.PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'),
+                               p_MESSAGE_DESCRIPTION => 'Log' );
+        CDI_LOG.LOG(0,'Populate CDI_PLC_TX_INT_DETAIL For '||
+                                              TO_CHAR(v_HOUR.PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+        POPULATE_CDI_PLC_TX_INT(v_HOUR.PEAK_HOUR);
+
+        IF IS_ALM_DAY(v_HOUR.PEAK_HOUR) THEN
+         CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Update ALM For '||TO_CHAR(v_HOUR.PEAK_HOUR,'MM/DD/YYYY HH24:MI:SS'));
+         CDI_LOG.LOG(0,'Update ALM');
+         UPDATE_ALM_MONTHLY_UP(v_HOUR.PEAK_HOUR,v_HOUR.PEAK_HOUR, p_MESSAGE);
+         UPDATE_ALM_INTERVAL_UP(v_HOUR.PEAK_HOUR,v_HOUR.PEAK_HOUR, p_MESSAGE);
+        END IF;
+      END IF;
+     END LOOP;
+
+     CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Update CDI_PLC_TX_DETAIL For Loss_factor');
+     CDI_LOG.LOG(0,'Update CDI_PLC_TX_DETAIL For Loss_factor');
+     UPDATE_TX_LOSS_FACTOR;
+
+     CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor:Update CDI_PLC_TX_INT_DETAIL For Loss_factor');
+     CDI_LOG.LOG(0,'Preprocessor:Update CDI_PLC_TX_INT_DETAIL For Loss_factor');
+     UPDATE_TX_INT_LOSS_FACTOR;
+
+END IF;
+
+
+END PREPROCESSOR_TX;
+ /*----------------------------------------------------------------------------*
+   *   MAIN                                                                      *
+   *----------------------------------------------------------------------------*/
+   PROCEDURE MAIN
+   (
+      p_START_DATE IN DATE ,
+      p_STATUS     OUT NUMBER,
+      p_MESSAGE    OUT VARCHAR2
+   ) IS
+
+   BEGIN
+      p_STATUS  := SQLCODE;
+      p_MESSAGE := 'Process ran successfully. Please check Process Log for details.';
+
+      -- Initialize the PLOG logging mechanism.
+      INITIALIZE_PLOG(p_START_DATE, p_START_DATE,'ANNUAL PLC TICKETS');
+
+      CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Creating Clean conditions');
+      TRUNCATE_TABLES;
+
+      CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor: Get Ancillary ID');
+      GET_AN_ID;
+
+      -- Preprocessor  populates data into CDI_PLC_DETAIL table
+      CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:Preprocessor PLC');
+      PREPROCESSOR_ICAP(p_START_DATE,p_MESSAGE);
+
+      CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:GENERATE_PLC_BUILDUPS');
+      GENERATE_PLC_BUILDUPS(p_START_DATE);
+
+      CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:CALCULATE_PLC_SF');
+      CALCULATE_PLC_SF(p_START_DATE);
+
+      CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:CALCULATE_PLC_OBLIGATION Factor');
+      CALCULATE_PLC_OBLIGATION_FAC(p_START_DATE);
+
+      CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:UPDATE_DETAIL_PLC');
+      UPDATE_DETAIL_PLC(p_START_DATE);
+
+      CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:GENERATE_PLC_TICKETS');
+      GENERATE_PLC_TICKETS(p_START_DATE, p_STATUS, p_MESSAGE);
+
+      REPORT_NORMAL_AND_FINISH(p_STATUS, p_MESSAGE);
+
+   EXCEPTION
+      WHEN OTHERS THEN
+         p_MESSAGE := ''''||k_PROCESS_NAME||''' terminated with unexpected errors.';
+         REPORT_ERROR_AND_FINISH(p_STATUS, p_MESSAGE);
+   END MAIN;
+
+  /*----------------------------------------------------------------------------*
+   *   MAIN_PREPROCESSOR                                                                   *
+   *----------------------------------------------------------------------------*/
+   PROCEDURE MAIN_PREPROCESSOR
+   (
+      p_ANCILLARY_ID IN NUMBER,
+      p_START_YEAR IN VARCHAR,
+      p_STATUS     OUT NUMBER,
+      p_MESSAGE    OUT VARCHAR2
+   ) IS
+
+   v_START_DATE DATE;
+
+   BEGIN
+      p_STATUS  := SQLCODE;
+      p_MESSAGE := 'Process started successfully. Please check Process Log for details.';
+      v_START_DATE := TO_DATE(p_START_YEAR,'MM/DD/YYYY');
+
+      --UT.DEBUG_TRACE ('MAIN_PREPROCESSOR: p_START_YEAR='||p_START_YEAR);
+      --UT.DEBUG_TRACE ('MAIN_PREPROCESSOR: p_ANCILLARY_ID='||p_ANCILLARY_ID);
+      -- Initialize the PLOG logging mechanism.
+      INITIALIZE_PLOG(v_START_DATE, v_START_DATE,'PREPROCESSOR');
+
+      CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Preprocessor: Get Ancillary ID',
+                             p_MESSAGE_DESCRIPTION => 'Log');
+      GET_AN_ID;
+
+
+      IF p_ANCILLARY_ID = g_ICAP_ID THEN
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'TRUNCATE ICAP TABLES',
+                                 p_SOURCE    => 'ICAP PREPROCESSOR',
+                                 p_MESSAGE   => 'Truncate Detail Tables');
+          CDI_LOG.LOG(p_STATUS);
+          TRUNCATE_ICAP_TABLES;
+
+          -- Preprocessor  populates data into CDI_PLC_DETAIL table
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:Preprocessor ICAP');
+          CDI_LOG.LOG(p_STATUS, 'Begin:Preprocessor ICAP');
+          PREPROCESSOR_ICAP(v_START_DATE,p_MESSAGE);
+      ELSE
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'TRUNCATE TX TABLES',
+                                 p_SOURCE    => 'TX PREPROCESSOR',
+                                 p_MESSAGE   => SQLERRM(SQLCODE));
+          CDI_LOG.LOG(p_STATUS);
+          TRUNCATE_TX_TABLES;
+
+          -- Preprocessor  populates data into CDI_PLC_DETAIL table
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:Preprocessor TX');
+          CDI_LOG.LOG(p_STATUS);
+          PREPROCESSOR_TX(v_START_DATE,p_MESSAGE);
+
+      END IF;
+      p_MESSAGE := 'End Preprocessor: p_START_YEAR='||p_START_YEAR;
+      REPORT_NORMAL_AND_FINISH(p_STATUS, p_MESSAGE);
+
+   EXCEPTION
+      WHEN OTHERS THEN
+         p_MESSAGE :=  SQLERRM(SQLCODE);
+         REPORT_ERROR_AND_FINISH(p_STATUS, p_MESSAGE);
+
+   END MAIN_PREPROCESSOR;
+
+  /*----------------------------------------------------------------------------*
+   *   MAIN_PLC_TICKETS                                                         *
+   *----------------------------------------------------------------------------*/
+   PROCEDURE MAIN_PLC_TICKETS
+   (
+    p_ANCILLARY_ID IN NUMBER,
+    p_START_YEAR IN VARCHAR,
+    p_STATUS     OUT NUMBER,
+    p_MESSAGE    OUT VARCHAR2
+   ) IS
+
+   v_START_DATE DATE;
+
+   BEGIN
+
+      p_STATUS  := SQLCODE;
+      p_MESSAGE := 'Process startes successfully. Please check Process Log for details.';
+      v_START_DATE := TO_DATE(p_START_YEAR,'MM/DD/YYYY');
+      -- Initialize the PLOG logging mechanism.
+      INITIALIZE_PLOG(v_START_DATE, v_START_DATE,'Calculate ICAP PLC_TICKETS');
+
+      CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'PLC TICKETS: Get Ancillary ID',
+                             p_MESSAGE_DESCRIPTION => 'Log');
+      GET_AN_ID;
+      IF p_ANCILLARY_ID = g_ICAP_ID THEN
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:GENERATE_PLC_BUILDUPS for '||p_START_YEAR,
+                                 p_SOURCE    => 'ANNUAL ICAP TICKETS',
+                                 p_MESSAGE   => SQLERRM(SQLCODE));
+          CDI_LOG.LOG(p_STATUS);
+
+          CDI_LOG.LOG(p_STATUS);
+          GENERATE_PLC_BUILDUPS(v_START_DATE);
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:CALCULATE_PLC_SF');
+          CDI_LOG.LOG(p_STATUS);
+          CALCULATE_PLC_SF(v_START_DATE);
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:CALCULATE_PLC_OBLIGATION Factor');
+          CDI_LOG.LOG(p_STATUS);
+          CALCULATE_PLC_OBLIGATION_FAC(v_START_DATE);
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:UPDATE_DETAIL_PLC');
+          CDI_LOG.LOG(p_STATUS);
+          UPDATE_DETAIL_PLC(v_START_DATE);
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:UPDATE_INTERVAL_PLC');
+          CDI_LOG.LOG(p_STATUS);
+          UPDATE_INT_HOURLY_PLC;
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:UPDATE_INT_NEW_ICAP');
+          CDI_LOG.LOG(p_STATUS);
+          UPDATE_INT_NEW_ICAP;
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:GENERATE_PLC_TICKETS');
+          CDI_LOG.LOG(p_STATUS);
+          GENERATE_PLC_TICKETS(v_START_DATE,p_STATUS, p_MESSAGE);
+      ELSE
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:GENERATE_PLC_BUILDUPS for '||p_START_YEAR,
+                                 p_SOURCE    => 'ANNUAL TX TICKETS',
+                                 p_MESSAGE   => SQLERRM(SQLCODE));
+          CDI_LOG.LOG(p_STATUS);
+          GENERATE_TX_BUILDUPS(v_START_DATE);
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:CALCULATE_TX_SF');
+          CDI_LOG.LOG(p_STATUS);
+          CALCULATE_TX_SF(v_START_DATE);
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:CALCULATE_TX_OBLIGATION Factor');
+          CDI_LOG.LOG(p_STATUS);
+          CALCULATE_TX_OBLIGATION_FAC(v_START_DATE);
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:UPDATE_DETAIL_PLC');
+          CDI_LOG.LOG(p_STATUS);
+          UPDATE_DETAIL_TX(v_START_DATE);
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:UPDATE_INTERVAL_PLC');
+          CDI_LOG.LOG(p_STATUS);
+          UPDATE_DETAIL_TX_INTERVAL;
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:UPDATE_DETAIL_INT_NEW_TX');
+          CDI_LOG.LOG(p_STATUS);
+          UPDATE_DETAIL_INT_NEW_TX;
+
+          CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Begin:GENERATE_PLC_TICKETS');
+          CDI_LOG.LOG(p_STATUS);
+          GENERATE_TX_TICKETS(v_START_DATE,p_STATUS, p_MESSAGE);
+
+      END IF;
+
+      p_MESSAGE := 'End: PLC TICKETS';
+      REPORT_NORMAL_AND_FINISH(p_STATUS, p_MESSAGE);
+
+   EXCEPTION
+      WHEN OTHERS THEN
+         p_MESSAGE := ''''||k_PROCESS_NAME||''' terminated with unexpected errors.';
+         p_STATUS  := SQLCODE;
+         REPORT_ERROR_AND_FINISH(p_STATUS, SQLERRM(SQLCODE)||p_MESSAGE);
+   END MAIN_PLC_TICKETS;
+
+    /*----------------------------------------------------------------------------*
+   *   GET_CDI_TOU_UF_LOOKUP                                                 *
+   *----------------------------------------------------------------------------*/
+   PROCEDURE GET_CDI_TOU_UF_LOOKUP
+   (
+      p_BEGIN_DATE  IN DATE,
+      p_END_DATE    IN DATE,
+      p_TEMPLATE_ID TEMPLATE.TEMPLATE_ID%TYPE,
+      p_PERIOD_ID   IN PERIOD.PERIOD_ID%TYPE,
+      p_MESSAGE     OUT VARCHAR2,
+      p_CURSOR      OUT SYS_REFCURSOR
+   ) IS
+   BEGIN
+      IF ((p_TEMPLATE_ID = 1 AND p_PERIOD_ID NOT IN (1, -1)) OR
+         (p_TEMPLATE_ID NOT IN (1, -1) AND p_PERIOD_ID = 1)) THEN
+         p_MESSAGE := 'Inappropriate selection criteria.' || k_CRLF ||
+                      'If ''Anytime'' is selected, it must be specified for both filters.';
+      END IF;
+
+      OPEN p_CURSOR FOR
+         SELECT BILL_ACCOUNT,
+                SERVICE_POINT,
+                PROFILE_NAME "PROFILE",
+                TEMPLATE_NAME "TEMPLATE",
+                PERIOD_NAME "PERIOD",
+                BASIS_END_DATE,
+                BEGIN_DATE,
+                END_DATE,
+                USAGE_FACTOR,
+                CREATE_DTS,
+                LAST_UPDATE_DTS
+         FROM   CDI_TOU_UF_LOOKUP
+         WHERE  BEGIN_DATE BETWEEN p_BEGIN_DATE AND p_END_DATE
+         ORDER  BY BILL_ACCOUNT,
+                   SERVICE_POINT,
+                   BEGIN_DATE,
+                   END_DATE,
+                   BASIS_END_DATE,
+                   TEMPLATE_ID,
+                   PERIOD_ID;
+   END GET_CDI_TOU_UF_LOOKUP;
+ /*----------------------------------------------------------------------------*
+ *   GET_SELECTION_FILTER                                                     *
+ *----------------------------------------------------------------------------*/
+  PROCEDURE  GET_SELECTION_FILTER
+ (
+   p_BEGIN_DATE IN DATE,
+   p_END_DATE   IN DATE,
+   p_SELECTION_TYPE IN NUMBER,
+   p_CURSOR     OUT SYS_REFCURSOR
+   ) IS
+  BEGIN
+
+  IF  p_SELECTION_TYPE = 1 THEN
+
+      OPEN p_CURSOR FOR
+         SELECT UNIQUE TO_NUMBER(TARIFF_CODE)
+         FROM   BGE_MASTER_ACCOUNT
+         WHERE  EFFECTIVE_DATE <= p_END_DATE
+         AND    TERMINATION_DATE  >= p_END_DATE
+         ORDER  BY 1;
+  ELSE
+
+     OPEN p_CURSOR FOR
+         SELECT UNIQUE RATE_CLASS
+         FROM   BGE_MASTER_ACCOUNT
+         WHERE  EFFECTIVE_DATE <= p_END_DATE
+         AND    TERMINATION_DATE  >= p_END_DATE
+         AND    RATE_CLASS NOT IN ('NR','IS','P')
+         ORDER  BY RATE_CLASS;
+  END IF;
+
+  END GET_SELECTION_FILTER;
+/*----------------------------------------------------------------------------*
+ *   GET_ANC service filter                                                   *
+ *----------------------------------------------------------------------------*/
+  PROCEDURE  GET_ANC_FILTER
+(
+   p_CURSOR OUT SYS_REFCURSOR
+) IS
+  BEGIN
+
+    OPEN p_CURSOR FOR
+        SELECT ANCILLARY_SERVICE_NAME, ANCILLARY_SERVICE_ID ANCILLARY_ID
+        FROM ANCILLARY_SERVICE
+        ORDER BY ANCILLARY_SERVICE_NAME;
+
+  END GET_ANC_FILTER ;
+
+/*----------------------------------------------------------------------------*
+ *   GET_TICKETS_FILTER                                                        *
+ *----------------------------------------------------------------------------*/
+PROCEDURE GET_TAG_FILTER
+(  p_BEGIN_DATE IN DATE,
+   p_END_DATE   IN DATE,
+   p_CURSOR     OUT SYS_REFCURSOR
+) IS
+BEGIN
+   OPEN p_CURSOR FOR
+      SELECT DISTINCT A.TAG_ID
+      FROM CDI_PLC_TICKETS A
+      ORDER BY 1;
+
+END GET_TAG_FILTER;
+/*----------------------------------------------------------------------------*
+ *   ALLOCATION_BEGIN_DATES                                                 *
+ *----------------------------------------------------------------------------*/
+PROCEDURE BEGIN_DATES
+    (p_ANCILLARY_ID IN NUMBER,
+     p_STATUS OUT NUMBER,
+     p_CURSOR IN OUT SYS_REFCURSOR
+    ) AS
+
+BEGIN
+
+    p_STATUS := GA.SUCCESS;
+
+    OPEN p_CURSOR FOR
+       SELECT DISTINCT TO_CHAR(BEGIN_DATE,'MM/DD/YYYY')
+        FROM ANCILLARY_SERVICE_AREA_PEAK
+        WHERE ANCILLARY_SERVICE_ID = p_ANCILLARY_ID
+        ORDER BY 1 DESC;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            p_STATUS := SQLCODE;
+
+END BEGIN_DATES;
+/*----------------------------------------------------------------------------*
+ *   ANCILLARY_SVC_AREA_PEAKS                                                 *
+ *----------------------------------------------------------------------------*/
+PROCEDURE ANCILLARY_SVC_AREA_PEAKS
+    (
+     p_ANCILLARY_ID IN NUMBER,
+     p_START_YEAR IN VARCHAR,
+     p_STATUS OUT NUMBER,
+     p_CURSOR IN OUT SYS_REFCURSOR
+    ) AS
+
+BEGIN
+
+
+    p_STATUS := GA.SUCCESS;
+    --UT.DEBUG_TRACE('ANCILLARY_SVC_AREA_PEAKS: p_START_YEAR='||p_START_YEAR);
+    --UT.DEBUG_TRACE('ANCILLARY_SVC_AREA_PEAKS: p_ANCILLARY_ID='||p_ANCILLARY_ID);
+
+    OPEN p_CURSOR FOR
+        SELECT A.ANCILLARY_SERVICE_ID, AREA_ID, BEGIN_DATE, END_DATE,
+                   TO_DATE(  (SUBSTR(FROM_CUT_AS_HED(PEAK_DATE,'EDT'),1,10)),'YYYY-MM-DD') "PEAK_DATE",
+                   LTRIM(RTRIM(SUBSTR(FROM_CUT_AS_HED(PEAK_DATE,'EDT'),11,15))) "PEAK_TIME",
+                  PEAK_VAL
+        FROM ANCILLARY_SERVICE_AREA_PEAK A
+        WHERE A.ANCILLARY_SERVICE_ID = p_ANCILLARY_ID
+          AND A.BEGIN_DATE >= TO_DATE(p_START_YEAR,'MM/DD/YYYY')
+        ORDER BY BEGIN_DATE;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            p_STATUS := SQLCODE;
+
+END ANCILLARY_SVC_AREA_PEAKS;
+-----------------------------------------
+PROCEDURE PUT_ANC_SERVICE_AREA_PEAK
+    (
+    p_ANCILLARY_ID IN NUMBER,
+    p_START_YEAR IN VARCHAR,
+    p_ANCILLARY_SERVICE_ID IN NUMBER,
+    p_AREA_ID IN NUMBER,
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE IN DATE,
+    p_PEAK_DATE IN DATE,
+    p_PEAK_TIME IN VARCHAR2,
+    p_PEAK_VAL IN NUMBER,
+    p_OLD_AREA_ID IN NUMBER,
+    p_OLD_BEGIN_DATE IN DATE,
+    p_OLD_PEAK_DATE IN DATE,
+    p_OLD_PEAK_TIME IN VARCHAR2,
+    p_TIME_ZONE IN VARCHAR,
+    p_STATUS OUT NUMBER
+    )
+    AS
+
+v_END_DATE DATE;
+v_PEAK_DATE DATE;
+v_OLD_PEAK_DATE DATE;
+v_OLD_BEGIN_DATE date;
+v_OLD_PEAK_TIME VARCHAR2(16);
+BEGIN
+
+    p_STATUS := GA.SUCCESS;
+    v_END_DATE := NULL_DATE(p_END_DATE);
+    v_OLD_BEGIN_DATE := NULL_DATE(p_OLD_BEGIN_DATE);
+    v_OLD_PEAK_DATE := NULL_DATE(p_OLD_PEAK_DATE);
+    v_PEAK_DATE := DATE_TIME_AS_CUT(TO_CHAR(p_PEAK_DATE,'YYYY-MM-DD'),p_PEAK_TIME,p_TIME_ZONE);
+
+
+    IF p_ANCILLARY_SERVICE_ID IS NOT NULL THEN
+
+
+        IF p_OLD_PEAK_TIME IS NULL THEN
+            v_OLD_PEAK_TIME  := '0';
+        ELSE
+            v_OLD_PEAK_TIME  := p_OLD_PEAK_TIME;
+        END IF;
+
+        v_OLD_PEAK_DATE := DATE_TIME_AS_CUT(TO_CHAR(v_OLD_PEAK_DATE,'YYYY-MM-DD'), v_OLD_PEAK_TIME,p_TIME_ZONE);
+        --UT.DEBUG_TRACE('v_OLD_PEAK_DATE='||TO_CHAR(v_OLD_PEAK_DATE,'YYYY-MM-DD HH24:MI'));
+        --UT.DEBUG_TRACE('p_ANCILLARY_ID='||p_ANCILLARY_ID);
+
+        -- UPDATE THE CURRENT ASSIGNMENT IF ONE EXISTS
+        UPDATE ANCILLARY_SERVICE_AREA_PEAK SET
+            AREA_ID = p_AREA_ID,
+            BEGIN_DATE = p_BEGIN_DATE,
+            END_DATE = v_END_DATE,
+            PEAK_DATE = v_PEAK_DATE,
+            PEAK_VAL = p_PEAK_VAL
+        WHERE ANCILLARY_SERVICE_ID = p_ANCILLARY_ID
+            AND AREA_ID = p_OLD_AREA_ID
+            AND BEGIN_DATE = TRUNC(v_OLD_BEGIN_DATE)
+            AND PEAK_DATE = v_OLD_PEAK_DATE;
+
+       -- NO ASSIGNMENT UPDATE FOR THIS COMBINATION SO INSERT A NEW ASSIGNMENT
+        IF SQL%NOTFOUND THEN
+            INSERT INTO ANCILLARY_SERVICE_AREA_PEAK
+                (
+                ANCILLARY_SERVICE_ID,
+                AREA_ID,
+                BEGIN_DATE,
+                END_DATE,
+                PEAK_DATE,
+                PEAK_VAL
+                )
+            VALUES
+                (
+                p_ANCILLARY_ID,
+                p_AREA_ID,
+                p_BEGIN_DATE,
+                v_END_DATE,
+                v_PEAK_DATE,
+                p_PEAK_VAL
+                );
+        END IF;
+
+    ELSE
+
+         INSERT INTO ANCILLARY_SERVICE_AREA_PEAK
+            (
+            ANCILLARY_SERVICE_ID,
+            AREA_ID,
+            BEGIN_DATE,
+            END_DATE,
+            PEAK_DATE,
+            PEAK_VAL
+            )
+        VALUES
+            (
+            p_ANCILLARY_ID,
+            p_AREA_ID,
+            p_BEGIN_DATE,
+            v_END_DATE,
+            v_PEAK_DATE,
+            p_PEAK_VAL
+            );
+    END IF;
+
+ COMMIT;
+
+EXCEPTION
+        WHEN DUP_VAL_ON_INDEX THEN
+            p_STATUS := GA.DUPLICATE_ENTITY;
+        WHEN OTHERS THEN
+            RAISE;
+
+END PUT_ANC_SERVICE_AREA_PEAK;
+----------------------------------------------------
+PROCEDURE DELETE_ANC_SERVICE_AREA_PEAK
+    (
+    p_ANCILLARY_SERVICE_ID IN NUMBER,
+    p_AREA_ID IN NUMBER,
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE IN DATE,
+    p_PEAK_DATE IN DATE,
+    p_PEAK_TIME IN VARCHAR2,
+    p_PEAK_VAL IN NUMBER,
+    p_TIME_ZONE IN VARCHAR,
+    p_STATUS OUT NUMBER
+    )
+    AS
+
+v_END_DATE DATE;
+v_PEAK_DATE DATE;
+
+BEGIN
+
+    p_STATUS := GA.SUCCESS;
+
+    v_PEAK_DATE := DATE_TIME_AS_CUT(TO_CHAR(p_PEAK_DATE,'YYYY-MM-DD'),p_PEAK_TIME,p_TIME_ZONE);
+    --UT.DEBUG_TRACE('DELETE v_PEAK_DATE='||TO_CHAR(v_PEAK_DATE,'YYYY-MM-DD HH24:MI'));
+    --UT.DEBUG_TRACE('DELETE p_PEAK_VAL='||p_PEAK_VAL);
+
+    DELETE ANCILLARY_SERVICE_AREA_PEAK
+    WHERE AREA_ID = p_AREA_ID
+     AND    BEGIN_DATE = p_BEGIN_DATE
+     AND     END_DATE = p_END_DATE
+     AND     PEAK_DATE = v_PEAK_DATE;
+
+    COMMIT;
+
+END DELETE_ANC_SERVICE_AREA_PEAK;
+/****************************************************************************
+*  ALM_IMPACT
+****************************************************************************/
+PROCEDURE ALM_IMPACT
+(
+   p_BEGIN_DATE IN DATE,
+   p_END_DATE   IN DATE,
+   p_STATUS  OUT NUMBER,
+   p_MESSAGE OUT VARCHAR2
+)
+IS
+
+   TYPE t_ALM_DAYS_TBL IS TABLE OF CHAR(1) INDEX BY VARCHAR2(10);
+   v_ALM_DAYS t_ALM_DAYS_TBL;
+
+   FUNCTION IS_ALM_DAY (p_DAY IN DATE) RETURN BOOLEAN
+   IS
+   BEGIN
+      RETURN v_ALM_DAYS.EXISTS(TO_CHAR(p_DAY,'YYYYMMDDHH24'));
+   END IS_ALM_DAY;
+
+BEGIN
+
+    FOR v_DATA IN (SELECT DISTINCT LOAD_DATE FROM CDI_ALM_IMPACT_DETAILS) LOOP
+        v_ALM_DAYS(TO_CHAR(v_DATA.LOAD_DATE,'YYYYMMDDHH24')) := 'Y';
+    END LOOP;
+
+END ALM_IMPACT;
+/*************************************************************************
+*           GET_PLC_TICKETS                                      *
+**************************************************************************/
+PROCEDURE GET_PLC_TICKETS
+(
+   p_BEGIN_DATE IN DATE,
+   p_END_DATE IN DATE,
+   p_TIME_ZONE IN VARCHAR,
+   p_FILTER_TAG IN VARCHAR2,
+   p_FILTER_CUSTOMER IN VARCHAR2,
+   p_CURSOR OUT SYS_REFCURSOR,
+   p_STATUS OUT NUMBER,
+   p_MESSAGE OUT VARCHAR2
+) IS
+
+v_COUNT NUMBER;
+v_BILL_ACCOUNT VARCHAR2(64);
+
+BEGIN
+
+  --ut.debug_trace('p_FILTER_TAG is ' || p_FILTER_TAG);
+  --ut.debug_trace('p_FILTER_CUSTOMER= ' || p_FILTER_CUSTOMER) ;
+
+  IF UPPER(p_FILTER_CUSTOMER) LIKE '%ALL%' THEN
+     v_BILL_ACCOUNT := NULL;
+  ELSE
+     v_BILL_ACCOUNT := p_FILTER_CUSTOMER;
+  END IF;
+
+   --ut.debug_trace('v_BILL_ACCOUNT ' || v_BILL_ACCOUNT) ;
+
+   SELECT COUNT(*)  INTO   v_COUNT
+   FROM   CDI_PLC_TICKETS
+   WHERE  BILL_ACCOUNT  like '%' || TRIM(v_BILL_ACCOUNT)|| '%'
+   AND    TAG_ID =  p_FILTER_TAG
+   AND    ROWNUM < 30000;
+
+
+   IF v_COUNT > 25000 THEN
+      OPEN p_CURSOR FOR
+      SELECT NULL FROM DUAL  WHERE 1=2;
+      p_STATUS := PLOG.c_ERROR;
+      p_MESSAGE :='QUERY WILL RETURN MORE THAN 25000 ROWS, PLEASE USE FILTER TO NARROW THE SELECTION';
+   ELSE
+       OPEN p_CURSOR FOR
+        SELECT
+               TO_CHAR(BILL_ACCOUNT)  BILL_ACCOUNT,
+               TO_CHAR(SERVICE_POINT) SERVICE_POINT,
+               TO_CHAR(PREMISE_NUMBER) PREMISE_NUMBER,
+               TAG_ID,
+               TO_CHAR(BEGIN_DATE,'MM/DD/YYYY') BEGIN_DATE,
+               TO_CHAR(END_DATE,'MM/DD/YYYY') END_DATE,
+               TO_CHAR(TAG_VAL) TAG_VAL
+        FROM   CDI_PLC_TICKETS
+        WHERE  BILL_ACCOUNT  like '%' || TRIM(v_BILL_ACCOUNT)|| '%'
+        AND    TAG_ID =  p_FILTER_TAG;
+
+   END IF;
+
+END GET_PLC_TICKETS ;
+/*----------------------------------------------------------------------------*
+ *  ACCEPT_PLC_TICKETS                                                *
+ *----------------------------------------------------------------------------*/
+PROCEDURE ACCEPT_PLC_TICKETS
+  (
+   p_BEGIN_DATE IN DATE,
+   p_END_DATE IN DATE,
+   p_TIME_ZONE IN VARCHAR,
+   p_FILTER_TAG IN VARCHAR2,
+   p_STATUS OUT NUMBER,
+   p_MESSAGE OUT VARCHAR2
+  )
+ IS
+
+
+v_COUNT      NUMBER;
+
+BEGIN
+
+  INITIALIZE_PLOG(SYSDATE, SYSDATE,'Accept PLC_TICKETS');
+
+  --UT.DEBUG_TRACE('IN CDI_PLC_ICAP_TX: p_FILTER_TAG= '||p_FILTER_TAG);
+
+  CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME =>'Begin Process ', p_MESSAGE_DESCRIPTION => 'Log');
+
+  SELECT COUNT(1) INTO v_COUNT FROM CDI_PLC_TICKETS WHERE TAG_ID = p_FILTER_TAG;
+
+  IF v_COUNT > 0 THEN
+
+    CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Delete '||p_FILTER_TAG || ' from CDI_PLC_ICAP_TX table');
+    CDI_LOG.LOG(p_STATUS);
+    DELETE FROM CDI_PLC_ICAP_TX WHERE TAG_ID = p_FILTER_TAG;
+
+    CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Update '||p_FILTER_TAG || ' CDI_PLC_ICAP_TX table');
+    CDI_LOG.LOG(p_STATUS);
+
+    INSERT INTO CDI_PLC_ICAP_TX
+    (SELECT BILL_ACCOUNT, SERVICE_POINT, PREMISE_NUMBER, TAG_ID, BEGIN_DATE, END_DATE, ROUND(TAG_VAL,6)
+      FROM CDI_PLC_TICKETS
+      WHERE TAG_ID = p_FILTER_TAG
+        AND TAG_VAL IS NOT NULL);
+       -- AND TAG_VAL <> 0);
+
+    COMMIT;
+
+  ELSE
+
+    p_STATUS := PLOG.c_ERROR;
+    p_MESSAGE :='Nothing to accept for '||p_FILTER_TAG;
+    CDI_LOG.SET_ATTRIBUTES(p_SEVERITY_LEVEL      => PLOG.c_SEV_ABORT,
+                             p_MESSAGE             => p_MESSAGE,
+                             p_MESSAGE_DESCRIPTION => p_MESSAGE);
+
+    CDI_LOG.LOG(SQLCODE, p_MESSAGE, TRUE);
+
+  END IF;
+
+  p_MESSAGE := 'End: Accept PLC TICKETS';
+  REPORT_NORMAL_AND_FINISH(p_STATUS, p_MESSAGE);
+
+EXCEPTION
+      WHEN OTHERS THEN
+         p_MESSAGE := ''''||k_PROCESS_NAME||''' terminated with unexpected errors.';
+         p_STATUS  := SQLCODE;
+         REPORT_ERROR_AND_FINISH(p_STATUS, SQLERRM(SQLCODE)||p_MESSAGE);
+
+END ACCEPT_PLC_TICKETS;
+/*----------------------------------------------------------------------------*
+ *  GET_ICAP_BUILDUPS                                                              *
+ *----------------------------------------------------------------------------*/
+PROCEDURE GET_ICAP_BUILDUPS
+    (
+     p_STATUS OUT NUMBER,
+     p_CURSOR IN OUT SYS_REFCURSOR
+    ) AS
+
+BEGIN
+
+
+    p_STATUS := GA.SUCCESS;
+    OPEN p_CURSOR FOR
+        SELECT TO_CHAR(PEAK_DATE,'YYYY-MM-DD HH24:MI') "PEAK_DATE", GROUP_NAME, IDR_STATUS,
+               RATE_CLASS, VOLTAGE_LEVEL, PROFILE_SUM, ALM_VAL, LOSS_FACTOR, USAGE_FACTOR_SUM,
+               DEMAND_SUM, BOTTOM_SUM, PJM_LOAD, SCALING_FACTOR, OBLIGATION_FACTOR
+        FROM CDI_PLC_ICAP_BUILDUPS
+        ORDER BY PEAK_DATE,GROUP_NAME,IDR_STATUS,RATE_CLASS, VOLTAGE_LEVEL;
+
+EXCEPTION
+        WHEN OTHERS THEN
+            p_STATUS := SQLCODE;
+
+END GET_ICAP_BUILDUPS;
+/*----------------------------------------------------------------------------*
+ *  GET_TX_BUILDUPS                                                              *
+ *----------------------------------------------------------------------------*/
+PROCEDURE GET_TX_BUILDUPS
+    (
+     p_STATUS OUT NUMBER,
+     p_CURSOR IN OUT SYS_REFCURSOR
+    ) AS
+
+BEGIN
+
+
+    p_STATUS := GA.SUCCESS;
+    OPEN p_CURSOR FOR
+        SELECT TO_CHAR(PEAK_DATE,'YYYY-MM-DD HH24:MI') "PEAK_DATE", GROUP_NAME, IDR_STATUS,
+               RATE_CLASS, VOLTAGE_LEVEL, PROFILE_SUM, ALM_VAL, AV_LOSS_FACTOR "AVERAGE LOSS FACTOR",
+               PEAK_LOSS_FACTOR "PEAK LOSS FACTOR", USAGE_FACTOR_SUM,
+               DEMAND_SUM, BOTTOM_SUM, ALM_WITH_LOSSES, PJM_LOAD, SCALING_FACTOR, OBLIGATION_FACTOR
+        FROM CDI_PLC_TX_BUILDUPS
+        ORDER BY PEAK_DATE,GROUP_NAME, IDR_STATUS,RATE_CLASS, VOLTAGE_LEVEL;
+
+EXCEPTION
+        WHEN OTHERS THEN
+            p_STATUS := SQLCODE;
+
+END GET_TX_BUILDUPS;
+/*----------------------------------------------------------------------------*
+ *   GET_TOLERANCE_FILTER                                                     *
+ *----------------------------------------------------------------------------*/
+  PROCEDURE  GET_TOLERANCE_FILTER
+(
+   p_CURSOR  OUT SYS_REFCURSOR
+) IS
+  BEGIN
+
+    OPEN p_CURSOR FOR
+      SELECT TO_NUMBER(VALUE) FROM SYSTEM_DICTIONARY
+      WHERE MODULE = 'Scheduling'
+      AND KEY1 = 'Tolerance'
+      ORDER BY 1;
+
+  END GET_TOLERANCE_FILTER;
+/*----------------------------------------------------------------------------*
+ *   GET_RATE_CLASS_FILTER                                                     *
+ *----------------------------------------------------------------------------*/
+  PROCEDURE  GET_RATE_CLASS_FILTER
+(
+  p_ANCILLARY_SERVICE_NAME IN VARCHAR2,
+  p_STATUS OUT NUMBER,
+  p_CURSOR OUT SYS_REFCURSOR
+) IS
+
+BEGIN
+
+  p_STATUS := GA.SUCCESS;
+
+  IF p_ANCILLARY_SERVICE_NAME = 'ICAP' THEN
+     OPEN p_CURSOR FOR
+       SELECT 'ALL' FROM DUAL
+       UNION ALL
+       SELECT DISTINCT RATE_CLASS  FROM  CDI_PLC_ICAP_DETAIL
+       UNION
+         SELECT DISTINCT RATE_CLASS FROM CDI_PLC_ICAP_INT_DETAIL
+       ORDER BY 1;
+  ELSE
+     OPEN p_CURSOR FOR
+       SELECT DISTINCT RATE_CLASS  FROM  CDI_PLC_TX_DETAIL
+       UNION
+         SELECT DISTINCT RATE_CLASS FROM CDI_PLC_TX_INT_DETAIL
+       ORDER BY 1;
+
+
+  END IF;
+
+EXCEPTION
+    WHEN OTHERS THEN
+         p_STATUS := SQLCODE;
+
+END GET_RATE_CLASS_FILTER;
+
+/*----------------------------------------------------------------------------*
+ *   GET_VOLTAGE_FILTER                                                     *
+ *----------------------------------------------------------------------------*/
+  PROCEDURE  GET_VOLTAGE_FILTER
+(
+  p_ANCILLARY_SERVICE_NAME IN VARCHAR2,
+  p_RATE_CLASS IN VARCHAR2,
+  p_STATUS OUT NUMBER,
+  p_CURSOR OUT SYS_REFCURSOR
+) IS
+
+BEGIN
+
+  p_STATUS := GA.SUCCESS;
+
+  IF p_ANCILLARY_SERVICE_NAME = 'ICAP' THEN
+     IF p_RATE_CLASS = 'ALL' THEN
+       OPEN p_CURSOR FOR
+       SELECT 'ALL' FROM DUAL
+       UNION ALL
+       SELECT VOLTAGE_LEVEL FROM
+       (SELECT DISTINCT VOLTAGE_LEVEL  FROM  CDI_PLC_ICAP_DETAIL
+        UNION
+        SELECT DISTINCT VOLTAGE_LEVEL FROM CDI_PLC_ICAP_INT_DETAIL
+        ORDER BY 1);
+
+     ELSE
+       OPEN p_CURSOR FOR
+        SELECT DISTINCT VOLTAGE_LEVEL  FROM  CDI_PLC_ICAP_DETAIL
+         WHERE RATE_CLASS = p_RATE_CLASS
+       UNION
+         SELECT DISTINCT VOLTAGE_LEVEL FROM CDI_PLC_ICAP_INT_DETAIL
+         WHERE RATE_CLASS = p_RATE_CLASS
+       ORDER BY 1;
+
+     END IF;
+  ELSE
+    IF p_RATE_CLASS = 'ALL' THEN
+     OPEN p_CURSOR FOR
+       SELECT 'ALL' FROM DUAL
+       UNION ALL
+       SELECT VOLTAGE_LEVEL FROM
+       (SELECT DISTINCT VOLTAGE_LEVEL  FROM  CDI_PLC_TX_DETAIL
+        UNION
+        SELECT DISTINCT VOLTAGE_LEVEL FROM CDI_PLC_TX_INT_DETAIL
+        ORDER BY 1);
+    ELSE
+     OPEN p_CURSOR FOR
+       SELECT DISTINCT VOLTAGE_LEVEL  FROM  CDI_PLC_TX_DETAIL
+         WHERE RATE_CLASS = p_RATE_CLASS
+       UNION
+         SELECT DISTINCT VOLTAGE_LEVEL FROM CDI_PLC_TX_INT_DETAIL
+         WHERE RATE_CLASS = p_RATE_CLASS
+       ORDER BY 1;
+
+    END IF;
+
+  END IF;
+
+EXCEPTION
+    WHEN OTHERS THEN
+         p_STATUS := SQLCODE;
+
+  END GET_VOLTAGE_FILTER ;
+/*----------------------------------------------------------------------------*
+*   GET_TAG_ID                                                                *
+*-----------------------------------------------------------------------------*/
+PROCEDURE GET_TAG_ID (
+  p_TYPE IN VARCHAR2,
+  p_TAG_ID OUT VARCHAR2,
+  p_STATUS OUT NUMBER,
+  p_MESSAGE OUT VARCHAR2
+  ) IS
+
+v_COUNT NUMBER;
+
+BEGIN
+
+  p_STATUS := 0;
+
+  SELECT COUNT(DISTINCT TAG_ID), MAX(DISTINCT TAG_ID) INTO v_COUNT, p_TAG_ID
+    FROM CDI_PLC_TICKETS
+    WHERE TAG_ID LIKE '%'||p_TYPE;
+
+  IF v_COUNT <> 1 THEN
+
+     p_STATUS := 1;
+     p_MESSAGE := 'Bad TAG_IDs in CDI_PLC_TICKETS table';
+
+  END IF;
+
+END GET_TAG_ID;
+/*----------------------------------------------------------------------------*
+*   CALCULATE_ICAP_STATISTICS                                                 *
+*-----------------------------------------------------------------------------*/
+PROCEDURE CALCULATE_ICAP_STATISTICS
+ (
+   p_TAG_ID IN VARCHAR2,
+   p_RATE_CLASS   IN VARCHAR2,
+   p_VOLTAGE_LEVEL IN VARCHAR2,
+   p_TOLERANCE   IN NUMBER,
+   p_STATUS      OUT NUMBER,
+   p_MESSAGE     OUT VARCHAR2
+ ) IS
+
+ v_COUNT       NUMBER;
+ v_TAG_ID      VARCHAR2(16) := p_TAG_ID;
+ v_AVERAGE     NUMBER;
+ v_MIN         NUMBER;
+ v_MAX         NUMBER;
+ v_DEV         NUMBER;
+ v_COUNT_ABOVE NUMBER;
+
+ BEGIN
+
+  p_STATUS := 0;
+
+  BEGIN
+
+    SELECT  ROUND(MIN(A.TAG_VAL),4),
+           ROUND(MAX(A.TAG_VAL),4),
+           ROUND(AVG(A.TAG_VAL),3),
+           ROUND(STDDEV(A.TAG_VAL),3)
+      INTO v_MIN, v_MAX, v_AVERAGE, v_DEV
+      FROM CDI_PLC_TICKETS A
+      WHERE A.TAG_ID = v_TAG_ID
+      AND A.BILL_ACCOUNT||A.SERVICE_POINT||A.PREMISE_NUMBER
+       IN
+         (SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+            FROM  CDI_PLC_ICAP_DETAIL B
+          WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+            AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL)
+         UNION ALL
+          SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+            FROM  CDI_PLC_ICAP_INT_DETAIL B
+          WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+            AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL))
+     GROUP BY A.TAG_ID, p_RATE_CLASS, p_VOLTAGE_LEVEL;
+  EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+      p_STATUS := 1;
+      RETURN;
+
+  END;
+
+   --- Calculate number of ZEROs
+   SELECT COUNT(1) INTO v_COUNT
+      FROM CDI_PLC_TICKETS A
+      WHERE A.TAG_ID =  v_TAG_ID
+      AND (A.TAG_VAL IS NULL OR A.TAG_VAL = 0)
+      AND A.BILL_ACCOUNT||A.SERVICE_POINT||A.PREMISE_NUMBER
+       IN
+         (SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+            FROM  CDI_PLC_ICAP_DETAIL B
+          WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+            AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL)
+         UNION ALL
+          SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+            FROM  CDI_PLC_ICAP_INT_DETAIL B
+          WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+            AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL));
+
+   ---
+   SELECT COUNT(1) INTO v_COUNT_ABOVE
+      FROM CDI_PLC_TICKETS A
+      WHERE A.TAG_ID =  v_TAG_ID
+      AND (A.TAG_VAL > (v_AVERAGE+p_TOLERANCE*v_DEV) OR
+           A.TAG_VAL < (v_AVERAGE-p_TOLERANCE*v_DEV))
+      AND A.BILL_ACCOUNT||A.SERVICE_POINT||A.PREMISE_NUMBER
+       IN
+         (SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+            FROM  CDI_PLC_ICAP_DETAIL B
+          WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+            AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL)
+         UNION ALL
+          SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+            FROM  CDI_PLC_ICAP_INT_DETAIL B
+          WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+            AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL));
+
+    INSERT INTO CDI_PLC_STATISTICS VALUES
+      (v_TAG_ID, NULL, p_RATE_CLASS, p_VOLTAGE_LEVEL,
+          v_MIN, v_MAX, v_AVERAGE, v_DEV, v_COUNT, v_COUNT_ABOVE);
+
+    COMMIT;
+
+END CALCULATE_ICAP_STATISTICS;
+/*----------------------------------------------------------------------------*
+*   CALCULATE_TX_STATISTICS                                                    *
+*-----------------------------------------------------------------------------*/
+PROCEDURE CALCULATE_TX_STATISTICS
+ (
+   p_TAG_ID IN VARCHAR2,
+   p_RATE_CLASS   IN VARCHAR2,
+   p_VOLTAGE_LEVEL IN VARCHAR2,
+   p_TOLERANCE   IN NUMBER,
+   p_STATUS      OUT NUMBER,
+   p_MESSAGE     OUT VARCHAR2
+ ) IS
+
+ v_COUNT       NUMBER;
+ v_TAG_ID      VARCHAR2(16) := p_TAG_ID;
+ v_AVERAGE     NUMBER;
+ v_MIN         NUMBER;
+ v_MAX         NUMBER;
+ v_DEV         NUMBER;
+ v_COUNT_ABOVE NUMBER;
+
+ BEGIN
+
+  BEGIN
+   SELECT    ROUND(MIN(A.TAG_VAL),4),
+             ROUND(MAX(A.TAG_VAL),4),
+             ROUND(AVG(A.TAG_VAL),3),
+             ROUND(STDDEV(A.TAG_VAL),3)
+      INTO v_MIN, v_MAX, v_AVERAGE, v_DEV
+      FROM CDI_PLC_TICKETS A
+      WHERE A.TAG_ID = v_TAG_ID
+      AND A.BILL_ACCOUNT||A.SERVICE_POINT||A.PREMISE_NUMBER
+       IN
+         (SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+            FROM  CDI_PLC_TX_DETAIL B
+          WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+            AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL)
+         UNION ALL
+          SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+            FROM  CDI_PLC_TX_INT_DETAIL B
+          WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+            AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL))
+     GROUP BY A.TAG_ID, p_RATE_CLASS, p_VOLTAGE_LEVEL;
+
+  EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+      p_STATUS := 1;
+      RETURN;
+  END;
+     ---
+     SELECT COUNT(1) INTO v_COUNT
+      FROM CDI_PLC_TICKETS A
+      WHERE A.TAG_ID =  v_TAG_ID
+      AND (A.TAG_VAL IS NULL OR A.TAG_VAL = 0)
+      AND A.BILL_ACCOUNT||A.SERVICE_POINT||A.PREMISE_NUMBER
+       IN
+         (SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+            FROM  CDI_PLC_TX_DETAIL B
+          WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+            AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL)
+         UNION ALL
+          SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+            FROM  CDI_PLC_TX_INT_DETAIL B
+          WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+            AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL));
+
+     ---
+      SELECT COUNT(1) INTO v_COUNT_ABOVE
+      FROM CDI_PLC_TICKETS A
+      WHERE A.TAG_ID =  v_TAG_ID
+      AND (A.TAG_VAL > (v_AVERAGE+p_TOLERANCE*v_DEV) OR
+           A.TAG_VAL < (v_AVERAGE-p_TOLERANCE*v_DEV))
+      AND A.BILL_ACCOUNT||A.SERVICE_POINT||A.PREMISE_NUMBER
+       IN
+         (SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+            FROM  CDI_PLC_TX_DETAIL B
+          WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+            AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL)
+         UNION ALL
+          SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+            FROM  CDI_PLC_TX_INT_DETAIL B
+          WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+            AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL));
+
+    INSERT INTO CDI_PLC_STATISTICS VALUES
+      (v_TAG_ID, NULL, p_RATE_CLASS, p_VOLTAGE_LEVEL,
+          v_MIN, v_MAX, v_AVERAGE, v_DEV, v_COUNT, v_COUNT_ABOVE);
+
+    COMMIT;
+
+
+END CALCULATE_TX_STATISTICS;
+/*----------------------------------------------------------------------------*
+*   ICAP_STATISTICS_DETAIL                                                    *
+*-----------------------------------------------------------------------------*/
+ PROCEDURE  PLC_STATISTICS_DETAIL
+ (
+   p_ANCILLARY_SERVICE_NAME IN VARCHAR2,
+   p_RATE_CLASS   IN VARCHAR2,
+   p_VOLTAGE_LEVEL IN VARCHAR2,
+   p_TOLERANCE IN NUMBER,
+   p_STATUS      OUT NUMBER,
+   p_MESSAGE     OUT VARCHAR2,
+   p_CURSOR      OUT SYS_REFCURSOR
+ ) IS
+
+v_TAG_ID VARCHAR2(16);
+v_AVERAGE     NUMBER;
+v_DEV         NUMBER;
+
+ BEGIN
+
+--  UT.DEBUG_TRACE(' p_ANCILLARY_SERVICE_NAME= '||p_ANCILLARY_SERVICE_NAME);
+--  UT.DEBUG_TRACE(' p_RATE_CLASS= '||p_RATE_CLASS);
+--  UT.DEBUG_TRACE(' p_VOLTAGE_LEVEL= '||p_VOLTAGE_LEVEL);
+
+  SELECT AVERAGE, DEVIATION INTO v_AVERAGE, v_DEV
+  FROM CDI_PLC_STATISTICS
+  WHERE ROWNUM = 1;
+
+  IF p_ANCILLARY_SERVICE_NAME = 'ICAP' THEN
+
+     GET_TAG_ID ('C', v_TAG_ID, p_STATUS, p_MESSAGE);
+
+     OPEN p_CURSOR FOR
+        SELECT TO_CHAR(BILL_ACCOUNT) BILL_ACCOUNT, TO_CHAR(SERVICE_POINT) SERVICE_POINT,
+               TO_CHAR(PREMISE_NUMBER) PREMISE_NUMBER,
+               TAG_ID, BEGIN_DATE, END_DATE, TAG_VAL
+          FROM CDI_PLC_TICKETS A
+          WHERE A.TAG_ID =  v_TAG_ID
+          AND A.BILL_ACCOUNT||A.SERVICE_POINT||A.PREMISE_NUMBER
+           IN
+             (SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+                FROM  CDI_PLC_ICAP_DETAIL B
+              WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+                AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL)
+             UNION ALL
+              SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+                FROM  CDI_PLC_ICAP_INT_DETAIL B
+              WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+                AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL))
+          AND (A.TAG_VAL > (v_AVERAGE+p_TOLERANCE*v_DEV) OR
+               A.TAG_VAL < (v_AVERAGE-p_TOLERANCE*v_DEV))
+       ORDER BY TAG_VAL DESC;
+
+  ELSE
+
+      GET_TAG_ID ('T', v_TAG_ID, p_STATUS, p_MESSAGE);
+
+      OPEN p_CURSOR FOR
+        SELECT TO_CHAR(BILL_ACCOUNT) BILL_ACCOUNT, TO_CHAR(SERVICE_POINT) SERVICE_POINT, TO_CHAR(PREMISE_NUMBER) PREMISE_NUMBER,
+               TAG_ID, BEGIN_DATE, END_DATE, TAG_VAL
+          FROM CDI_PLC_TICKETS A
+          WHERE A.TAG_ID =  v_TAG_ID
+          AND A.BILL_ACCOUNT||A.SERVICE_POINT||A.PREMISE_NUMBER
+           IN
+             (SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+                FROM  CDI_PLC_TX_DETAIL B
+              WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+                AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL)
+             UNION ALL
+              SELECT DISTINCT B.BILL_ACCOUNT||B.SERVICE_POINT||B.PREMISE_NUMBER
+                FROM  CDI_PLC_TX_INT_DETAIL B
+              WHERE B.RATE_CLASS LIKE DECODE(p_RATE_CLASS, 'ALL', '%' , p_RATE_CLASS)
+                AND B.VOLTAGE_LEVEL LIKE DECODE(p_VOLTAGE_LEVEL, 'ALL', '%' , p_VOLTAGE_LEVEL))
+                AND (A.TAG_VAL > (v_AVERAGE+p_TOLERANCE*v_DEV) OR
+                     A.TAG_VAL < (v_AVERAGE-p_TOLERANCE*v_DEV))
+          ORDER BY TAG_VAL DESC;
+
+  END IF;
+
+EXCEPTION
+    WHEN OTHERS THEN
+      p_STATUS := SQLCODE;
+      p_MESSAGE := 'No Data available for this selection';
+      OPEN p_CURSOR FOR SELECT NULL FROM DUAL WHERE 1 = 0;
+
+
+END PLC_STATISTICS_DETAIL;
+/*----------------------------------------------------------------------------*
+*   PLC_STATISTICS_REPORT                                                     *
+*-----------------------------------------------------------------------------*/
+ PROCEDURE  PLC_STATISTICS
+ (
+   p_ANCILLARY_SERVICE_NAME IN VARCHAR2,
+   p_RATE_CLASS   IN VARCHAR2,
+   p_VOLTAGE_LEVEL IN VARCHAR2,
+   p_TOLERANCE    IN NUMBER,
+   p_STATUS      OUT NUMBER,
+   p_MESSAGE     OUT VARCHAR2,
+   p_CURSOR      OUT SYS_REFCURSOR
+ ) IS
+
+ v_COUNT       NUMBER;
+ v_TAG_ID      VARCHAR2(16);
+
+ BEGIN
+
+   EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_STATISTICS';
+
+--   UT.DEBUG_TRACE(' p_ANCILLARY_SERVICE_NAME= '||p_ANCILLARY_SERVICE_NAME);
+--   UT.DEBUG_TRACE(' p_RATE_CLASS= '||p_RATE_CLASS);
+--   UT.DEBUG_TRACE(' p_VOLTAGE_LEVEL= '||p_VOLTAGE_LEVEL);
+--   UT.DEBUG_TRACE(' p_TOLERANCE= '||p_TOLERANCE);
+
+   IF p_ANCILLARY_SERVICE_NAME = 'ICAP' THEN
+
+     GET_TAG_ID ('C', v_TAG_ID, p_STATUS, p_MESSAGE);
+
+     IF p_STATUS = 0 THEN
+
+        CALCULATE_ICAP_STATISTICS(v_TAG_ID, p_RATE_CLASS,p_VOLTAGE_LEVEL,
+                                         p_TOLERANCE, p_STATUS,p_MESSAGE);
+     END IF;
+
+   ELSE
+
+     GET_TAG_ID ('T', v_TAG_ID, p_STATUS, p_MESSAGE);
+
+     IF p_STATUS = 0 THEN
+        CALCULATE_TX_STATISTICS (v_TAG_ID, p_RATE_CLASS,p_VOLTAGE_LEVEL,
+                                 p_TOLERANCE, p_STATUS,  p_MESSAGE);
+     END IF;
+
+   END IF;
+
+   COMMIT;
+
+   SELECT COUNT(1) INTO v_COUNT FROM CDI_PLC_STATISTICS;
+   IF v_COUNT = 0 THEN
+      p_STATUS := 1;
+      p_MESSAGE := 'No Data available for this selection';
+      OPEN p_CURSOR FOR SELECT NULL FROM DUAL WHERE 1 = 0;
+      RETURN;
+   END IF;
+
+   OPEN p_CURSOR FOR
+     SELECT * FROM CDI_PLC_STATISTICS
+     ORDER BY 1,2;
+
+ END PLC_STATISTICS;
+------------------------------------------------------------------------------
+PROCEDURE IMPORT_ALMBACKS_CLOB
+ (
+    p_LOB_ID IN NUMBER,
+    p_RECORD_DELIMITER IN CHAR,
+    p_FILE_PATH        IN VARCHAR,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR
+ ) AS
+
+ v_CLOB CLOB;
+ i NUMBER;
+ v_FILE_BODY  FILE_BODY_TABLE;
+ v_NEXTVALSEQ      NUMBER;
+
+ v_PID                  NUMBER;
+
+ v_FIELD_TABLE          GA.BIG_STRING_TABLE;
+ v_FILE_COUNT           NUMBER;
+ v_CURRENT_LINE         NUMBER;
+ v_CI_REF               CDI_PLC_ALMBACKS%ROWTYPE;
+
+ g_SOURCE               VARCHAR2(256);
+
+BEGIN
+
+   p_STATUS    := Ga.SUCCESS;
+   INITIALIZE_PLOG(SYSDATE, SYSDATE,'Import ALMBACKS File');
+
+   EXECUTE IMMEDIATE 'TRUNCATE TABLE CDI_PLC_ALMBACKS';
+  --UT.DEBUG_TRACE('IN CDI_PLC_ICAP_TX: p_FILTER_TAG= '||p_FILTER_TAG);
+
+   CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME =>'Begin Process ', p_MESSAGE_DESCRIPTION => 'Log');
+
+   SP.GET_DATA_IMPORT_CLOB(p_LOB_ID,v_CLOB);
+
+   CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'GET BIG STRING');
+   CDI_LOG.LOG(p_STATUS);
+
+   RO_FILE.READ_CLOB( v_CLOB, UTL_TCP.crlf,v_FILE_BODY ) ;
+   v_FILE_COUNT:=v_FILE_BODY.COUNT();
+
+   CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Store the Data in CDI_PLC_ALMBACKS');
+   CDI_LOG.LOG(p_STATUS);
+
+   v_CURRENT_LINE:= 0;
+   FOR II IN 1..v_FILE_COUNT LOOP
+
+        v_CURRENT_LINE:=v_CURRENT_LINE+1;
+        g_SOURCE    := v_FILE_BODY(II);
+        IF RTRIM(g_SOURCE,',') IS NULL THEN
+           CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Bad data - Line Does Not Contain enough Data in line '||v_current_line);
+           REPORT_ERROR_AND_FINISH(p_STATUS, p_MESSAGE);
+        ELSE
+          UT.TOKENS_FROM_BIG_STRING(v_FILE_BODY(II),',', v_FIELD_TABLE);
+          IF NOT v_FIELD_TABLE.COUNT = 28 THEN
+             CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Bad data - Please fix the FILE AND IMPORT again');
+             REPORT_ERROR_AND_FINISH(p_STATUS, p_MESSAGE);
+          ELSE
+
+             v_CI_REF.BILL_ACCOUNT     := trim(v_FIELD_TABLE(1));
+             v_CI_REF.SERVICE_POINT    := trim(v_FIELD_TABLE(2));
+             v_CI_REF.PREMISE_NUMBER   := trim(v_FIELD_TABLE(3));
+             v_CI_REF.ADD_DATE      := TO_DATE(trim(v_FIELD_TABLE(4)),'MM/DD/YYYY');
+             v_CI_REF.HOUR_1   := trim(v_FIELD_TABLE(5));
+             v_CI_REF.HOUR_2   := trim(v_FIELD_TABLE(6));
+             v_CI_REF.HOUR_3   := trim(v_FIELD_TABLE(7));
+             v_CI_REF.HOUR_4   := trim(v_FIELD_TABLE(8));
+             v_CI_REF.HOUR_5   := trim(v_FIELD_TABLE(9));
+             v_CI_REF.HOUR_6   := trim(v_FIELD_TABLE(10));
+             v_CI_REF.HOUR_7   := trim(v_FIELD_TABLE(11));
+             v_CI_REF.HOUR_8   := trim(v_FIELD_TABLE(12));
+             v_CI_REF.HOUR_9   := trim(v_FIELD_TABLE(13));
+             v_CI_REF.HOUR_10  := trim(v_FIELD_TABLE(14));
+             v_CI_REF.HOUR_11  := trim(v_FIELD_TABLE(15));
+             v_CI_REF.HOUR_12  := trim(v_FIELD_TABLE(16));
+             v_CI_REF.HOUR_13  := trim(v_FIELD_TABLE(17));
+             v_CI_REF.HOUR_14  := trim(v_FIELD_TABLE(18));
+             v_CI_REF.HOUR_15  := trim(v_FIELD_TABLE(19));
+             v_CI_REF.HOUR_16  := trim(v_FIELD_TABLE(20));
+             v_CI_REF.HOUR_17  := trim(v_FIELD_TABLE(21));
+             v_CI_REF.HOUR_18  := trim(v_FIELD_TABLE(22));
+             v_CI_REF.HOUR_19  := trim(v_FIELD_TABLE(23));
+             v_CI_REF.HOUR_20  := trim(v_FIELD_TABLE(24));
+             v_CI_REF.HOUR_21  := trim(v_FIELD_TABLE(25));
+             v_CI_REF.HOUR_22  := trim(v_FIELD_TABLE(26));
+             v_CI_REF.HOUR_23  := trim(v_FIELD_TABLE(27));
+             v_CI_REF.HOUR_24  := trim(v_FIELD_TABLE(28));
+
+
+             INSERT INTO CDI_PLC_ALMBACKS (
+                   BILL_ACCOUNT,
+                   SERVICE_POINT,
+                   PREMISE_NUMBER,
+                   ADD_DATE,
+                   HOUR_1,
+                   HOUR_2,
+                   HOUR_3,
+                   HOUR_4,
+                   HOUR_5,
+                   HOUR_6,
+                   HOUR_7,
+                   HOUR_8,
+                   HOUR_9,
+                   HOUR_10,
+                   HOUR_11,
+                   HOUR_12,
+                   HOUR_13,
+                   HOUR_14,
+                   HOUR_15,
+                   HOUR_16,
+                   HOUR_17,
+                   HOUR_18,
+                   HOUR_19,
+                   HOUR_20,
+                   HOUR_21,
+                   HOUR_22,
+                   HOUR_23,
+                   HOUR_24)
+             VALUES
+                   (
+                   v_CI_REF.BILL_ACCOUNT,
+                   v_CI_REF.SERVICE_POINT,
+                   v_CI_REF.PREMISE_NUMBER,
+                   v_CI_REF.ADD_DATE,
+                   v_CI_REF.HOUR_1,
+                   v_CI_REF.HOUR_2,
+                   v_CI_REF.HOUR_3,
+                   v_CI_REF.HOUR_4,
+                   v_CI_REF.HOUR_5,
+                   v_CI_REF.HOUR_6,
+                   v_CI_REF.HOUR_7,
+                   v_CI_REF.HOUR_8,
+                   v_CI_REF.HOUR_9,
+                   v_CI_REF.HOUR_10,
+                   v_CI_REF.HOUR_11,
+                   v_CI_REF.HOUR_12,
+                   v_CI_REF.HOUR_13,
+                   v_CI_REF.HOUR_14,
+                   v_CI_REF.HOUR_15,
+                   v_CI_REF.HOUR_16,
+                   v_CI_REF.HOUR_17,
+                   v_CI_REF.HOUR_18,
+                   v_CI_REF.HOUR_19,
+                   v_CI_REF.HOUR_20,
+                   v_CI_REF.HOUR_21,
+                   v_CI_REF.HOUR_22,
+                   v_CI_REF.HOUR_23,
+                   v_CI_REF.HOUR_24
+                  );
+          END IF;  --NOT v_FIELD_TABLE.COUNT BETWEEN 14 AND 15
+        END IF;  --RTRIM(g_source,',') IS NULL
+
+   END LOOP; -- FOR x IN 1..i LOOP
+
+
+   CDI_LOG.SET_ATTRIBUTES(p_STEP_NAME => 'Import finished');
+   CDI_LOG.LOG(p_STATUS);
+
+   COMMIT;
+   p_MESSAGE := 'Import finished';
+   REPORT_NORMAL_AND_FINISH(p_STATUS, p_MESSAGE);
+
+EXCEPTION
+    WHEN OTHERS THEN
+         p_MESSAGE :=  SQLERRM(SQLCODE);
+         REPORT_ERROR_AND_FINISH(p_STATUS, p_MESSAGE);
+
+
+END IMPORT_ALMBACKS_CLOB;
+---------------------------------------------------------------------------------
+/*************************************************************************
+*           GET_PLC_TICKETS                                      *
+**************************************************************************/
+PROCEDURE GET_ALM_ADDBACKS
+(
+   p_BEGIN_DATE IN DATE,
+   p_END_DATE IN DATE,
+   p_TIME_ZONE IN VARCHAR,
+   p_CURSOR OUT SYS_REFCURSOR,
+   p_STATUS OUT NUMBER,
+   p_MESSAGE OUT VARCHAR2
+) IS
+
+v_COUNT NUMBER;
+
+BEGIN
+
+
+   SELECT COUNT(*)  INTO   v_COUNT
+   FROM   CDI_PLC_ALMBACKS;
+
+   OPEN p_CURSOR FOR
+        SELECT
+               TO_CHAR(BILL_ACCOUNT)  BILL_ACCOUNT,
+               TO_CHAR(SERVICE_POINT) SERVICE_POINT,
+               TO_CHAR(PREMISE_NUMBER) PREMISE_NUMBER,
+               TO_CHAR(ADD_DATE, 'MM/DD/YYYY') ADD_DATE,
+               TO_CHAR(HOUR_1) HOUR1,TO_CHAR(HOUR_2) HOUR2,TO_CHAR(HOUR_3) HOUR3, TO_CHAR(HOUR_4) HOUR4,
+               TO_CHAR(HOUR_5) HOUR5,TO_CHAR(HOUR_6) HOUR6,TO_CHAR(HOUR_7) HOUR7, TO_CHAR(HOUR_8) HOUR8,
+               TO_CHAR(HOUR_9) HOUR9,TO_CHAR(HOUR_10) HOUR10,TO_CHAR(HOUR_11) HOUR11, TO_CHAR(HOUR_12) HOUR12,
+               TO_CHAR(HOUR_13) HOUR13,TO_CHAR(HOUR_14) HOUR14,TO_CHAR(HOUR_15) HOUR15, TO_CHAR(HOUR_16) HOUR16,
+               TO_CHAR(HOUR_17) HOUR17,TO_CHAR(HOUR_18) HOUR18,TO_CHAR(HOUR_19) HOUR19, TO_CHAR(HOUR_20) HOUR20,
+               TO_CHAR(HOUR_21) HOUR21,TO_CHAR(HOUR_22) HOUR22,TO_CHAR(HOUR_23) HOUR23, TO_CHAR(HOUR_24) HOUR24
+        FROM   CDI_PLC_ALMBACKS
+        ORDER BY 1,2,3,4;
+
+END GET_ALM_ADDBACKS;
+-------------------------------------------------------------------------------
+END CDI_COMPUTE_ANNUAL_PLC
+;
+/
+

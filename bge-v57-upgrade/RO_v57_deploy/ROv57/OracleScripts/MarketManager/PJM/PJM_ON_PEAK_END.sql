@@ -1,0 +1,9 @@
+BEGIN
+
+	UPDATE SYSTEM_DICTIONARY
+	SET VALUE = 23
+	WHERE MODULE = 'On_Peak'
+	and SETTING_NAME = 'End_Hour';
+
+END;
+/

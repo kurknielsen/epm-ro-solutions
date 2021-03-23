@@ -1,0 +1,1299 @@
+CREATE OR REPLACE PACKAGE BODY MM_PJM_EMTR IS
+
+    -- Author  : Josh Humphries
+    -- Created : 1/6/2005
+    -- Purpose :
+
+g_DEBUG_EXCHANGES CONSTANT VARCHAR2(8) := 'FALSE';
+
+g_CREATE_AREA_IF_NOT_FOUND CONSTANT BOOLEAN := TRUE;
+g_CREATE_METER_IF_NOT_FOUND CONSTANT BOOLEAN := TRUE;
+
+g_INADVERTENT_CONTROL_AREA VARCHAR2(32); -- initialized below
+g_INADVERTENT_OWNER VARCHAR2(32);
+
+--g_EMTR_ACCESS_ATTR ENTITY_ATTRIBUTE.ATTRIBUTE_ID%TYPE;
+g_DST_SPRING_AHEAD_OPTION CONSTANT CHAR := 'B';
+
+-- The type of external identifier used to look up PSEs using meter owner names that are
+-- in XML
+g_IDENT_TYPE_FOR_METER_OWNER CONSTANT EXTERNAL_SYSTEM_IDENTIFIER.IDENTIFIER_TYPE%TYPE := 'Long Name';
+g_LOW_DATE CONSTANT DATE := LOW_DATE;
+g_HIGH_DATE CONSTANT DATE := HIGH_DATE;
+----------------------------------------------------------------------------------------------------
+FUNCTION WHAT_VERSION RETURN VARCHAR2 IS
+BEGIN
+    RETURN '$Revision: 1.1 $';
+END WHAT_VERSION;
+---------------------------------------------------------------------------------------------------
+FUNCTION DUPLICATE_DATE(p_DATE IN DATE, p_ISDUPLICATE IN VARCHAR2)
+    RETURN DATE IS
+    v_CUT_DATE DATE;
+BEGIN
+    v_CUT_DATE := p_DATE + CASE UPPER(p_ISDUPLICATE) WHEN 'TRUE' THEN 1/86400 ELSE 0 END;
+    RETURN v_CUT_DATE;
+END DUPLICATE_DATE;
+-----------------------------------------------------------------------------------------------------
+FUNCTION GET_TXN_ID
+    (
+    p_EXT_ID IN VARCHAR2,
+    p_CONTRACT_ID IN NUMBER,
+    p_TXN_TYPE IN VARCHAR2
+    ) RETURN NUMBER IS
+v_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+BEGIN
+    SELECT TRANSACTION_ID
+    INTO v_ID
+    FROM INTERCHANGE_TRANSACTION
+    WHERE TRANSACTION_IDENTIFIER = p_EXT_ID
+    AND CONTRACT_ID = p_CONTRACT_ID
+    AND TRANSACTION_TYPE = p_TXN_TYPE;
+
+	RETURN v_ID;
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN v_ID;
+END GET_TXN_ID;
+-----------------------------------------------------------------------------------------------------
+PROCEDURE POST_METERS_TO_TXNS
+	(
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR2,
+	p_ISO_ACCOUNT IN VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_BEGIN_DATE DATE;
+v_END_DATE DATE;
+v_ATTRIBUTE_ID TEMPORAL_ENTITY_ATTRIBUTE.ATTRIBUTE_ID%TYPE;
+v_RT_COMMODITY IT_COMMODITY.COMMODITY_ID%TYPE;
+v_PJM_SC_ID SC.SC_ID%TYPE;
+v_CONTRACT_ID INTERCHANGE_CONTRACT.CONTRACT_ID%TYPE;
+v_METER_VAL TX_SUB_STATION_METER_PT_VALUE.METER_VAL%TYPE;
+v_METER_NAME_ATTR TEMPORAL_ENTITY_ATTRIBUTE.ATTRIBUTE_ID%TYPE;
+v_UPDATE_SCHED BOOLEAN;
+v_METER_NAME TX_SUB_STATION_METER.METER_NAME%TYPE;
+
+  CURSOR c_METERS IS
+     SELECT
+           IT.TRANSACTION_ID "TXN_ID",
+					 IT.TRANSACTION_TYPE "TYPE",
+           V.METER_DATE,
+           M.METER_NAME,
+           SUM(V.METER_VAL) AMT  -- -SUM(V.METER_VAL) AMT
+      FROM INTERCHANGE_TRANSACTION IT,
+	  		TEMPORAL_ENTITY_ATTRIBUTE T,
+			INTERCHANGE_CONTRACT IC,
+			PJM_SERVICE_POINT_OWNERSHIP PJMO,
+	  		TX_SUB_STATION_METER M,
+			TX_SUB_STATION_METER_OWNER MO,
+			TX_SUB_STATION_METER_POINT MP,
+			TX_SUB_STATION_METER_PT_SOURCE MPS,
+			TX_SUB_STATION_METER_PT_VALUE V
+     WHERE IT.COMMODITY_ID = v_RT_COMMODITY
+            AND IT.SC_ID = v_PJM_SC_ID
+            AND IT.CONTRACT_ID = v_CONTRACT_ID
+            AND IT.TRANSACTION_TYPE IN ('Generation', 'Load')
+            AND IT.END_DATE >= p_BEGIN_DATE
+            AND T.ATTRIBUTE_ID = v_ATTRIBUTE_ID
+            AND T.OWNER_ENTITY_ID = IT.TRANSACTION_ID
+            AND T.ATTRIBUTE_VAL = 1  --Transaction is a Metered transaction
+            AND IC.CONTRACT_ID = IT.CONTRACT_ID
+            AND PJMO.SERVICE_POINT_ID(+) = IT.POD_ID
+            AND PJMO.CONTRACT_ID(+) = IT.CONTRACT_ID
+			-- now get matching meters
+			AND MP.SUB_STATION_METER_ID = M.METER_ID
+			AND M.SERVICE_POINT_ID = CASE MP.OPERATION_CODE
+										WHEN 'A' THEN IT.POD_ID
+										WHEN 'S' THEN IT.POR_ID
+										ELSE NULL
+										END
+			AND MO.METER_ID = M.METER_ID
+			AND MO.BEGIN_DATE <= p_BEGIN_DATE
+			AND NVL(MO.END_DATE,CONSTANTS.HIGH_DATE) >= p_BEGIN_DATE
+            AND TRUNC(FROM_CUT(V.METER_DATE, 'EDT')- 1/86400) BETWEEN NVL(PJMO.BEGIN_DATE, g_LOW_DATE) AND NVL(PJMO.END_DATE, g_HIGH_DATE)
+			-- if this is shared unit, only get the meters that belong to current contract
+			AND MO.OWNER_ID = CASE WHEN NVL(PJMO.OWNERSHIP_PERCENT,100) < 100 THEN IC.BILLING_ENTITY_ID ELSE OWNER_ID END
+			-- get primary measurement source
+			AND MPS.METER_POINT_ID = MP.METER_POINT_ID
+			AND MPS.BEGIN_DATE <= p_BEGIN_DATE
+			AND NVL(MPS.END_DATE,CONSTANTS.HIGH_DATE) >= p_BEGIN_DATE
+			AND MPS.IS_PRIMARY = 1
+			-- now get interval data
+			AND V.METER_POINT_ID = MP.METER_POINT_ID
+			AND V.MEASUREMENT_SOURCE_ID = MPS.MEASUREMENT_SOURCE_ID
+			AND V.METER_CODE = CONSTANTS.CODE_ACTUAL
+			AND V.METER_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+     GROUP BY IT.TRANSACTION_ID, IT.TRANSACTION_TYPE, V.METER_DATE, M.METER_NAME
+     ORDER BY IT.TRANSACTION_ID;
+
+  BEGIN
+  	p_STATUS := GA.SUCCESS;
+		ID.ID_FOR_ENTITY_ATTRIBUTE('Metered_Transaction', 'TRANSACTION', 'Boolean', TRUE, v_ATTRIBUTE_ID);
+        ID.ID_FOR_ENTITY_ATTRIBUTE('Meter_Name', 'TRANSACTION', 'String', TRUE, V_meter_name_attr);
+		ID.ID_FOR_COMMODITY('RealTime Energy', FALSE, v_RT_COMMODITY);
+    ID.ID_FOR_SC('PJM', FALSE, v_PJM_SC_ID);
+		v_CONTRACT_ID := MM_PJM_UTIL.GET_CONTRACT_ID_FOR_ISO_ACCT(p_ISO_ACCOUNT);
+
+  	UT.CUT_DATE_RANGE(GA.ELECTRIC_MODEL, p_BEGIN_DATE, p_END_DATE, NVL(p_TIME_ZONE, 'EST'), v_BEGIN_DATE, v_END_DATE);
+
+  	FOR v_METER IN c_METERS LOOP
+
+    	IF v_METER.TYPE = 'Generation' then
+    		v_METER_VAL := -v_METER.AMT;
+    	ELSE
+    		v_METER_VAL := v_METER.AMT;
+    	END IF;
+
+        v_METER_NAME := NULL;
+        v_UPDATE_SCHED := TRUE;
+
+        BEGIN
+            SELECT T.ATTRIBUTE_VAL INTO v_METER_NAME
+            FROM TEMPORAL_ENTITY_ATTRIBUTE T
+            WHERE T.OWNER_ENTITY_ID = v_METER.Txn_Id
+            AND T.ATTRIBUTE_ID = v_METER_NAME_ATTR;
+        EXCEPTION WHEN NO_DATA_FOUND THEN
+            v_UPDATE_SCHED := TRUE;
+        END;
+
+        IF v_METER_NAME IS NOT NULL THEN
+            IF v_METER_NAME = v_METER.Meter_Name THEN
+                v_UPDATE_SCHED := TRUE;
+            ELSE
+                v_UPDATE_SCHED := FALSE;
+            END IF;
+        END IF;
+
+        IF v_UPDATE_SCHED = TRUE THEN
+
+            ITJ.PUT_IT_SCHEDULE(p_TRANSACTION_ID =>  v_METER.TXN_ID,
+                             p_SCHEDULE_TYPE => 1,
+                             p_SCHEDULE_STATE => GA.INTERNAL_STATE,
+                             p_SCHEDULE_DATE => v_METER.METER_DATE,
+                             p_AS_OF_DATE => LOW_DATE,
+                             p_AMOUNT => v_METER_VAL,--v_METER.AMT,
+                             p_PRICE => NULL,
+                             p_STATUS => p_STATUS);
+        END IF;
+
+
+
+  	END LOOP;
+
+EXCEPTION
+	WHEN OTHERS THEN
+	  p_STATUS := SQLCODE;
+		p_MESSAGE := 'Error in MM_PJM_EFTR.POST_METERS_TO_TXNS: ' || UT.GET_FULL_ERRM;
+END POST_METERS_TO_TXNS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_METER_SVC_PT_MAPPING
+	(
+	p_METER_ID IN NUMBER,
+	p_SERVICE_POINT_ID IN NUMBER,
+	p_STATUS OUT NUMBER
+	) AS
+BEGIN
+	p_STATUS := GA.SUCCESS;
+	-- update the meter with the service point
+	UPDATE TX_SUB_STATION_METER SET SERVICE_POINT_ID = p_SERVICE_POINT_ID
+	WHERE METER_ID = p_METER_ID;
+END PUT_METER_SVC_PT_MAPPING;
+-------------------------------------------------------------------------------------
+PROCEDURE METER_SVC_PT_MAPPING_RPT(p_STATUS        OUT NUMBER,
+                                   p_CURSOR        IN OUT REF_CURSOR) AS
+BEGIN
+	p_STATUS := GA.SUCCESS;
+    OPEN p_CURSOR FOR
+        SELECT X.EXTERNAL_IDENTIFIER,
+				T.METER_ID,
+				T.METER_NAME,
+				P.SERVICE_POINT_ID,
+				P.SERVICE_POINT_NAME as SVC_PT_NAME
+          FROM TX_SUB_STATION_METER T, SERVICE_POINT P, EXTERNAL_SYSTEM_IDENTIFIER X
+         WHERE P.SERVICE_POINT_ID = NVL(T.SERVICE_POINT_ID,0)
+		 	AND X.EXTERNAL_SYSTEM_ID = EC.ES_PJM
+			AND X.ENTITY_DOMAIN_ID = EC.ED_SUB_STATION_METER
+			AND X.ENTITY_ID = T.METER_ID
+			AND X.IDENTIFIER_TYPE = EI.g_DEFAULT_IDENTIFIER_TYPE
+         ORDER BY SVC_PT_NAME, EXTERNAL_IDENTIFIER, METER_NAME;
+EXCEPTION WHEN OTHERS THEN
+	p_STATUS := SQLCODE;
+	OPEN p_CURSOR FOR SELECT NULL FROM DUAL;
+END METER_SVC_PT_MAPPING_RPT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE UNUSED_IMPORT_LOAD
+	(
+    p_XML IN CLOB,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2
+    ) AS
+v_BEGIN_DATE DATE;
+v_END_DATE DATE;
+v_REC_COUNT NUMBER := 0;
+v_XML XMLTYPE;
+CURSOR c_SYSTEM_LOAD IS
+	SELECT EXTRACTVALUE(VALUE(T), '//interval_definition/interval_start/date')||' '||EXTRACTVALUE(VALUE(T), '//interval_definition/interval_start/hour') "BEGIN_DATE",
+		EXTRACTVALUE(VALUE(T), '//interval_definition/interval_start/time_zone') "BEGIN_TZ",
+        EXTRACTVALUE(VALUE(T), '//interval_definition/interval_end/date')||' '||EXTRACTVALUE(VALUE(T), '//interval_definition/interval_end/hour') "END_DATE",
+		EXTRACTVALUE(VALUE(T), '//interval_definition/interval_end/time_zone') "END_TZ",
+		EXTRACTVALUE(VALUE(T), '//mw_values') "AMOUNT"
+	FROM TABLE(XMLSEQUENCE(EXTRACT(v_XML,'//adjusted_nmi/adjusted_nmi_value'))) T;
+
+	FUNCTION GET_AREA_ID
+		(
+		p_EXTERNAL_ID IN VARCHAR2,
+		p_AREA_NAME IN VARCHAR2
+		) RETURN NUMBER IS
+	v_AREA_ID NUMBER := NULL;
+	BEGIN
+		IF p_EXTERNAL_ID IS NULL THEN
+			--no external id specified? then just use area from incumbent edc's system load
+			SELECT A.AREA_ID
+			INTO v_AREA_ID
+			FROM SYSTEM_LOAD_AREA A,
+				ENERGY_DISTRIBUTION_COMPANY B,
+				INCUMBENT_ENTITY C
+			WHERE C.INCUMBENT_TYPE = 'EDC'
+				AND B.EDC_ID = C.INCUMBENT_ID
+				AND A.SYSTEM_LOAD_ID = B.EDC_SYSTEM_LOAD_ID
+				AND ROWNUM=1;
+		ELSE
+			-- otherwise find it by external id (area alias)
+			BEGIN
+				SELECT AREA_ID
+				INTO v_AREA_ID
+				FROM AREA
+				WHERE AREA_ALIAS = p_EXTERNAL_ID
+					AND ROWNUM=1;
+			EXCEPTION
+				WHEN NO_DATA_FOUND THEN
+					-- not found? try searching by name
+					BEGIN
+						SELECT AREA_ID
+						INTO v_AREA_ID
+						FROM AREA
+						WHERE AREA_NAME = p_AREA_NAME
+							AND ROWNUM=1;
+					EXCEPTION
+						WHEN NO_DATA_FOUND THEN
+							-- still not found? then create it
+							IF g_CREATE_AREA_IF_NOT_FOUND THEN
+								SELECT OID.NEXTVAL INTO v_AREA_ID FROM DUAL;
+								INSERT INTO AREA
+									(AREA_ID, AREA_NAME, AREA_ALIAS, AREA_DESC,
+									AREA_INTERVAL, PROJECTION_PERIOD, ENTRY_DATE)
+								VALUES
+									(v_AREA_ID, p_AREA_NAME, p_EXTERNAL_ID, p_AREA_NAME,
+									'Hour', '', SYSDATE);
+							END IF;
+					END;
+			END;
+		END IF;
+
+		RETURN v_AREA_ID;
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+			RETURN NULL;
+	END GET_AREA_ID;
+
+	PROCEDURE PUT_SYSTEM_LOAD
+		(
+		p_BEGIN_DATE IN DATE,
+		p_END_DATE IN DATE,
+		p_LOAD_VAL IN NUMBER,
+		p_AS_OF_DATE IN DATE
+		) AS
+	v_AREA_ID NUMBER;
+	v_AS_OF_DATE DATE;
+	v_BEGIN_DATE DATE := p_BEGIN_DATE;
+	BEGIN
+		v_AREA_ID := GET_AREA_ID(NULL,NULL);
+		IF GA.VERSION_AREA_LOAD THEN
+			v_AS_OF_DATE := p_AS_OF_DATE;
+		ELSE
+			v_AS_OF_DATE := LOW_DATE;
+		END IF;
+
+		WHILE v_BEGIN_DATE <= p_END_DATE LOOP
+			UPDATE AREA_LOAD SET LOAD_VAL = p_LOAD_VAL
+			WHERE CASE_ID = GA.BASE_CASE_ID
+				AND AREA_ID = v_AREA_ID
+				AND LOAD_CODE = 'A'
+				AND LOAD_DATE = v_BEGIN_DATE
+				AND AS_OF_DATE = v_AS_OF_DATE;
+			IF SQL%NOTFOUND THEN
+				INSERT INTO AREA_LOAD
+					(CASE_ID, AREA_ID, LOAD_CODE, LOAD_DATE, AS_OF_DATE, LOAD_VAL)
+				VALUES
+					(GA.BASE_CASE_ID, v_AREA_ID, 'A', v_BEGIN_DATE, v_AS_OF_DATE, p_LOAD_VAL);
+			END IF;
+			v_BEGIN_DATE := v_BEGIN_DATE+1/24;
+		END LOOP;
+	END PUT_SYSTEM_LOAD;
+BEGIN
+	v_XML := PARSE_UTIL.CREATE_XML_SAFE(p_XML);
+
+	FOR v_SYSTEM_LOAD IN c_SYSTEM_LOAD LOOP
+	    v_END_DATE := NEW_TIME(TO_DATE(v_SYSTEM_LOAD.END_DATE,'YYYYMMDD HH24'), v_SYSTEM_LOAD.END_TZ, CUT_TIME_ZONE);
+        -- start date is optional
+    	IF NOT TRIM(v_SYSTEM_LOAD.BEGIN_DATE) IS NULL THEN
+		    v_BEGIN_DATE := NEW_TIME(TO_DATE(v_SYSTEM_LOAD.BEGIN_DATE,'YYYYMMDD HH24'), v_SYSTEM_LOAD.BEGIN_TZ, CUT_TIME_ZONE);
+		    v_BEGIN_DATE := v_BEGIN_DATE+1/24; -- increment so it's hour-ending
+        ELSE
+        	v_BEGIN_DATE := v_END_DATE;
+        END IF;
+        PUT_SYSTEM_LOAD (v_BEGIN_DATE, v_END_DATE, v_SYSTEM_LOAD.AMOUNT, SYSDATE);
+        v_REC_COUNT := v_REC_COUNT+1;
+    END LOOP;
+    p_STATUS := 1;
+    p_MESSAGE := TO_CHAR(v_REC_COUNT)||' records imported';
+EXCEPTION
+	WHEN OTHERS THEN
+    	p_STATUS := SQLCODE;
+        p_MESSAGE := UT.GET_FULL_ERRM;
+END UNUSED_IMPORT_LOAD;
+----------------------------------------------------------------------------------------------------
+-- 24-mar-2009, jbc: this currently isn't used by anyone, and only populates RetailOffice-related tables anyway.
+PROCEDURE UNUSED_QUERY_LOAD
+	(
+	p_CRED	IN mex_credentials,
+	p_LOG_ONLY	IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+	p_LOGGER IN OUT mm_logger_adapter
+    ) AS
+v_RESP_STRING CLOB := NULL;
+v_PARAMS MEX_Util.Parameter_Map := Mex_Switchboard.c_Empty_Parameter_Map;
+BEGIN
+    p_STATUS    := GA.SUCCESS;
+	v_PARAMS(MEX_PJM.c_Type) := 'dailymetervaluesallocated';
+	v_PARAMS(MEX_PJM.c_Account_Type) := 'both';
+	v_PARAMS(MEX_PJM.c_DEBUG) := g_DEBUG_EXCHANGES;
+	MEX_PJM.RUN_PJM_BROWSERLESS(v_PARAMS,
+							'emeter', -- p_REQUEST_APP
+							p_LOGGER,
+							p_CRED,
+							p_BEGIN_DATE,
+							p_END_DATE,
+							'download',  -- p_REQUEST_DIR
+							v_RESP_STRING,
+							p_STATUS,
+							p_MESSAGE,
+							p_LOG_ONLY );
+	IF p_STATUS = Mex_Switchboard.c_Status_Success THEN
+		  UNUSED_IMPORT_LOAD (v_RESP_STRING, p_STATUS, p_MESSAGE);
+	END IF;
+	IF NOT v_RESP_STRING IS NULL THEN
+		DBMS_LOB.FREETEMPORARY(v_RESP_STRING);
+	END IF;
+END UNUSED_QUERY_LOAD;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_PJM_METER_SOURCE_ID RETURN NUMBER IS
+v_ID NUMBER;
+BEGIN
+	RETURN EI.GET_ID_FROM_ALIAS('PJM', EC.ED_MEASUREMENT_SOURCE);
+EXCEPTION
+	WHEN MSGCODES.e_ERR_NO_SUCH_ENTRY THEN
+		-- create if not found
+		IO.PUT_MEASUREMENT_SOURCE(v_ID, 'PJM', 'PJM', 'Meter data imported from PJM',
+								0, NULL, 'Hour', NULL, LOW_DATE, NULL, EC.ES_PJM,
+								NULL, NULL, NULL, NULL);
+		RETURN v_ID;
+END GET_PJM_METER_SOURCE_ID;
+----------------------------------------------------------------------------------------------------
+PROCEDURE SET_METER_OWNER
+	(
+	p_METER_ID IN NUMBER,
+	p_METER_OWNER IN VARCHAR2
+	) AS
+v_OWNER_ID NUMBER;
+BEGIN
+	SELECT PSE_ID
+	INTO v_OWNER_ID
+	FROM PURCHASING_SELLING_ENTITY
+	WHERE PSE_ID = EI.GET_ID_FROM_IDENTIFIER_EXTSYS(p_METER_OWNER, EC.ED_PSE, EC.ES_PJM, g_IDENT_TYPE_FOR_METER_OWNER);
+
+	UT.PUT_TEMPORAL_DATA('TX_SUB_STATION_METER_OWNER', LOW_DATE, NULL, TRUE, TRUE,
+						'METER_ID', UT.GET_LITERAL_FOR_NUMBER(p_METER_ID), TRUE,
+						'OWNER_ID', UT.GET_LITERAL_FOR_NUMBER(v_OWNER_ID), FALSE);
+END SET_METER_OWNER;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_METER_ID
+	(
+    p_EXTERNAL_ID IN VARCHAR2,
+    p_METER_NAME IN VARCHAR2,
+    p_METER_OWNER IN VARCHAR2,
+	p_METER_DATE IN DATE,
+	p_AUTO_CREATE IN BOOLEAN := g_CREATE_METER_IF_NOT_FOUND
+    ) RETURN NUMBER IS
+v_METER_ID NUMBER := NULL;
+v_METER_POINT_ID NUMBER;
+v_MEASUREMENT_SOURCE_ID NUMBER;
+v_METER_IDs NUMBER_COLLECTION;
+BEGIN
+	v_METER_IDs := EI.GET_IDs_FROM_IDENTIFIER_EXTSYS(p_EXTERNAL_ID, EC.ED_SUB_STATION_METER, EC.ES_PJM);
+	IF v_METER_IDs.COUNT = 1 THEN
+		v_METER_ID := v_METER_IDs(v_METER_IDs.FIRST);
+	ELSIF v_METER_IDs.COUNT > 1 THEN
+		-- refine search by meter owner
+		SELECT MAX(M.METER_ID)
+		INTO v_METER_ID
+		FROM TX_SUB_STATION_METER_OWNER M,
+			TABLE(CAST(v_METER_IDs as NUMBER_COLLECTION)) IDs,
+			INTERCHANGE_CONTRACT IC,
+			EXTERNAL_SYSTEM_IDENTIFIER ESI
+		WHERE M.METER_ID = IDs.COLUMN_VALUE
+			AND M.BEGIN_DATE <= TRUNC(p_METER_DATE)
+			AND NVL(M.END_DATE,CONSTANTS.HIGH_DATE) >= TRUNC(p_METER_DATE)
+			AND IC.BILLING_ENTITY_ID = M.OWNER_ID
+			AND ESI.EXTERNAL_SYSTEM_ID = EC.ES_PJM
+			AND ESI.ENTITY_DOMAIN_ID = EC.ED_INTERCHANGE_CONTRACT
+			AND ESI.ENTITY_ID = IC.CONTRACT_ID
+			AND ESI.IDENTIFIER_TYPE = EI.g_DEFAULT_IDENTIFIER_TYPE
+			AND ROWNUM=1;
+	END IF;
+
+	IF v_METER_ID IS NULL THEN
+		-- try search by alias instead of by external identifier
+		SELECT MAX(M.METER_ID)
+		INTO v_METER_ID
+		FROM TX_SUB_STATION_METER M,
+			TX_SUB_STATION_METER_OWNER MO,
+			INTERCHANGE_CONTRACT IC,
+			EXTERNAL_SYSTEM_IDENTIFIER ESI
+		WHERE M.METER_ALIAS = p_METER_NAME
+			AND MO.METER_ID = M.METER_ID
+			AND MO.BEGIN_DATE <= TRUNC(p_METER_DATE)
+			AND NVL(MO.END_DATE,CONSTANTS.HIGH_DATE) >= TRUNC(p_METER_DATE)
+			AND IC.BILLING_ENTITY_ID = MO.OWNER_ID
+			AND ESI.EXTERNAL_SYSTEM_ID = EC.ES_PJM
+			AND ESI.ENTITY_DOMAIN_ID = EC.ED_INTERCHANGE_CONTRACT
+			AND ESI.ENTITY_ID = IC.CONTRACT_ID
+			AND ESI.IDENTIFIER_TYPE = EI.g_DEFAULT_IDENTIFIER_TYPE
+			AND ROWNUM=1;
+	END IF;
+
+	IF v_METER_ID IS NULL AND p_AUTO_CREATE THEN
+		IO.PUT_SUB_STATION_METER(v_METER_ID, p_METER_NAME, p_METER_NAME, p_METER_NAME,
+								0, p_EXTERNAL_ID, CONSTANTS.LOW_DATE, NULL, NULL, NULL,
+								NULL, 0, 0, 0, NULL, NULL);
+		-- add external system identifier
+		EI.PUT_EXTERNAL_SYSTEM_IDENTIFIER(EC.ES_PJM, EC.ED_SUB_STATION_METER, v_METER_ID, p_EXTERNAL_ID);
+
+		-- and owner
+		SET_METER_OWNER(v_METER_ID, p_METER_OWNER);
+
+		-- now create single data point for this meter
+		IO.PUT_SUB_STATION_METER_POINT(v_METER_POINT_ID, p_METER_NAME, p_METER_NAME, p_METER_NAME,
+									0, NULL, NULL, NULL, v_METER_ID, NULL, LOW_DATE, NULL, NULL, 'A',
+									NULL, NULL);
+
+		-- and add PJM measurement source - set it to primary to make sure meter point has a
+		-- primary source
+		v_MEASUREMENT_SOURCE_ID := GET_PJM_METER_SOURCE_ID;
+		INSERT INTO TX_SUB_STATION_METER_PT_SOURCE (METER_POINT_ID, MEASUREMENT_SOURCE_ID, BEGIN_DATE, END_DATE, IS_PRIMARY, ENTRY_DATE)
+				VALUES (v_METER_POINT_ID, v_MEASUREMENT_SOURCE_ID, LOw_DATE, NULL, 1, SYSDATE);
+	ELSIF v_METER_ID IS NULL THEN
+		-- couldn't find one
+		ERRS.RAISE(MSGCODES.c_ERR_NO_SUCH_ENTRY, TEXT_UTIL.TO_CHAR_ENTITY(EC.ED_SUB_STATION_METER, EC.ED_ENTITY_DOMAIN)||': '||
+												p_METER_NAME||' (PJM External ID='||p_EXTERNAL_ID||', Owner='||p_METER_OWNER||')');
+	END IF;
+
+	RETURN v_METER_ID;
+END GET_METER_ID;
+----------------------------------------------------------------------------------------------------
+PROCEDURE CLEAR_METER_VALS_FOR_DATE
+    (
+    p_DATE IN DATE,
+    p_CONTRACT_ALIAS IN VARCHAR2,
+    p_TIME_ZONE IN VARCHAR2
+    ) AS
+v_DATE DATE;
+v_END_DATE DATE;
+BEGIN
+
+    UT.CUT_DATE_RANGE(1, TRUNC(p_DATE, 'DD'), TRUNC(p_DATE, 'DD'), p_TIME_ZONE, v_DATE, v_END_DATE);
+
+    UPDATE TX_SUB_STATION_METER_PT_VALUE
+    SET METER_VAL = 0
+    WHERE METER_POINT_ID IN(
+        SELECT DISTINCT M.METER_ID
+        FROM TX_SUB_STATION_METER M, ENTITY_ATTRIBUTE E, temporal_entity_attribute T, ENTITY_DOMAIN D
+        WHERE D.ENTITY_DOMAIN_NAME = 'TX SubStation Meter'
+        AND E.ENTITY_DOMAIN_ID = D.ENTITY_DOMAIN_ID
+        AND E.ATTRIBUTE_NAME = 'Contract'
+        AND T.ATTRIBUTE_ID = E.ATTRIBUTE_ID
+        AND T.ATTRIBUTE_VAL = p_CONTRACT_ALIAS
+        AND p_DATE BETWEEN T.BEGIN_DATE AND NVL(T.END_DATE, p_DATE)
+        AND M.METER_ID = T.OWNER_ENTITY_ID)
+    AND METER_DATE BETWEEN v_DATE AND v_END_DATE;
+
+END CLEAR_METER_VALS_FOR_DATE;
+------------------------------------------------------------------------------------------------------
+FUNCTION GET_METER_POINT_ID
+	(
+	p_METER_ID IN NUMBER
+	) RETURN NUMBER IS
+v_SOURCE_ID NUMBER := GET_PJM_METER_SOURCE_ID;
+v_RET NUMBER;
+BEGIN
+	SELECT DISTINCT P.METER_POINT_ID
+	INTO v_RET
+	FROM TX_SUB_STATION_METER_POINT P, TX_SUB_STATION_METER_PT_SOURCE PS
+	WHERE P.SUB_STATION_METER_ID = p_METER_ID
+		AND PS.METER_POINT_ID = P.METER_POINT_ID
+		AND PS.MEASUREMENT_SOURCE_ID = v_SOURCE_ID;
+
+	RETURN v_RET;
+
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		ERRS.RAISE(MSGCODES.c_ERR_NO_SUCH_ENTRY, TEXT_UTIL.TO_CHAR_ENTITY(EC.ED_SUB_STATION_METER_POINT, EC.ED_ENTITY_DOMAIN)||' for '||
+													TEXT_UTIL.TO_CHAR_ENTITY(p_METER_ID, EC.ED_SUB_STATION_METER, TRUE)||' with '||
+													TEXT_UTIL.TO_CHAR_ENTITY(v_SOURCE_ID, EC.ED_MEASUREMENT_SOURCE, TRUE));
+
+END GET_METER_POINT_ID;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_METER_VALUE
+	(
+    p_METER_POINT_ID IN NUMBER,
+    p_SOURCE_ID IN NUMBER,
+    p_DATE IN DATE,
+    p_METER_VAL IN NUMBER,
+    p_AS_OF_DATE IN DATE
+    ) AS
+BEGIN
+    UPDATE TX_SUB_STATION_METER_PT_VALUE SET METER_VAL = p_METER_VAL
+    WHERE METER_POINT_ID = p_METER_POINT_ID
+    AND MEASUREMENT_SOURCE_ID = p_SOURCE_ID
+    AND METER_CODE = CONSTANTS.CODE_ACTUAL
+    AND METER_DATE = p_DATE;
+
+    IF SQL%NOTFOUND THEN
+ 	    INSERT INTO TX_SUB_STATION_METER_PT_VALUE
+     	    (METER_POINT_ID, MEASUREMENT_SOURCE_ID, METER_CODE, METER_DATE, METER_VAL)
+        VALUES
+     	    (p_METER_POINT_ID, p_SOURCE_ID, CONSTANTS.CODE_ACTUAL, p_DATE, p_METER_VAL);
+    END IF;
+
+END PUT_METER_VALUE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_METER_VALUE
+	(
+    p_EXTERNAL_ID IN VARCHAR2,
+    p_METER_NAME IN VARCHAR2,
+    p_METER_OWNER IN VARCHAR2,
+    p_DATE IN DATE,
+    p_METER_VAL IN NUMBER,
+    p_AS_OF_DATE IN DATE
+    ) AS
+v_METER_ID NUMBER;
+v_METER_POINT_ID NUMBER;
+v_SOURCE_ID NUMBER := GET_PJM_METER_SOURCE_ID;
+BEGIN
+	v_METER_ID := GET_METER_ID(p_EXTERNAL_ID, p_METER_NAME, p_METER_OWNER, p_DATE);
+	v_METER_POINT_ID := GET_METER_POINT_ID(v_METER_ID);
+
+    UPDATE TX_SUB_STATION_METER_PT_VALUE SET METER_VAL = p_METER_VAL
+    WHERE METER_POINT_ID = v_METER_POINT_ID
+    AND MEASUREMENT_SOURCE_ID = v_SOURCE_ID
+    AND METER_CODE = CONSTANTS.CODE_ACTUAL
+    AND METER_DATE = p_DATE;
+
+    IF SQL%NOTFOUND THEN
+ 	    INSERT INTO TX_SUB_STATION_METER_PT_VALUE
+     	    (METER_POINT_ID, MEASUREMENT_SOURCE_ID, METER_CODE, METER_DATE, METER_VAL)
+        VALUES
+     	    (v_METER_POINT_ID, v_SOURCE_ID, CONSTANTS.CODE_ACTUAL, p_DATE, p_METER_VAL);
+    END IF;
+
+END PUT_METER_VALUE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_INADVERTENT_VALUES
+    (
+    p_ACCOUNT_NAME IN VARCHAR2,
+    p_DATE IN DATE,
+    p_METER_VALUE NUMBER,
+    p_STATUS OUT NUMBER
+    ) AS
+v_CONTRACT_ID INTERCHANGE_CONTRACT.CONTRACT_ID%TYPE;
+v_TRANSACTION_ID NUMBER(9);
+v_COMMODITY_ID NUMBER(9);
+BEGIN
+    ID.ID_FOR_COMMODITY('RealTime Energy', FALSE, v_COMMODITY_ID);
+    v_CONTRACT_ID := MM_PJM_UTIL.GET_CONTRACT_ID_FOR_ISO_ACCT(p_ACCOUNT_NAME);
+    v_TRANSACTION_ID := MM_PJM_ESCHED.GET_TX_ID('InadvertentMeterValue',
+                                                'Load',
+                                                'InadvertentMeterValues',
+                                                'Hour',
+                                                v_COMMODITY_ID,
+                                                v_CONTRACT_ID);
+
+
+        ITJ.PUT_IT_SCHEDULE(p_TRANSACTION_ID => v_TRANSACTION_ID,
+                             p_SCHEDULE_TYPE => 1,
+                             p_SCHEDULE_STATE => GA.INTERNAL_STATE,
+                         p_SCHEDULE_DATE => p_DATE,
+                             p_AS_OF_DATE => LOW_DATE,
+                             p_AMOUNT => p_METER_VALUE,
+                             p_PRICE => NULL,
+                             p_STATUS => p_STATUS);
+
+
+END PUT_INADVERTENT_VALUES;
+------------------------------------------------------------------------------------------------------
+PROCEDURE PUT_DERATED_LOSS_VALUES
+    (
+    p_ACCOUNT_NAME IN VARCHAR2,
+    p_DATE IN DATE,
+    p_METER_VALUE NUMBER,
+    p_STATUS OUT NUMBER
+    ) AS
+v_CONTRACT_ID INTERCHANGE_CONTRACT.CONTRACT_ID%TYPE;
+v_TRANSACTION_ID NUMBER(9);
+v_COMMODITY_ID NUMBER(9);
+BEGIN
+    ID.ID_FOR_COMMODITY('RealTime Energy', FALSE, v_COMMODITY_ID);
+    v_CONTRACT_ID := MM_PJM_UTIL.GET_CONTRACT_ID_FOR_ISO_ACCT(p_ACCOUNT_NAME);
+    v_TRANSACTION_ID := MM_PJM_ESCHED.GET_TX_ID('DeratedLossValue',
+                                                'DeratedLoss',
+                                                'DeratedLossValues',
+                                                'Hour',
+                                                v_COMMODITY_ID,
+                                                v_CONTRACT_ID);
+
+        ITJ.PUT_IT_SCHEDULE(p_TRANSACTION_ID => v_TRANSACTION_ID,
+                             p_SCHEDULE_TYPE => 1,
+                             p_SCHEDULE_STATE => GA.INTERNAL_STATE,
+                         p_SCHEDULE_DATE => p_DATE,
+                             p_AS_OF_DATE => LOW_DATE,
+                             p_AMOUNT => p_METER_VALUE,
+                             p_PRICE => NULL,
+                             p_STATUS => p_STATUS);
+
+
+END PUT_DERATED_LOSS_VALUES;
+------------------------------------------------------------------------------------------------------
+PROCEDURE UNUSED_IMPORT_METER_VALUES
+	(
+    p_XML IN CLOB,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+	p_LOGGER IN OUT NOCOPY MM_LOGGER_ADAPTER
+    ) AS
+v_END_DATE DATE;
+v_REC_COUNT NUMBER := 0;
+v_BAD_REC_COUNT NUMBER := 0;
+v_XML XMLTYPE;
+v_WORK_ID NUMBER(9);
+v_SET_OF_IDS UT.STRING_MAP;
+CURSOR c_METER_VALUES IS
+	SELECT EXTRACTVALUE(VALUE(T), '//meter_account_id') "METER_ID",
+		EXTRACTVALUE(VALUE(T), '//name') "METER_NAME",
+		EXTRACTVALUE(VALUE(T), '//counter_party') "METER_OWNER",
+		EXTRACTVALUE(VALUE(U), '//interval_definition/interval_start/date')||' '||EXTRACTVALUE(VALUE(U), '//interval_definition/interval_start/hour') "BEGIN_DATE",
+		EXTRACTVALUE(VALUE(U), '//interval_definition/interval_start/time_zone') "BEGIN_TZ",
+		EXTRACTVALUE(VALUE(U), '//interval_definition/interval_end/date')||' '||EXTRACTVALUE(VALUE(U), '//interval_definition/interval_end/hour') "END_DATE",
+		EXTRACTVALUE(VALUE(U), '//interval_definition/interval_end/time_zone') "END_TZ",
+		EXTRACTVALUE(VALUE(U), '//mw_values') "AMOUNT"
+	FROM TABLE(XMLSEQUENCE(EXTRACT((SELECT XML_DATA FROM MM_EMTR_XML_WORK WHERE WORK_ID = -1/*v_WORK_ID*/),'//meter_account'))) T,
+		TABLE(XMLSEQUENCE(EXTRACT(VALUE(T),'//meter_values'))) U
+	UNION ALL
+	SELECT 'INADVERTENT' "METER_ID",
+		'Total Inadvertent' "METER_NAME",
+		(SELECT OWNER_DATA FROM MM_EMTR_XML_WORK WHERE WORK_ID = -1/*v_WORK_ID*/) "METER_OWNER", --g_INADVERTENT_OWNER "METER_OWNER",
+		EXTRACTVALUE(VALUE(T), '//interval_definition/interval_start/date')||' '||EXTRACTVALUE(VALUE(T), '//interval_definition/interval_start/hour') "BEGIN_DATE",
+		EXTRACTVALUE(VALUE(T), '//interval_definition/interval_start/time_zone') "BEGIN_TZ",
+		EXTRACTVALUE(VALUE(T), '//interval_definition/interval_end/date')||' '||EXTRACTVALUE(VALUE(T), '//interval_definition/interval_end/hour') "END_DATE",
+		EXTRACTVALUE(VALUE(T), '//interval_definition/interval_end/time_zone') "END_TZ",
+		EXTRACTVALUE(VALUE(T), '//inadvertent_amount') "AMOUNT"
+	FROM TABLE(XMLSEQUENCE(EXTRACT((SELECT XML_DATA FROM MM_EMTR_XML_WORK WHERE WORK_ID = -1/*v_WORK_ID*/),'//total_inadvertent[@control_area_name="'||(SELECT CA_DATA FROM MM_EMTR_XML_WORK WHERE WORK_ID = -1/*v_WORK_ID*/)||'"]/inadvertent_values'))) T;
+BEGIN
+	v_XML := PARSE_UTIL.CREATE_XML_SAFE(p_XML);
+
+	UT.GET_RTO_WORK_ID(v_WORK_ID);
+
+	-- dump info to work table (to work around oracle bug that throws exception when
+	-- trying to open queries as cursors)
+	INSERT INTO MM_EMTR_XML_WORK (WORK_ID, OWNER_DATA, CA_DATA, XML_DATA)
+		VALUES (v_WORK_ID, g_INADVERTENT_OWNER, g_INADVERTENT_CONTROL_AREA, v_XML);
+
+	-- now loop over data just dumped to work table and process
+	FOR v_METER_VALUE IN c_METER_VALUES LOOP
+	    IF v_METER_VALUE.BEGIN_DATE = v_METER_VALUE.END_DATE THEN
+            --it is the fall back hour
+            v_END_DATE := TO_CUT_WITH_OPTIONS(DUPLICATE_DATE(TO_DATE(v_METER_VALUE.END_DATE,'YYYYMMDD HH24') ,'TRUE'),
+                            v_METER_VALUE.END_TZ, g_DST_SPRING_AHEAD_OPTION);
+        ELSE
+            v_END_DATE := TO_CUT_WITH_OPTIONS(DUPLICATE_DATE(TO_DATE(v_METER_VALUE.END_DATE,'YYYYMMDD HH24') ,'FALSE'),
+                            v_METER_VALUE.END_TZ, g_DST_SPRING_AHEAD_OPTION);
+        END IF;
+		BEGIN
+        PUT_METER_VALUE (v_METER_VALUE.METER_ID, v_METER_VALUE.METER_NAME, v_METER_VALUE.METER_OWNER, v_END_DATE, v_METER_VALUE.AMOUNT, SYSDATE);
+        v_REC_COUNT := v_REC_COUNT+1;
+		EXCEPTION
+			WHEN MSGCODES.e_ERR_NO_SUCH_ENTRY THEN
+				-- only log one error per meter ID - not one per record
+				IF NOT v_SET_OF_IDS.EXISTS(v_METER_VALUE.METER_ID) THEN
+					ERRS.LOG_AND_CONTINUE;
+					v_SET_OF_IDs(v_METER_VALUE.METER_ID) := ' '; -- dummy value - key is all we are interested in
+				END IF;
+				v_BAD_REC_COUNT := v_BAD_REC_COUNT+1;
+		END;
+    END LOOP;
+
+	--cleanup
+	DELETE MM_EMTR_XML_WORK WHERE WORK_ID = v_WORK_ID;
+
+    p_STATUS := 1;
+    p_MESSAGE := TO_CHAR(v_REC_COUNT)||' records imported.';
+	IF v_BAD_REC_COUNT > 0 THEN
+		p_MESSAGE := p_MESSAGE||' '||TO_CHAR(v_BAD_REC_COUNT)||' records failed due to missing meters.';
+	END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		--cleanup
+		DELETE MM_EMTR_XML_WORK WHERE WORK_ID = v_WORK_ID;
+    	p_STATUS := SQLCODE;
+        p_MESSAGE := UT.GET_FULL_ERRM;
+END UNUSED_IMPORT_METER_VALUES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE UNUSED_QUERY_METER_VALUES(p_CRED	IN mex_credentials,
+							  p_LOG_ONLY	IN NUMBER,
+							  p_BEGIN_DATE IN DATE,
+							  p_END_DATE   IN DATE,
+							  p_STATUS     OUT NUMBER,
+							  p_MESSAGE    OUT VARCHAR2,
+							  p_LOGGER IN OUT mm_logger_adapter
+							  ) AS
+    v_RESP_STRING CLOB;
+	v_PARAMS MEX_Util.Parameter_Map := Mex_Switchboard.c_Empty_Parameter_Map;
+BEGIN
+    p_STATUS    := GA.SUCCESS;
+	v_PARAMS(MEX_PJM.c_Type) := 'dailymetervaluessubmitted';
+	v_PARAMS(MEX_PJM.c_Account_Type) := 'both';
+	v_PARAMS(MEX_PJM.c_DEBUG) := g_DEBUG_EXCHANGES;
+	MEX_PJM.RUN_PJM_BROWSERLESS(v_PARAMS,
+							'emeter', -- p_REQUEST_APP
+							p_LOGGER,
+							p_CRED,
+							p_BEGIN_DATE,
+							p_END_DATE,
+							'download',  -- p_REQUEST_DIR
+							v_RESP_STRING,
+							p_STATUS,
+							p_MESSAGE,
+							p_LOG_ONLY );
+	IF p_STATUS = Mex_Switchboard.c_Status_Success THEN
+		  UNUSED_IMPORT_METER_VALUES(v_RESP_STRING, p_STATUS, p_MESSAGE, p_LOGGER);
+	END IF;
+	IF NOT v_RESP_STRING IS NULL THEN
+		DBMS_LOB.FREETEMPORARY(v_RESP_STRING);
+	END IF;
+
+END UNUSED_QUERY_METER_VALUES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_ALLOCATED_METER_VALUES
+	(
+    p_XML IN CLOB,
+    p_ACCOUNT_NAME IN VARCHAR2,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2
+    ) AS
+v_END_DATE DATE;
+v_INADVERT_END_DATE DATE;
+v_DERATED_END_DATE DATE;
+v_REC_COUNT NUMBER := 0;
+v_XML XMLTYPE;
+v_WORK_ID NUMBER(9);
+v_METER_OWNER VARCHAR2(64);
+v_DATE DATE := LOW_DATE;
+v_METER_POINT_ID NUMBER(9);
+
+CURSOR c_METER_VALUES IS
+	SELECT EXTRACTVALUE(VALUE(T), '//meter_account_id') "METER_ID",
+		EXTRACTVALUE(VALUE(T), '//name') "METER_NAME",
+        EXTRACTVALUE(VALUE(U), '//interval_definition/interval_start/date') "DATE",
+		EXTRACTVALUE(VALUE(U), '//interval_definition/interval_start/date')||' '||EXTRACTVALUE(VALUE(U), '//interval_definition/interval_start/hour') "BEGIN_DATE",
+		EXTRACTVALUE(VALUE(U), '//interval_definition/interval_start/time_zone') "BEGIN_TZ",
+		EXTRACTVALUE(VALUE(U), '//interval_definition/interval_end/date')||' '||EXTRACTVALUE(VALUE(U), '//interval_definition/interval_end/hour') "END_DATE",
+		EXTRACTVALUE(VALUE(U), '//interval_definition/interval_end/time_zone') "END_TZ",
+		EXTRACTVALUE(VALUE(U), '//mw_values') "AMOUNT"
+	FROM TABLE(XMLSEQUENCE(EXTRACT((SELECT XML_DATA FROM MM_EMTR_XML_WORK WHERE WORK_ID = -1/*v_WORK_ID*/),'//meter_account'))) T,
+		TABLE(XMLSEQUENCE(EXTRACT(VALUE(T),'//allocated_values'))) U
+    ORDER BY 1,3;
+
+CURSOR c_INADVERT_METER_VALUES IS
+	SELECT EXTRACTVALUE(VALUE(W), '//interval_definition/interval_start/date')||' '||EXTRACTVALUE(VALUE(W), '//interval_definition/interval_start/hour') "INADVERT_BEGIN_DATE",
+		EXTRACTVALUE(VALUE(W), '//interval_definition/interval_start/time_zone') "INADVERT_BEGIN_TZ",
+		EXTRACTVALUE(VALUE(W), '//interval_definition/interval_end/date')||' '||EXTRACTVALUE(VALUE(W), '//interval_definition/interval_end/hour') "INADVERT_END_DATE",
+		EXTRACTVALUE(VALUE(W), '//interval_definition/interval_end/time_zone') "INADVERT_END_TZ",
+		EXTRACTVALUE(VALUE(W), '//mw_values') "INADVERT_AMOUNT"
+	FROM TABLE(XMLSEQUENCE(EXTRACT((SELECT XML_DATA FROM MM_EMTR_XML_WORK WHERE WORK_ID = -1/*v_WORK_ID*/),'//share_inadvertent'))) V,
+		TABLE(XMLSEQUENCE(EXTRACT(VALUE(V),'//share_inadvertent_value'))) W;
+
+CURSOR c_DERATED_LOSS_VALUES IS
+	SELECT EXTRACTVALUE(VALUE(W), '//interval_definition/interval_start/date')||' '||EXTRACTVALUE(VALUE(W), '//interval_definition/interval_start/hour') "DERATED_BEGIN_DATE",
+		EXTRACTVALUE(VALUE(W), '//interval_definition/interval_start/time_zone') "DERATED_BEGIN_TZ",
+		EXTRACTVALUE(VALUE(W), '//interval_definition/interval_end/date')||' '||EXTRACTVALUE(VALUE(W), '//interval_definition/interval_end/hour') "DERATED_END_DATE",
+		EXTRACTVALUE(VALUE(W), '//interval_definition/interval_end/time_zone') "DERATED_END_TZ",
+		EXTRACTVALUE(VALUE(W), '//mw_values') "DERATED_LOSS_AMOUNT"
+	FROM TABLE(XMLSEQUENCE(EXTRACT((SELECT XML_DATA FROM MM_EMTR_XML_WORK WHERE WORK_ID = -1/*v_WORK_ID*/),'//derated_loss_adjustment'))) V,
+		TABLE(XMLSEQUENCE(EXTRACT(VALUE(V),'//derated_loss_adjustment_value'))) W;
+
+BEGIN
+	v_XML := PARSE_UTIL.CREATE_XML_SAFE(p_XML);
+
+	--UT.GET_RTO_WORK_ID(v_WORK_ID);
+	v_WORK_ID := -1;
+
+	-- dump info to work table (to work around oracle bug that throws exception when
+	-- trying to open queries as cursors)
+	INSERT INTO MM_EMTR_XML_WORK (WORK_ID, OWNER_DATA, CA_DATA, XML_DATA)
+		VALUES (v_WORK_ID, g_INADVERTENT_OWNER, g_INADVERTENT_CONTROL_AREA, v_XML);
+
+	-- now loop over data just dumped to work table and process
+	FOR v_METER_VALUE IN c_METER_VALUES LOOP
+        IF v_DATE <> TRUNC(TO_DATE(v_METER_VALUE.BEGIN_DATE,'YYYYMMDD HH24'),'DD') THEN
+            CLEAR_METER_VALS_FOR_DATE(TO_DATE(v_METER_VALUE.BEGIN_DATE,'YYYYMMDD HH24'), p_ACCOUNT_NAME,v_METER_VALUE.BEGIN_TZ);
+            v_DATE := TRUNC(TO_DATE(v_METER_VALUE.BEGIN_DATE,'YYYYMMDD HH24'),'DD');
+        END IF;
+
+        IF v_METER_VALUE.BEGIN_DATE = v_METER_VALUE.END_DATE THEN
+            --it is the fall back hour
+            v_END_DATE := TO_CUT_WITH_OPTIONS(DUPLICATE_DATE(TO_DATE(v_METER_VALUE.END_DATE,'YYYYMMDD HH24') ,'TRUE'),
+                            v_METER_VALUE.END_TZ, g_DST_SPRING_AHEAD_OPTION);
+        ELSE
+            v_END_DATE := TO_CUT_WITH_OPTIONS(DUPLICATE_DATE(TO_DATE(v_METER_VALUE.END_DATE,'YYYYMMDD HH24') ,'FALSE'),
+                            v_METER_VALUE.END_TZ, g_DST_SPRING_AHEAD_OPTION);
+        END IF;
+/*
+        SELECT SUBSTR(P.PSE_DESC,6) INTO v_METER_OWNER
+        FROM INTERCHANGE_CONTRACT ITC, PURCHASING_SELLING_ENTITY P
+        WHERE ITC.CONTRACT_ALIAS = p_ACCOUNT_NAME
+        AND ITC.BILLING_ENTITY_ID = P.PSE_ID;
+*/
+		SELECT A.METER_POINT_ID
+		INTO v_METER_POINT_ID
+		FROM TX_SUB_STATION_METER_POINT A, TX_SUB_STATION_METER_PT_SOURCE B
+		WHERE A.METER_POINT_ID = B.METER_POINT_ID
+		AND B.MEASUREMENT_SOURCE_ID = EI.GET_ID_FROM_ALIAS('PJM', EC.ED_MEASUREMENT_SOURCE)
+		AND v_END_DATE BETWEEN A.BEGIN_DATE AND NVL(A.END_DATE, HIGH_DATE)
+		AND A.SUB_STATION_METER_ID =
+			  EI.GET_ID_FROM_IDENTIFIER_EXTSYS(v_METER_VALUE.METER_ID, EC.ED_SUB_STATION_METER, EC.ES_PJM);
+
+		PUT_METER_VALUE(v_METER_POINT_ID, GET_PJM_METER_SOURCE_ID, v_END_DATE, v_METER_VALUE.AMOUNT, SYSDATE);
+
+        v_REC_COUNT := v_REC_COUNT+1;
+    END LOOP;
+
+    FOR v_METER_VALUE IN c_INADVERT_METER_VALUES LOOP
+
+        IF v_METER_VALUE.INADVERT_BEGIN_DATE = v_METER_VALUE.INADVERT_END_DATE THEN
+            --it is the fall back hour
+            v_INADVERT_END_DATE := TO_CUT_WITH_OPTIONS(DUPLICATE_DATE(TO_DATE(v_METER_VALUE.INADVERT_END_DATE,'YYYYMMDD HH24') ,'TRUE'),
+                            v_METER_VALUE.INADVERT_END_TZ, g_DST_SPRING_AHEAD_OPTION);
+        ELSE
+            v_INADVERT_END_DATE := TO_CUT_WITH_OPTIONS(DUPLICATE_DATE(TO_DATE(v_METER_VALUE.INADVERT_END_DATE,'YYYYMMDD HH24') ,'FALSE'),
+                            v_METER_VALUE.INADVERT_END_TZ, g_DST_SPRING_AHEAD_OPTION);
+        END IF;
+
+        PUT_INADVERTENT_VALUES(p_ACCOUNT_NAME, v_INADVERT_END_DATE,v_METER_VALUE.Inadvert_Amount, p_STATUS);
+
+    END LOOP;
+
+    FOR v_METER_VALUE IN c_DERATED_LOSS_VALUES LOOP
+
+        IF v_METER_VALUE.DERATED_BEGIN_DATE = v_METER_VALUE.DERATED_END_DATE THEN
+            --it is the fall back hour
+            v_DERATED_END_DATE := TO_CUT_WITH_OPTIONS(DUPLICATE_DATE(TO_DATE(v_METER_VALUE.DERATED_END_DATE,'YYYYMMDD HH24') ,'TRUE'),
+                            v_METER_VALUE.DERATED_END_TZ, g_DST_SPRING_AHEAD_OPTION);
+        ELSE
+            v_DERATED_END_DATE := TO_CUT_WITH_OPTIONS(DUPLICATE_DATE(TO_DATE(v_METER_VALUE.DERATED_END_DATE,'YYYYMMDD HH24') ,'FALSE'),
+                            v_METER_VALUE.DERATED_END_TZ, g_DST_SPRING_AHEAD_OPTION);
+        END IF;
+
+        PUT_DERATED_LOSS_VALUES(p_ACCOUNT_NAME, v_DERATED_END_DATE,v_METER_VALUE.Derated_Loss_Amount, p_STATUS);
+
+    END LOOP;
+
+	--cleanup
+	DELETE MM_EMTR_XML_WORK WHERE WORK_ID = -1/*v_WORK_ID*/;
+
+    p_STATUS := 1;
+    p_MESSAGE := TO_CHAR(v_REC_COUNT)||' records imported';
+
+EXCEPTION
+	WHEN OTHERS THEN
+		--cleanup
+		DELETE MM_EMTR_XML_WORK WHERE WORK_ID = -1/*v_WORK_ID*/;
+    	p_STATUS := SQLCODE;
+        p_MESSAGE := UT.GET_FULL_ERRM;
+END IMPORT_ALLOCATED_METER_VALUES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE QUERY_ALLOCATED_METER_VALUES
+    (
+	p_CRED	IN mex_credentials,
+	p_LOG_ONLY	IN NUMBER,
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE   IN DATE,
+    p_STATUS     OUT NUMBER,
+    p_MESSAGE    OUT VARCHAR2,
+	p_LOGGER IN OUT mm_logger_adapter
+    ) AS
+v_RESP_STRING CLOB := NULL;
+v_PARAMS MEX_Util.Parameter_Map := Mex_Switchboard.c_Empty_Parameter_Map;
+v_CURRENT_DAY DATE := TRUNC(p_BEGIN_DATE);
+BEGIN
+	p_STATUS := GA.SUCCESS;
+	v_CURRENT_DAY := TRUNC(p_BEGIN_DATE);
+	v_PARAMS(MEX_PJM.c_Type) := 'dailymetervaluesallocated';
+	v_PARAMS(MEX_PJM.c_Account_Type) := 'both';
+	v_PARAMS(MEX_PJM.c_DEBUG) := g_DEBUG_EXCHANGES;
+	WHILE v_CURRENT_DAY <= TRUNC(p_END_DATE) LOOP
+		MEX_PJM.RUN_PJM_BROWSERLESS(v_PARAMS,
+								'emeter', -- p_REQUEST_APP
+								p_LOGGER,
+								p_CRED,
+								v_CURRENT_DAY,
+								v_CURRENT_DAY,
+								'download',  -- p_REQUEST_DIR
+								v_RESP_STRING,
+								p_STATUS,
+								p_MESSAGE,
+								p_LOG_ONLY );
+		IF p_STATUS = Mex_Switchboard.c_Status_Success THEN
+			IMPORT_ALLOCATED_METER_VALUES(v_RESP_STRING,
+										p_CRED.EXTERNAL_ACCOUNT_NAME,
+										p_STATUS,
+										p_MESSAGE);
+
+
+			POST_METERS_TO_TXNS(v_CURRENT_DAY,
+								v_CURRENT_DAY,
+								'EDT',
+								p_CRED.EXTERNAL_ACCOUNT_NAME,
+								p_STATUS,
+								p_MESSAGE);
+		END IF;
+		IF NOT v_RESP_STRING IS NULL THEN
+			DBMS_LOB.FREETEMPORARY(v_RESP_STRING);
+		END IF;
+		v_CURRENT_DAY := v_CURRENT_DAY + 1;
+	END LOOP;
+
+END QUERY_ALLOCATED_METER_VALUES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_METERS
+	(
+    p_XML IN CLOB,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+	p_LOGGER IN OUT mm_logger_adapter
+    ) AS
+v_METER_ID NUMBER;
+v_METER_POINT_ID NUMBER;
+v_ADJ_CLOB CLOB;
+v_METER_OWNER VARCHAR2(64);
+CURSOR c_METERS IS
+SELECT METER_ID, METER_NAME, METER_TYPE, CASE WHEN ALLOCATED_OWNER IS NULL THEN REPORTED_OWNER ELSE ALLOCATED_OWNER END METER_OWNER, SUBMITTER FROM
+--SELECT meter_id, meter_name, meter_type, ALLOCATED_OWNER, REPORTED_OWNER FROM
+	(SELECT EXTRACTVALUE(VALUE(T), '//meter_account_id') METER_ID,
+		EXTRACTVALUE(VALUE(T), '//meter_account_name') METER_NAME,
+		EXTRACTVALUE(VALUE(T), '//meter_type') METER_TYPE,
+        EXTRACTVALUE(VALUE(T), '//submitter') SUBMITTER,
+		EXTRACTVALUE(VALUE(T), '//allocated/allocated_to') ALLOCATED_OWNER,
+		EXTRACTVALUE(VALUE(T), '//reported/reported_to') REPORTED_OWNER
+	FROM TABLE(XMLSEQUENCE(EXTRACT(XMLTYPE.CREATEXML(v_ADJ_CLOB),'//meter_account'))) T) a;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+	v_ADJ_CLOB := REPLACE(p_XML, '<!DOCTYPE emtr SYSTEM "meterAccounts.dtd">', NULL);
+	FOR v_METER IN c_METERS LOOP
+		 --if there is no reported owner or allocated owner, use submitter
+        IF v_METER.METER_OWNER IS NULL THEN
+			p_LOGGER.LOG_DEBUG('Use submitter as owner: ' || v_METER.SUBMITTER);
+            v_METER_OWNER := v_METER.SUBMITTER;
+        ELSE
+			p_LOGGER.LOG_DEBUG('Use allocated/reported owner as owner: ' || v_METER.METER_OWNER);
+            v_METER_OWNER := v_METER.METER_OWNER;
+        END IF;
+		p_LOGGER.LOG_DEBUG('Look up meter using account_id=' || v_METER.METER_ID || ', meter_name='
+			|| v_METER.METER_NAME || ', meter_owner=' || v_METER_OWNER);
+        v_METER_ID := GET_METER_ID(v_METER.METER_ID, v_METER.METER_NAME, v_METER_OWNER, SYSDATE, TRUE);
+		-- make sure owner is set correctly (this is likely a no-op if the meter already exists)
+		p_LOGGER.LOG_DEBUG('Set owner for meter_account_id=' || v_METER.METER_ID || ' to ' || v_METER_OWNER);
+        SET_METER_OWNER(v_METER_ID, v_METER_OWNER);
+		-- make sure data point's op code is correct
+		p_LOGGER.LOG_DEBUG('Get meter point for meter_account_id=' || v_METER.METER_ID);
+        v_METER_POINT_ID := GET_METER_POINT_ID(v_METER_ID);
+
+		p_LOGGER.LOG_DEBUG('Update meter point for meter_account_id=' || v_METER.METER_ID || ' for meter_type ' || v_METER.METER_TYPE);
+		UPDATE TX_SUB_STATION_METER_POINT
+		SET OPERATION_CODE=CASE v_METER.METER_TYPE WHEN 'Gen' THEN 'S' ELSE 'A' END
+		WHERE METER_POINT_ID = v_METER_POINT_ID;
+    END LOOP;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS := SQLCODE;
+        p_MESSAGE := UT.GET_FULL_ERRM;
+END IMPORT_METERS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE QUERY_METERS(p_CRED	IN mex_credentials,
+						p_LOG_ONLY	IN NUMBER,
+						p_BEGIN_DATE IN DATE,
+                        p_END_DATE   IN DATE,
+                        p_STATUS     OUT NUMBER,
+                        p_MESSAGE    OUT VARCHAR2,
+						p_LOGGER IN OUT mm_logger_adapter) AS
+    v_RESP_STRING CLOB := NULL;
+	v_PARAMS MEX_Util.Parameter_Map := Mex_Switchboard.c_Empty_Parameter_Map;
+
+BEGIN
+    p_STATUS    := GA.SUCCESS;
+	--IF MM_PJM_UTIL.HAS_ESUITE_ACCESS(g_EMTR_ACCESS_ATTR, p_CRED.EXTERNAL_ACCOUNT_NAME) THEN
+		v_PARAMS(MEX_PJM.c_Type) := 'meteraccounts';
+		v_PARAMS(MEX_PJM.c_Account_Type) := 'both';
+		v_PARAMS(MEX_PJM.c_DEBUG) := g_DEBUG_EXCHANGES;
+		MEX_PJM.RUN_PJM_BROWSERLESS(v_PARAMS,
+								'emeter', -- p_REQUEST_APP
+								p_LOGGER,
+								p_CRED,
+								p_BEGIN_DATE,
+								p_END_DATE,
+								'download',  -- p_REQUEST_DIR
+								v_RESP_STRING,
+								p_STATUS,
+								p_MESSAGE,
+								p_LOG_ONLY );
+		IF p_STATUS = Mex_Switchboard.c_Status_Success THEN
+			IMPORT_METERS(v_RESP_STRING, p_STATUS, p_MESSAGE, p_LOGGER);
+		END IF;
+		IF NOT v_RESP_STRING IS NULL THEN
+			DBMS_LOB.FREETEMPORARY(v_RESP_STRING);
+		END IF;
+	--END IF;
+
+END QUERY_METERS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE UNUSED_IMPORT_METER_ALLOC
+	(
+    p_XML IN CLOB,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2
+    ) AS
+v_XML XMLTYPE;
+v_TRANSACTION_ID NUMBER;
+v_DATE DATE;
+v_AMOUNT NUMBER;
+/*CURSOR c_METER_VALUES IS
+	SELECT MONTH, SUM(AMOUNT) "AMOUNT"
+	FROM (SELECT EXTRACTVALUE(VALUE(T), '//interval_definition/interval_start/date') "MONTH",
+			EXTRACTVALUE(VALUE(U), '//counter_party') "COUNTER_PARTY",
+			EXTRACTVALUE(VALUE(U), '//participant_net_share') "AMOUNT"
+		FROM TABLE(XMLSEQUENCE(EXTRACT(v_XML ,'//emtr'))) T,
+			TABLE(XMLSEQUENCE(EXTRACT(VALUE(T),'//net_ties/counter_party_net_tie'))) U)
+	GROUP BY MONTH;*/
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+	-- check to make sure we got something
+	IF p_XML LIKE '%<!--The download has not received any values.%' THEN
+		LOGS.LOG_INFO('Meter correction allocations file contains no data.');
+		v_TRANSACTION_ID := NULL;
+	ELSE
+		v_XML := PARSE_UTIL.CREATE_XML_SAFE(p_XML);
+
+		-- determine transaction where we put this
+		BEGIN
+			SELECT IT.TRANSACTION_ID
+			  INTO v_TRANSACTION_ID
+			  FROM INTERCHANGE_TRANSACTION IT,
+				   SCHEDULE_COORDINATOR    SC
+			 WHERE IT.TRANSACTION_TYPE = 'Meter Corrects.'
+			   AND SC.SC_EXTERNAL_IDENTIFIER = 'PJM'
+			   AND IT.SC_ID = SC.SC_ID;
+		EXCEPTION
+			WHEN NO_DATA_FOUND THEN
+				v_TRANSACTION_ID := NULL;
+		END;
+	END IF;
+
+	IF v_TRANSACTION_ID IS NOT NULL THEN
+		-- we are only concerned with getting participant share of net ties
+		SELECT TO_DATE(MONTH,'MM/YYYY')+1/86400, SUM(AMOUNT)
+		INTO v_DATE, v_AMOUNT
+		FROM (SELECT EXTRACTVALUE(VALUE(T), '//interval_definition/interval_start/date') "MONTH",
+				EXTRACTVALUE(VALUE(U), '//counter_party') "COUNTER_PARTY",
+				EXTRACTVALUE(VALUE(U), '//participant_net_share') "AMOUNT"
+			FROM TABLE(XMLSEQUENCE(EXTRACT(v_XML ,'//emtr'))) T,
+				TABLE(XMLSEQUENCE(EXTRACT(VALUE(T),'//net_ties/counter_party_net_tie'))) U)
+		GROUP BY MONTH;
+
+		ITJ.PUT_IT_SCHEDULE(v_TRANSACTION_ID,
+						   1, -- SCHEDULE TYPE
+						   MM_PJM_UTIL.g_EXTERNAL_STATE, -- SCHEDULE STATE
+						   v_DATE,
+						   SYSDATE, --AS OF DATE
+						   v_AMOUNT,
+						   NULL,
+						   p_STATUS);
+		ITJ.PUT_IT_SCHEDULE(v_TRANSACTION_ID,
+						   1, -- SCHEDULE TYPE
+						   MM_PJM_UTIL.g_INTERNAL_STATE, -- SCHEDULE STATE
+						   v_DATE,
+						   SYSDATE, --AS OF DATE
+						   v_AMOUNT,
+						   NULL,
+						   p_STATUS);
+	END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN
+    	p_STATUS := SQLCODE;
+        p_MESSAGE := UT.GET_FULL_ERRM;
+END UNUSED_IMPORT_METER_ALLOC;
+----------------------------------------------------------------------------------------------------
+-- 24-mar-2009, jbc: this currently isn't used by anyone
+PROCEDURE UNUSED_QUERY_METER_ALLOC(p_CRED		  IN mex_credentials,
+							 p_LOG_ONLY	  IN NUMBER,
+							 p_BEGIN_DATE IN DATE,
+                             p_END_DATE   IN DATE,
+                             p_STATUS     OUT NUMBER,
+                             p_MESSAGE    OUT VARCHAR2,
+							 p_LOGGER	  IN OUT mm_logger_adapter) AS
+v_RESP_STRING CLOB := NULL;
+v_PARAMS MEX_Util.Parameter_Map := Mex_Switchboard.c_Empty_Parameter_Map;
+BEGIN
+    p_STATUS    := GA.SUCCESS;
+	v_PARAMS(MEX_PJM.c_Type) := 'monthlymeterallocations';
+	v_PARAMS(MEX_PJM.c_Account_Type) := 'both';
+	v_PARAMS(MEX_PJM.c_DEBUG) := g_DEBUG_EXCHANGES;
+	MEX_PJM.RUN_PJM_BROWSERLESS(v_PARAMS,
+							'emeter', -- p_REQUEST_APP
+							p_LOGGER,
+							p_CRED,
+							p_BEGIN_DATE,
+							p_END_DATE,
+							'download',  -- p_REQUEST_DIR
+							v_RESP_STRING,
+							p_STATUS,
+							p_MESSAGE,
+							p_LOG_ONLY );
+		IF p_STATUS = Mex_Switchboard.c_Status_Success THEN
+			  UNUSED_IMPORT_METER_ALLOC(v_RESP_STRING, p_STATUS, p_MESSAGE);
+		END IF;
+		IF NOT v_RESP_STRING IS NULL THEN
+			DBMS_LOB.FREETEMPORARY(v_RESP_STRING);
+		END IF;
+END UNUSED_QUERY_METER_ALLOC;
+----------------------------------------------------------------------------------------------------
+PROCEDURE MARKET_EXCHANGE
+	(
+	p_BEGIN_DATE            	IN DATE,
+	p_END_DATE              	IN DATE,
+	p_EXCHANGE_TYPE  			IN VARCHAR2,
+	p_ENTITY_LIST           	IN VARCHAR2,
+	p_ENTITY_LIST_DELIMITER 	IN CHAR,
+	p_LOG_ONLY					IN NUMBER :=0,
+	p_LOG_TYPE 					IN NUMBER,
+	p_TRACE_ON 					IN NUMBER,
+	p_STATUS                	OUT NUMBER,
+	p_MESSAGE               	OUT VARCHAR2) AS
+
+	v_CREDS         MM_CREDENTIALS_SET;
+    v_CRED          MEX_CREDENTIALS;
+    v_LOGGER        MM_LOGGER_ADAPTER;
+	v_LOG_ONLY		NUMBER;
+	v_EMTR_ACCESS_ATTR_ID NUMBER(9);
+BEGIN
+	p_STATUS := GA.SUCCESS;
+	v_LOG_ONLY := NVL(p_LOG_ONLY,0);
+
+	MM_UTIL.INIT_MEX(EC.ES_PJM,
+                         'PJM:EMTR',
+                         p_EXCHANGE_TYPE,
+                         p_LOG_TYPE,
+                         p_TRACE_ON,
+                         v_CREDS,
+                         v_LOGGER);
+	MM_UTIL.START_EXCHANGE(FALSE, v_LOGGER);
+
+	ID.ID_FOR_ENTITY_ATTRIBUTE('PJM: eMTR', EC.ED_INTERCHANGE_CONTRACT, 'String', FALSE, v_EMTR_ACCESS_ATTR_ID);
+
+	WHILE v_CREDS.HAS_NEXT LOOP
+    	v_CRED    := v_CREDS.GET_NEXT;
+		IF MM_PJM_UTIL.HAS_ESUITE_ACCESS(v_EMTR_ACCESS_ATTR_ID, v_CRED.EXTERNAL_ACCOUNT_NAME) THEN
+			CASE p_EXCHANGE_TYPE
+			WHEN g_ET_QUERY_METER_ACCOUNTS THEN
+				QUERY_METERS (v_CRED, v_LOG_ONLY, p_BEGIN_DATE, p_END_DATE, p_STATUS, p_MESSAGE, v_LOGGER);
+			WHEN g_ET_QUERY_ALLOC_METER_VALUES THEN
+				QUERY_ALLOCATED_METER_VALUES (v_CRED, v_LOG_ONLY, p_BEGIN_DATE, p_END_DATE, p_STATUS, p_MESSAGE, v_LOGGER);
+			ELSE
+				p_STATUS := -1;
+				p_MESSAGE := 'Exchange Type ' || p_EXCHANGE_TYPE || ' not found.';
+				v_LOGGER.LOG_ERROR(p_MESSAGE);
+				EXIT;
+			END CASE;
+		END IF;
+	END LOOP;
+	MM_UTIL.STOP_EXCHANGE(v_LOGGER, p_STATUS, p_MESSAGE, p_MESSAGE);
+EXCEPTION
+	WHEN OTHERS THEN
+    	p_STATUS := SQLCODE;
+        p_MESSAGE := UT.GET_FULL_ERRM;
+		MM_UTIL.STOP_EXCHANGE(v_LOGGER, p_STATUS, p_MESSAGE, p_MESSAGE);
+END MARKET_EXCHANGE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE MARKET_IMPORT_CLOB
+	(
+	p_EXCHANGE_TYPE         	IN VARCHAR2,
+	p_FILE_PATH					IN VARCHAR2, 		-- For logging Purposes.
+	p_IMPORT_FILE				IN OUT NOCOPY CLOB, -- File to be imported
+	p_LOG_TYPE					IN NUMBER,
+	p_TRACE_ON					IN NUMBER,
+	p_STATUS                	OUT NUMBER,
+	p_MESSAGE               	OUT VARCHAR2) AS
+
+    v_CRED          MEX_CREDENTIALS;
+    v_LOGGER        MM_LOGGER_ADAPTER;
+BEGIN
+	MM_UTIL.INIT_MEX(EC.ES_PJM, NULL,
+                         'PJM:EMTR',
+                         p_EXCHANGE_TYPE,
+                         p_LOG_TYPE,
+                         p_TRACE_ON,
+                         v_CRED,
+                         v_LOGGER,
+						 TRUE);
+
+	MM_UTIL.START_EXCHANGE(TRUE, v_LOGGER);
+
+ 	CASE p_EXCHANGE_TYPE
+    	WHEN g_ET_IMPORT_METER_ACC_XML  THEN
+    		IMPORT_METERS (p_IMPORT_FILE, p_STATUS, p_MESSAGE, v_LOGGER);
+        ELSE
+			p_STATUS := -1;
+			p_MESSAGE := 'Exchange Type ' || p_EXCHANGE_TYPE || ' not found.';
+			v_LOGGER.LOG_ERROR(p_MESSAGE);
+    END CASE;
+
+    MM_UTIL.STOP_EXCHANGE(v_LOGGER, p_STATUS, p_MESSAGE, p_MESSAGE);
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS := SQLCODE;
+		p_MESSAGE := UT.GET_FULL_ERRM;
+		MM_UTIL.STOP_EXCHANGE(v_LOGGER, p_STATUS, p_MESSAGE, p_MESSAGE);
+END MARKET_IMPORT_CLOB;
+-------------------------------------------------------------------------------------------
+BEGIN
+	g_INADVERTENT_CONTROL_AREA := NVL(GET_DICTIONARY_VALUE('Control Area Name',1,'MarketExchange','PJM','eMTR'), 'CE');
+	g_INADVERTENT_OWNER := NVL(GET_DICTIONARY_VALUE('Owner Name',1,'MarketExchange','PJM','eMTR'), 'ComEd');
+END MM_PJM_EMTR;
+/

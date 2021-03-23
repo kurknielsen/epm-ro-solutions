@@ -1,0 +1,217 @@
+CREATE OR REPLACE package MM_PI is
+
+  -- Author  : LDUMITRIU
+  -- Created : 05/11/2005 1524:11I:58
+  -- Purpose :
+
+PROCEDURE GET_PI_FILES_FROM_QUEUE
+	(
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	);
+
+g_TRACE_ON BOOLEAN := TRUE; --DEBUG TRACE
+
+END MM_PI;
+/
+
+CREATE OR REPLACE package body MM_PI is
+
+ g_PACKAGE_NAME CONSTANT VARCHAR2(16) := 'MM_PI';
+ g_TIMEZONE CONSTANT CHAR(3) :='PDT';
+ g_FIRST_STATEMENT_TYPE_ID NUMBER(1) := 1;
+---------------------------------------------------------------------------------------------------
+PROCEDURE ID_FOR_TXN_EXT_IDENT(p_TRANSACTION_IDENT IN VARCHAR2,
+                               p_TRANSACTION_ID    OUT NUMBER,
+                               p_ERROR_MESSAGE     OUT VARCHAR2) AS
+
+v_CREATE_IF_NOT_FOUND BOOLEAN := TRUE;
+v_TRANSACTION_NAME INTERCHANGE_TRANSACTION.TRANSACTION_NAME%TYPE;
+v_TRANSACTION INTERCHANGE_TRANSACTION%ROWTYPE;
+
+BEGIN
+
+ 	--TRY TO FIND THE TRANSACTION
+	BEGIN
+		SELECT A.TRANSACTION_ID
+		INTO p_TRANSACTION_ID
+		FROM INTERCHANGE_TRANSACTION A
+		WHERE TRANSACTION_IDENTIFIER = p_TRANSACTION_IDENT;
+
+	EXCEPTION
+		--CREATE THE TRANSACTION IF IT DOES NOT EXIST.
+		WHEN NO_DATA_FOUND THEN
+			IF v_CREATE_IF_NOT_FOUND THEN
+				v_TRANSACTION_NAME := p_TRANSACTION_IDENT;
+				v_TRANSACTION.TRANSACTION_ID := 0;
+				v_TRANSACTION.SC_ID := MM_CAISO_UTIL.GET_CAISO_SC_ID;
+				v_TRANSACTION.IS_BID_OFFER := 0;
+				v_TRANSACTION.MODEL_ID := 1;
+				v_TRANSACTION.TRANSACTION_TYPE := 'PI Records';
+				v_TRANSACTION.BEGIN_DATE := LOW_DATE;
+				v_TRANSACTION.END_DATE := HIGH_DATE;
+				v_TRANSACTION.COMMODITY_ID := 2;
+				v_TRANSACTION.TRANSACTION_INTERVAL := '5 Minute';
+				v_TRANSACTION.TRANSACTION_NAME := v_TRANSACTION_NAME;
+				v_TRANSACTION.TRANSACTION_ALIAS := SUBSTR(v_TRANSACTION_NAME,1,32);
+				v_TRANSACTION.TRANSACTION_IDENTIFIER := v_TRANSACTION_NAME;
+				MM_UTIL.PUT_TRANSACTION(p_TRANSACTION_ID, v_TRANSACTION, GA.INTERNAL_STATE, 'Active');
+			ELSE
+		 		p_ERROR_MESSAGE := 'Unable to find Load Transaction associated with ident=' || p_TRANSACTION_IDENT;
+				RETURN;
+			END IF;
+	END;
+
+END ID_FOR_TXN_EXT_IDENT;
+-----------------------------------------------------------------------------------------------
+PROCEDURE PUT_MW_RESULTS(p_TRANSACTION_ID    IN NUMBER,
+                         p_SCHEDULE_DATE     IN DATE,
+--                         p_SCHEDULE_TYPE_IDS IN ID_TABLE,
+                         p_MW                IN NUMBER,
+                         p_STATUS            OUT NUMBER) AS
+
+  v_SCHEDULE_TYPE NUMBER(9) := 1;
+  v_INDEX         BINARY_INTEGER;
+  v_AS_OF_DATE    DATE := LOW_DATE;
+
+BEGIN
+
+--  FOR v_INDEX IN p_SCHEDULE_TYPE_IDS.FIRST .. p_SCHEDULE_TYPE_IDS.LAST LOOP
+--    v_SCHEDULE_TYPE := p_SCHEDULE_TYPE_IDS(v_INDEX).ID;
+
+--    IF v_SCHEDULE_TYPE <> g_FIRST_STATEMENT_TYPE_ID THEN
+        IT.PUT_IT_SCHEDULE(p_TRANSACTION_ID,
+                           v_SCHEDULE_TYPE,
+                           p_SCHEDULE_DATE,
+                           v_AS_OF_DATE,
+                           p_MW, NULL,
+                           p_STATUS);
+--    END IF;
+--  END LOOP;
+
+END PUT_MW_RESULTS;
+--------------------------------------------------------------------------------------------------
+PROCEDURE PUT_RESULTS(p_TBL IN MEX_CA_PI_DATA_TBL, p_MESSAGE OUT VARCHAR2) AS
+
+  v_RECORD         MEX_CA_PI_DATA;
+  i                BINARY_INTEGER;
+  v_TAG            VARCHAR2(80);
+  v_DATE           DATE;
+  v_VALUE          IT_SCHEDULE.AMOUNT%TYPE;
+  v_IDENT          VARCHAR2(64);
+  v_PREV_IDENT     VARCHAR2(64) := 'INIT_VAL';
+  v_TRANSACTION_ID NUMBER(9);
+  v_STATUS         NUMBER;
+
+--  v_SCHEDULE_TYPE_IDS ID_TABLE := MM_CAISO_UTIL.GET_SCHEDULE_TYPE_IDS;
+
+BEGIN
+
+  --Loop over lines
+  FOR i IN p_TBL.FIRST .. p_TBL.LAST LOOP
+    v_RECORD := p_TBL(i);
+
+    v_TAG   := v_RECORD.TAG;
+    v_DATE  := TO_CUT(v_RECORD.DTE, g_TIMEZONE);
+    v_VALUE := v_RECORD.VAL;
+
+    --Build the Transaction_Identifier that should have the name 'PI:<TAG NAME>'
+    v_IDENT := 'PI:' || SUBSTR(v_TAG, 1, 61);
+
+    --Get Transaction_ID from INTERCHANGE_TRANSACTION table
+    IF v_PREV_IDENT <> v_IDENT THEN
+      ID_FOR_TXN_EXT_IDENT(v_IDENT, v_TRANSACTION_ID, p_MESSAGE);
+      v_PREV_IDENT := v_IDENT;
+    END IF;
+
+    --Save data in IT_SCHEDULE table
+    PUT_MW_RESULTS(v_TRANSACTION_ID,
+                   v_DATE,
+                  -- v_SCHEDULE_TYPE_IDS,
+                   v_VALUE,
+                   v_STATUS);
+
+  END LOOP;
+
+EXCEPTION
+  WHEN OTHERS THEN
+    p_MESSAGE := 'Error in MM_CAISO_PI.PUT_RESULTS: ' || SQLERRM;
+
+END PUT_RESULTS;
+--------------------------------------------------------------------------------------------------
+PROCEDURE READ_TXT_FILES(p_CLOB IN CLOB, p_ERROR_MESSAGE OUT VARCHAR2) AS
+
+  v_TBL MEX_CA_PI_DATA_TBL;
+
+BEGIN
+
+	--parse the .TXT file
+	IF g_TRACE_ON THEN
+		UT.DEBUG_TRACE('SENDING TEXT TO MEX.');
+	END IF;
+
+  MEX_PI.PARSE_TXT_FILES(p_CLOB, v_TBL, p_ERROR_MESSAGE);
+
+	IF p_ERROR_MESSAGE IS NOT NULL THEN
+		RETURN;
+	END IF;
+
+  IF g_TRACE_ON THEN
+		UT.DEBUG_TRACE('MEX PARSING SUCCESSFUL.');
+	END IF;
+
+	--store data in MM schema
+	PUT_RESULTS(v_TBL, p_ERROR_MESSAGE);
+
+EXCEPTION
+  WHEN OTHERS THEN
+    p_ERROR_MESSAGE := 'Error in MM_PI.READ_TXT_FILES: ' || SQLERRM;
+
+END READ_TXT_FILES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE GET_PI_FILES_FROM_QUEUE
+	(
+	p_STATUS           OUT NUMBER,
+	p_MESSAGE          OUT VARCHAR2
+	) AS
+
+  v_RESPONSE CLOB;
+  v_CREDENTIALS EXTERNAL_CREDENTIAL;
+  v_NO_MESSAGES BOOLEAN;
+  v_CLOB CLOB;
+
+BEGIN
+
+	MM_CAISO_UTIL.GET_CREDENTIALS(v_CREDENTIALS, p_MESSAGE);
+	IF NOT p_MESSAGE IS NULL THEN
+		p_STATUS := -1;
+		RETURN;
+	END IF;
+
+	MEX_HTTP.MESSAGE_QUEUE_START(v_CREDENTIALS, 'pi', p_MESSAGE);
+	IF p_MESSAGE IS NOT NULL THEN
+		p_STATUS := 2;
+		RETURN;
+	END IF;
+	LOOP
+		MEX_HTTP.MESSAGE_QUEUE_NEXT_CLOB(v_NO_MESSAGES, v_CLOB, p_MESSAGE);
+		IF p_MESSAGE IS NOT NULL THEN
+			p_STATUS := 2;
+			RETURN;
+		END IF;
+
+		EXIT WHEN v_NO_MESSAGES;
+
+     --Read PI data
+		READ_TXT_FILES(v_CLOB, p_MESSAGE);
+		IF p_MESSAGE IS NOT NULL THEN
+			p_STATUS := 2;
+			RETURN;
+		END IF;
+	END LOOP;
+
+END GET_PI_FILES_FROM_QUEUE;
+----------------------------------------------------------------------------------------------------
+end MM_PI;
+/
+

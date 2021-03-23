@@ -1,0 +1,17 @@
+@d:\retailoffice\database\oracle\system\RTO_VERSION.sql
+@d:\retailoffice\database\oracle\system\SYSTEM_DICTIONARY.sql
+@d:\retailoffice\database\oracle\system\SYSTEM_LABEL.sql
+@d:\retailoffice\database\oracle\system\SYSTEM_TABLE.sql
+@d:\retailoffice\database\oracle\packages\GA.sql
+@d:\retailoffice\database\oracle\packages\GB.sql
+@d:\retailoffice\database\oracle\objects\drop.sql
+@d:\retailoffice\database\oracle\objects\build.sql
+@d:\retailoffice\database\oracle\functions\build_independent.sql
+@d:\retailoffice\database\oracle\procedures\build.sql
+@d:\retailoffice\database\oracle\functions\build_dependent.sql
+@d:\retailoffice\database\oracle\views\build.sql
+@d:\retailoffice\database\oracle\packages\build.sql
+@d:\retailoffice\database\oracle\triggers\build.sql
+@d:\retailoffice\database\oracle\systemobjects\build.sql
+@d:\retailoffice\database\oracle\systemobjects\rebuild.sql
+@d:\retailoffice\database\oracle\system\POST_SETUP.sql

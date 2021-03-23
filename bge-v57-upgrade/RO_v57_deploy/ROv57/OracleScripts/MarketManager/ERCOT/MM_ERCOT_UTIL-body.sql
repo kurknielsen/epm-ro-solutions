@@ -1,0 +1,275 @@
+CREATE OR REPLACE PACKAGE BODY MM_ERCOT_UTIL is
+
+-------------------------------------------------------------------------------------
+FUNCTION WHAT_VERSION RETURN VARCHAR2 IS
+BEGIN
+    RETURN '$Revision: 1.1 $';
+END WHAT_VERSION;
+---------------------------------------------------------------------------------------------------
+FUNCTION ID_FOR_ZONE(p_ZONE_IDENT IN VARCHAR2) RETURN NUMBER IS
+--GET THE ZONE ID.
+	v_ZONE_ID NUMBER(9);
+
+BEGIN
+
+	IF p_ZONE_IDENT IS NULL THEN
+		RETURN 0;
+	END IF;
+
+	BEGIN
+		SELECT SERVICE_ZONE_ID
+		  INTO v_ZONE_ID
+		  FROM SERVICE_ZONE
+		 WHERE SERVICE_ZONE_NAME = p_ZONE_IDENT;
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+			IO.PUT_SERVICE_ZONE(v_ZONE_ID,
+								p_ZONE_IDENT, ---p_SERVICE_ZONE_NAME
+								p_ZONE_IDENT, ---p_SERVICE_ZONE_ALIAS
+								'ERCOT Zone', ---p_SERVICE_ZONE_DESC
+								0,
+								NULL,
+								0,
+								0,
+								NULL);
+	END;
+
+END ID_FOR_ZONE;
+-------------------------------------------------------------------------------------
+FUNCTION GET_ERCOT_SC_ID RETURN NUMBER IS
+
+BEGIN
+	RETURN ID.ID_FOR_SC('ERCOT');
+END GET_ERCOT_SC_ID;
+------------------------------------------------------------------------------------
+FUNCTION GET_COMMODITY_ID(p_MARKET_TYPE  IN VARCHAR2,
+						  p_SERVICE_TYPE IN VARCHAR2 := 'Energy')
+	RETURN NUMBER IS
+
+	v_NAME         IT_COMMODITY.COMMODITY_NAME%TYPE;
+	v_COMM_ALIAS   IT_COMMODITY.COMMODITY_ALIAS%TYPE;
+	v_MARKET_TYPE  IT_COMMODITY.MARKET_TYPE%TYPE;
+	v_COMMODITY_ID NUMBER(9);
+
+BEGIN
+
+	IF p_MARKET_TYPE = g_MKT_CLEARING_PRICE THEN
+		v_COMM_ALIAS := 'RT';
+	ELSE
+		v_COMM_ALIAS := 'DA';
+	END IF;
+
+	SELECT COMMODITY_ID
+	  INTO v_COMMODITY_ID
+	  FROM IT_COMMODITY
+	 WHERE COMMODITY_ALIAS = v_COMM_ALIAS;
+
+	RETURN v_COMMODITY_ID;
+
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		BEGIN
+			IF p_MARKET_TYPE = g_MKT_CLEARING_PRICE THEN
+				v_MARKET_TYPE := g_MM_REALTIME;
+			ELSE
+				v_MARKET_TYPE := g_MM_DAYAHEAD;
+			END IF;
+			v_NAME := v_MARKET_TYPE || ' ' || p_SERVICE_TYPE;
+
+			IO.PUT_IT_COMMODITY(o_OID                    => v_COMMODITY_ID,
+								p_COMMODITY_NAME         => v_NAME,
+								p_COMMODITY_ALIAS        => v_COMM_ALIAS, -- lookup key
+								p_COMMODITY_DESC         => v_NAME,
+								p_COMMODITY_ID           => 0,
+								p_COMMODITY_TYPE         => p_SERVICE_TYPE,
+								p_COMMODITY_UNIT         => 'MWH',
+								p_COMMODITY_UNIT_FORMAT  => '?',
+								p_COMMODITY_PRICE_UNIT   => 'Dollars',
+								p_COMMODITY_PRICE_FORMAT => '?',
+								p_IS_VIRTUAL             => 0,
+								p_MARKET_TYPE            => v_MARKET_TYPE);
+
+		END;
+
+		RETURN v_COMMODITY_ID;
+
+END GET_COMMODITY_ID;
+------------------------------------------------------------------------------------
+FUNCTION GET_PRICE_INTERVAL(p_MARKET_TYPE IN VARCHAR2) RETURN VARCHAR2 AS
+BEGIN
+
+	IF p_MARKET_TYPE = g_MKT_CLEARING_PRICE THEN
+		RETURN '15 Minutes';
+	ELSIF p_MARKET_TYPE = g_ANCILLARY_SERVICE THEN
+		RETURN 'Hour';
+	END IF;
+
+END GET_PRICE_INTERVAL;
+------------------------------------------------------------------------------------
+FUNCTION GET_POD_ID(p_SP_IDENT IN VARCHAR2) RETURN NUMBER IS
+	v_SERVICE_POINT_ID NUMBER(9);
+--IF THE ID DOESN'T EXIST THEN NO NEW ENTITY IS CREATED
+BEGIN
+	SELECT SERVICE_POINT_ID
+	  INTO v_SERVICE_POINT_ID
+	  FROM SERVICE_POINT
+	 WHERE EXTERNAL_IDENTIFIER = p_SP_IDENT;
+
+	 RETURN v_SERVICE_POINT_ID;
+END GET_POD_ID;
+------------------------------------------------------------------------------------
+FUNCTION GET_TX_ID
+  (
+  p_EXT_ID IN VARCHAR2,
+  p_TRANS_TYPE IN VARCHAR2 := 'Market Result',
+  p_NAME IN VARCHAR2 := NULL,
+  p_INTERVAL IN VARCHAR2 := 'Hour',
+  p_COMMODITY_ID IN NUMBER := 0,
+  p_CONTRACT_ID IN NUMBER := 0,
+  p_ZOD_ID IN NUMBER := 0,
+  p_SERVICE_POINT_ID IN NUMBER := 0,
+  p_POOL_ID IN NUMBER := 0,
+  p_SELLER_ID IN NUMBER := 0
+  ) RETURN NUMBER IS
+
+  v_ID NUMBER;
+  v_SC NUMBER(9);
+  v_SUFFIX VARCHAR2(64) := '';
+  v_TMP VARCHAR2(32);
+  v_NAME VARCHAR2(64);
+  v_TRANSACTION INTERCHANGE_TRANSACTION%ROWTYPE;
+  v_TRANSACTION_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+
+BEGIN
+	IF p_EXT_ID IS NULL THEN
+        SELECT TRANSACTION_ID
+        INTO v_ID
+        FROM INTERCHANGE_TRANSACTION
+        WHERE TRANSACTION_TYPE = p_TRANS_TYPE
+            AND CONTRACT_ID = p_CONTRACT_ID
+            AND (p_SERVICE_POINT_ID = 0 OR POD_ID = p_SERVICE_POINT_ID)
+            AND (p_POOL_ID = 0 OR POOL_ID = p_POOL_ID)
+			AND (p_SELLER_ID = 0 OR SELLER_ID = p_SELLER_ID)
+            AND (p_ZOD_ID = 0 OR ZOD_ID = p_ZOD_ID);
+	ELSE
+        SELECT TRANSACTION_ID
+        INTO v_ID
+        FROM INTERCHANGE_TRANSACTION
+        WHERE TRANSACTION_IDENTIFIER = p_EXT_ID
+            AND (p_CONTRACT_ID = 0 OR CONTRACT_ID = p_CONTRACT_ID)
+            AND (p_SERVICE_POINT_ID = 0 OR POD_ID = p_SERVICE_POINT_ID)
+            AND (p_POOL_ID = 0 OR POOL_ID = p_POOL_ID)
+			AND (p_SELLER_ID = 0 OR SELLER_ID = p_SELLER_ID)
+            AND (p_ZOD_ID = 0 OR ZOD_ID = p_ZOD_ID);
+	END IF;
+
+	RETURN v_ID;
+
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		v_NAME := NVL(p_NAME,p_EXT_ID);
+
+        SELECT SC_ID
+        INTO v_SC
+        FROM SCHEDULE_COORDINATOR
+        WHERE SC_NAME = g_ERCOT_MKT;
+
+		IF p_CONTRACT_ID <> 0 THEN
+    	    SELECT ': '||CONTRACT_NAME
+	        INTO v_TMP
+	        FROM INTERCHANGE_CONTRACT
+	        WHERE CONTRACT_ID = p_CONTRACT_ID;
+			v_SUFFIX := v_SUFFIX||v_TMP;
+		END IF;
+        IF p_SELLER_ID <> 0 THEN
+    	    SELECT ': '||PSE_NAME
+	        INTO v_TMP
+	        FROM PURCHASING_SELLING_ENTITY
+	        WHERE PSE_ID = p_SELLER_ID;
+			v_SUFFIX := v_SUFFIX||v_TMP;
+        END IF;
+        IF p_POOL_ID <> 0 THEN
+    	    SELECT ': '||POOL_NAME
+	        INTO v_TMP
+	        FROM POOL
+	        WHERE POOL_ID = p_POOL_ID;
+			v_SUFFIX := v_SUFFIX||v_TMP;
+        END IF;
+        IF p_SERVICE_POINT_ID <> 0 THEN
+    	    SELECT ': '||SERVICE_POINT_NAME
+	        INTO v_TMP
+	        FROM SERVICE_POINT
+	        WHERE SERVICE_POINT_ID = p_SERVICE_POINT_ID;
+			v_SUFFIX := v_SUFFIX||v_TMP;
+        END IF;
+
+	--create the transaction
+    	v_TRANSACTION.TRANSACTION_ID := 0;
+        v_TRANSACTION.TRANSACTION_NAME := SUBSTR(v_NAME||v_SUFFIX,1,64);
+        v_TRANSACTION.TRANSACTION_ALIAS := SUBSTR(v_NAME||v_SUFFIX,1,32);
+        v_TRANSACTION.TRANSACTION_DESC := v_NAME||v_SUFFIX;
+        v_TRANSACTION.TRANSACTION_TYPE := p_TRANS_TYPE;
+        v_TRANSACTION.TRANSACTION_IDENTIFIER := p_EXT_ID;
+        v_TRANSACTION.TRANSACTION_INTERVAL := p_INTERVAL;
+        v_TRANSACTION.BEGIN_DATE := TO_DATE('1/1/2004','MM/DD/YYYY');
+        v_TRANSACTION.END_DATE := TO_DATE('12/31/2020','MM/DD/YYYY');
+        v_TRANSACTION.SELLER_ID := p_SELLER_ID;
+        v_TRANSACTION.CONTRACT_ID := p_CONTRACT_ID;
+        v_TRANSACTION.SC_ID := v_SC;
+        v_TRANSACTION.POD_ID := p_SERVICE_POINT_ID;
+        v_TRANSACTION.POOL_ID := p_POOL_ID;
+        v_TRANSACTION.ZOD_ID := p_ZOD_ID;
+        v_TRANSACTION.COMMODITY_ID := p_COMMODITY_ID;
+
+		MM_UTIL.PUT_TRANSACTION(v_TRANSACTION_ID, v_TRANSACTION, GA.INTERNAL_STATE, 'Active');
+
+		RETURN v_TRANSACTION_ID;
+END GET_TX_ID;
+---------------------------------------------------------------------------------------------------
+PROCEDURE PUT_SCHEDULE_VALUE(p_TX_ID         IN NUMBER,
+							 p_SCHED_DATE    IN DATE,
+							 p_AMOUNT        NUMBER,
+							 p_SCHEDULE_TYPE NUMBER := 1,
+							 p_PRICE         NUMBER := NULL,
+							 p_TO_INTERNAL   BOOLEAN := TRUE) AS
+
+	v_STATUS NUMBER;
+	v_IDX    BINARY_INTEGER;
+
+BEGIN
+
+	--Based on p_SCHEDULE_TYPE value, update the schedule types (Initial, Final, True-Up)
+	FOR v_IDX IN p_SCHEDULE_TYPE .. g_STATEMENT_TYPE_ID_ARRAY.COUNT LOOP
+		IF p_TO_INTERNAL THEN
+			ITJ.PUT_IT_SCHEDULE(p_TRANSACTION_ID => p_TX_ID,
+							   p_SCHEDULE_TYPE  => g_STATEMENT_TYPE_ID_ARRAY(v_IDX),
+							   p_SCHEDULE_STATE => GA.INTERNAL_STATE,
+							   p_SCHEDULE_DATE  => p_SCHED_DATE,
+							   p_AS_OF_DATE     => SYSDATE,
+							   p_AMOUNT         => p_AMOUNT,
+							   p_PRICE          => p_PRICE,
+							   p_STATUS         => v_STATUS);
+		END IF;
+		ITJ.PUT_IT_SCHEDULE(p_TRANSACTION_ID => p_TX_ID,
+						   p_SCHEDULE_TYPE  => g_STATEMENT_TYPE_ID_ARRAY(v_IDX),
+						   p_SCHEDULE_STATE => GA.EXTERNAL_STATE,
+						   p_SCHEDULE_DATE  => p_SCHED_DATE,
+						   p_AS_OF_DATE     => SYSDATE,
+						   p_AMOUNT         => p_AMOUNT,
+						   p_PRICE          => p_PRICE,
+						   p_STATUS         => v_STATUS);
+	END LOOP;
+
+  END PUT_SCHEDULE_VALUE;
+---------------------------------------------------------------------------------------------------
+BEGIN
+	FOR v_ARRAY_INDEX IN 1 .. g_STATEMENT_TYPE_ARRAY.COUNT LOOP
+		g_STATEMENT_TYPE_ID_ARRAY.EXTEND();
+		SELECT S.STATEMENT_TYPE_ID
+			INTO g_STATEMENT_TYPE_ID_ARRAY(v_ARRAY_INDEX)
+			FROM STATEMENT_TYPE S
+		 WHERE S.STATEMENT_TYPE_NAME LIKE g_STATEMENT_TYPE_ARRAY(v_ARRAY_INDEX) || '%';
+	END LOOP;
+
+END MM_ERCOT_UTIL;
+/

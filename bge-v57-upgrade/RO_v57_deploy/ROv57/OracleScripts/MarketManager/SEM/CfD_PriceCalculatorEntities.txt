@@ -1,0 +1,372 @@
+begin object
+   table_name:PURCHASING_SELLING_ENTITY
+   table_alias:PSE
+   PSE_ID:*PURCHASING_SELLING_ENTITY-0000
+   PSE_NAME:"Market Price Calculator PSE
+   PSE_ALIAS:"?
+   PSE_DESC:"?
+   PSE_NERC_CODE:"?
+   PSE_STATUS:"Active
+   PSE_DUNS_NUMBER:"?
+   PSE_BANK:"?
+   PSE_ACH_NUMBER:"?
+   PSE_TYPE:"IPP
+   PSE_EXTERNAL_IDENTIFIER:"Market Price Calculator PSE
+   PSE_IS_RETAIL_AGGREGATOR:#0
+   PSE_IS_BACKUP_GENERATION:#0
+   PSE_EXCLUDE_LOAD_SCHEDULE:#0
+   IS_BILLING_ENTITY:#1
+   TIME_ZONE:"EDT
+   STATEMENT_INTERVAL:"Day
+   INVOICE_INTERVAL:"Day
+   WEEK_BEGIN:"First of Month
+   INVOICE_LINE_ITEM_OPTION:"By Product-Component
+   ENTRY_DATE:@May-01-2008 17:31:41
+end object
+begin object
+   table_name:SCHEDULE_COORDINATOR
+   table_alias:SC
+   SC_ID:*SCHEDULE_COORDINATOR-0001
+   SC_NAME:"SEM
+   SC_ALIAS:"SEM
+   SC_DESC:"SEM
+   SC_NERC_CODE:"?
+   SC_DUNS_NUMBER:"?
+   SC_STATUS:"Active
+   SC_EXTERNAL_IDENTIFIER:"SEM
+   SC_SCHEDULE_NAME_PREFIX:"?
+   SC_SCHEDULE_FORMAT:"Schedule Group
+   SC_SCHEDULE_INTERVAL:"Day
+   SC_LOAD_ROUNDING_PREFERENCE:"None
+   SC_LOSS_ROUNDING_PREFERENCE:"None
+   SC_CREATE_TX_LOSS_SCHEDULE:#0
+   SC_CREATE_DX_LOSS_SCHEDULE:#0
+   SC_CREATE_UFE_SCHEDULE:#0
+   SC_MARKET_PRICE_ID:#0
+   SC_MINIMUM_SCHEDULE_AMT:#0
+   ENTRY_DATE:@Apr-23-2008 15:23:47
+end object
+begin object
+   table_name:IT_COMMODITY
+   table_alias:COMMODITY
+   COMMODITY_ID:*IT_COMMODITY-0002
+   COMMODITY_NAME:"Energy
+   COMMODITY_ALIAS:"Energy
+   COMMODITY_DESC:"Energy
+   COMMODITY_TYPE:"Energy
+   COMMODITY_UNIT:"MWH
+   COMMODITY_UNIT_FORMAT:"?
+   COMMODITY_PRICE_UNIT:"Dollars
+   COMMODITY_PRICE_FORMAT:"?
+   IS_VIRTUAL:#
+   MARKET_TYPE:"
+   ENTRY_DATE:@Jan-23-2007 10:37:11
+end object
+begin object
+   table_name:MARKET_PRICE
+   table_alias:MARKET_PRICE
+   MARKET_PRICE_ID:*MARKET_PRICE-0003
+   MARKET_PRICE_NAME:"SEM:Capacity Payments Demand Price
+   MARKET_PRICE_ALIAS:"CPDP
+   MARKET_PRICE_DESC:"?
+   MARKET_PRICE_TYPE:"User Defined
+   MARKET_PRICE_INTERVAL:"30 Minute
+   MARKET_TYPE:"?
+   COMMODITY_ID:*IT_COMMODITY-0002
+   SERVICE_POINT_TYPE:"?
+   EXTERNAL_IDENTIFIER:"Capacity Payments Demand Price
+   EDC_ID:#0
+   SC_ID:*SCHEDULE_COORDINATOR-0001
+   POD_ID:#0
+   ZOD_ID:#0
+   ENTRY_DATE:@Oct-18-2007 17:12:35
+end object
+begin object
+   table_name:MARKET_PRICE
+   table_alias:MARKET_PRICE
+   MARKET_PRICE_ID:*MARKET_PRICE-0004
+   MARKET_PRICE_NAME:"SEM:Capacity Payments Generation Price
+   MARKET_PRICE_ALIAS:"CPGP
+   MARKET_PRICE_DESC:"?
+   MARKET_PRICE_TYPE:"User Defined
+   MARKET_PRICE_INTERVAL:"30 Minute
+   MARKET_TYPE:"?
+   COMMODITY_ID:*IT_COMMODITY-0002
+   SERVICE_POINT_TYPE:"?
+   EXTERNAL_IDENTIFIER:"Capacity Payments Generation Price
+   EDC_ID:#0
+   SC_ID:*SCHEDULE_COORDINATOR-0001
+   POD_ID:#0
+   ZOD_ID:#0
+   ENTRY_DATE:@Oct-18-2007 17:12:44
+end object
+begin object
+   table_name:MARKET_PRICE
+   table_alias:MARKET_PRICE
+   MARKET_PRICE_ID:*MARKET_PRICE-0005
+   MARKET_PRICE_NAME:"SEM:System Marginal Price Euro
+   MARKET_PRICE_ALIAS:"?
+   MARKET_PRICE_DESC:"?
+   MARKET_PRICE_TYPE:"Commodity Price
+   MARKET_PRICE_INTERVAL:"30 Minute
+   MARKET_TYPE:"?
+   COMMODITY_ID:*IT_COMMODITY-0002
+   SERVICE_POINT_TYPE:"?
+   EXTERNAL_IDENTIFIER:"System Marginal Price Euro
+   EDC_ID:#0
+   SC_ID:*SCHEDULE_COORDINATOR-0001
+   POD_ID:#0
+   ZOD_ID:#0
+   ENTRY_DATE:@Aug-07-2007 08:42:13
+end object
+begin object
+   table_name:COMPONENT
+   table_alias:COMPONENT
+   COMPONENT_ID:*COMPONENT-0006
+   COMPONENT_NAME:"Market Price Calculator - 30 Min
+   COMPONENT_ALIAS:"?
+   COMPONENT_DESC:"Calculates 30-minute resultant market prices.
+   COMPONENT_ENTITY:"PSE
+   CHARGE_TYPE:"?
+   RATE_STRUCTURE:"Formula
+   RATE_INTERVAL:"30 Minute
+   IS_REBILL:#0
+   IS_TAXED:#0
+   IS_CUSTOM_CHARGE:#0
+   IS_CREDIT_CHARGE:#0
+   IS_INCLUDE_TX_LOSS:#0
+   IS_INCLUDE_DX_LOSS:#0
+   TEMPLATE_ID:#0
+   MARKET_PRICE_ID:#0
+   SERVICE_POINT_ID:#0
+   MODEL_ID:#1
+   EVENT_ID:#0
+   COMPONENT_REFERENCE:"None
+   INVOICE_GROUP_ID:#0
+   INVOICE_GROUP_ORDER:#0
+   COMPUTATION_ORDER:#0
+   QUANTITY_UNIT:"?
+   CURRENCY_UNIT:"?
+   QUANTITY_TYPE:"?
+   EXTERNAL_IDENTIFIER:"?
+   COMPONENT_CATEGORY:"?
+   GL_DEBIT_ACCOUNT:"?
+   GL_CREDIT_ACCOUNT:"?
+   FIRM_NON_FIRM:"Either
+   EXCLUDE_FROM_INVOICE:#0
+   EXCLUDE_FROM_INVOICE_TOTAL:#0
+   IMBALANCE_TYPE:"?
+   ACCUMULATION_PERIOD:#0
+   BASE_COMPONENT_ID:#0
+   BASE_LIMIT_ID:#0
+   MARKET_TYPE:"Real-Time
+   MARKET_PRICE_TYPE:"Locational Marginal Price
+   WHICH_INTERVAL:"First
+   LMP_PRICE_CALC:"Actual
+   LMP_INCLUDE_EXT:#0
+   LMP_INCLUDE_SALES:"All
+   CHARGE_WHEN:"Either
+   BILATERALS_SIGN:#1
+   LMP_COMMODITY_ID:#0
+   LMP_BASE_COMMODITY_ID:#0
+   USE_ZONAL_PRICE:#0
+   ALTERNATE_PRICE:"None
+   ALTERNATE_PRICE_FUNCTION:"Min
+   ENTRY_DATE:@May-02-2008 14:37:31
+   begin subtable
+      table_name:COMPONENT_FORMULA_INPUT
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"CPDP
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Sum
+         ENTITY_DOMAIN_ID:#-610
+         ENTITY_ID:*MARKET_PRICE-0003
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@May-02-2008 14:16:35
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"CPGP
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Sum
+         ENTITY_DOMAIN_ID:#-610
+         ENTITY_ID:*MARKET_PRICE-0004
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@May-02-2008 14:37:31
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"SMP_Euro
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Sum
+         ENTITY_DOMAIN_ID:#-610
+         ENTITY_ID:*MARKET_PRICE-0005
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@May-02-2008 14:16:35
+      end row
+   end subtable
+   begin subtable
+      table_name:COMPONENT_FORMULA_VARIABLE
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"#CHARGE QUANTITY#
+         BEGIN_DATE:@Jan-01-1900 00:00:00
+         END_DATE:@
+         FORMULA:"0
+         COMMENTS:"
+         ROW_NUMBER:#0
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@May-02-2008 09:28:09
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"#CHARGE RATE#
+         BEGIN_DATE:@Jan-01-1900 00:00:00
+         END_DATE:@
+         FORMULA:"0
+         COMMENTS:"
+         ROW_NUMBER:#0
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@May-02-2008 09:28:09
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"CustomRate1
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"CPDP+0.1*SMP_Euro
+         COMMENTS:"
+         ROW_NUMBER:#1
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@May-02-2008 14:35:12
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"CustomRate1Store
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"MM_SEM_CFD_UTIL.PUT_MARKET_PRICE('CustomRate1', :cut_now, CustomRate1)
+         COMMENTS:"
+         ROW_NUMBER:#2
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@May-02-2008 14:35:12
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"CustomRate2
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"CPDP+0.25*CPGP
+         COMMENTS:"
+         ROW_NUMBER:#3
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@May-02-2008 14:37:03
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"CustomRate2Store
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"MM_SEM_CFD_UTIL.PUT_MARKET_PRICE('CustomRate2', :cut_now, CustomRate2)
+         COMMENTS:"
+         ROW_NUMBER:#4
+         PERSIST_VALUE:#
+         ENTRY_DATE:@May-02-2008 14:37:03
+      end row
+   end subtable
+end object
+begin object
+   table_name:PRODUCT
+   table_alias:PRODUCT
+   PRODUCT_ID:*PRODUCT-0007
+   PRODUCT_NAME:"Market Price Calculator Product
+   PRODUCT_ALIAS:"?
+   PRODUCT_DESC:"?
+   PRODUCT_EXTERNAL_IDENTIFIER:"?
+   PRODUCT_CATEGORY:"?
+   BEGIN_DATE:@Jan-01-2007 00:00:00
+   END_DATE:@Jan-01-2020 00:00:00
+   ENTRY_DATE:@May-01-2008 16:52:36
+   begin subtable
+      table_name:PRODUCT_COMPONENT
+      relationship:PRODUCT_ID
+      begin row
+         PRODUCT_ID:*PRODUCT-0007
+         COMPONENT_ID:*COMPONENT-0006
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@Jan-01-2020 00:00:00
+         ENTRY_DATE:@May-01-2008 16:52:36
+      end row
+   end subtable
+end object
+begin object
+   table_name:INTERCHANGE_CONTRACT
+   table_alias:CONTRACT
+   CONTRACT_ID:*INTERCHANGE_CONTRACT-0008
+   CONTRACT_NAME:"Market Price Calculator Contract
+   CONTRACT_ALIAS:"?
+   CONTRACT_DESC:"Contract to reference the Market Price Calculator PSE and the Market Price Calculator product and component, for custom market price creation using the billing engine.
+   CONTRACT_STATUS:"Active
+   BEGIN_DATE:@Jan-01-2007 00:00:00
+   END_DATE:@Jan-01-2020 00:00:00
+   IS_EVERGREEN:#0
+   CONTRACT_TYPE:"Supply
+   BILLING_ENTITY_ID:*PURCHASING_SELLING_ENTITY-0000
+   PURCHASER_ID:#0
+   SELLER_ID:#0
+   SOURCE_ID:#0
+   SINK_ID:#0
+   POR_ID:#0
+   POD_ID:#0
+   SC_ID:#0
+   AGREEMENT_TYPE:"Enabling
+   APPROVAL_TYPE:"?
+   MARKET_TYPE:"?
+   LOSS_OPTION:"?
+   CONTRACT_FILE_NAME:"?
+   PIPELINE_ID:#0
+   PIPELINE_TARIFF_TYPE:"Zone to Zone
+   ENTRY_DATE:@May-01-2008 18:00:51
+   begin subtable
+      table_name:CONTRACT_PRODUCT_COMPONENT
+      relationship:CONTRACT_ID
+      begin row
+         CONTRACT_ID:*INTERCHANGE_CONTRACT-0008
+         PRODUCT_ID:*PRODUCT-0007
+         COMPONENT_ID:*COMPONENT-0006
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@Jan-01-2020 00:00:00
+         ENTRY_DATE:@May-01-2008 16:53:01
+      end row
+   end subtable
+end object

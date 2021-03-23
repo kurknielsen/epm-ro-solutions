@@ -1,0 +1,6136 @@
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+  1  comment on column BILL_CASE.RELEASE_BY
+  2*   is 'Who released a Bill Case.'
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+CREATE INDEX RET_INV_PRICING_RESULT_IX01...
+
+Index created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+CREATE INDEX RET_INV_PRICING_RESULT_IX01...
+
+Index created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+

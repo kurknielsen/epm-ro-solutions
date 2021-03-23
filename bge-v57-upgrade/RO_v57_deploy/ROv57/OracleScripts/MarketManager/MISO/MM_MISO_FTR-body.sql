@@ -1,0 +1,423 @@
+CREATE OR REPLACE PACKAGE BODY MM_MISO_FTR AS
+
+-------------------------------------------------------------------------------------
+FUNCTION WHAT_VERSION RETURN VARCHAR2 IS
+BEGIN
+    RETURN '$Revision: 1.1 $';
+END WHAT_VERSION;
+---------------------------------------------------------------------------------------------------
+    FUNCTION SAFE_STRING(
+        p_XML IN XMLTYPE,
+        p_XPATH IN VARCHAR2,
+        p_NAMESPACE IN VARCHAR2 := NULL
+    )
+        RETURN VARCHAR2 IS
+        --RETURN TEXT FOR A PATH OR NULL IF IT DOESN'T EXIST.
+        v_XMLTMP XMLTYPE;
+    BEGIN
+        v_XMLTMP := XMLTYPE.EXTRACT(p_XML, p_XPATH, p_NAMESPACE);
+
+        IF v_XMLTMP IS NULL THEN
+            RETURN NULL;
+        ELSE
+            RETURN v_XMLTMP.GETSTRINGVAL();
+        END IF;
+    END SAFE_STRING;
+----------------------------------------------------------------------------------------------------
+    PROCEDURE GET_FTR_BID_PROFILE(
+        p_TRANSACTION_ID IN NUMBER,
+        p_SCHEDULE_DATE IN DATE,
+        p_SUBMIT_XML OUT XMLTYPE,
+        p_ERROR_MESSAGE OUT VARCHAR2,
+		p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+        v_SCHEDULE_STATE NUMBER(1) := GA.INTERNAL_STATE;
+        v_REQUEST_XML XMLTYPE := XMLTYPE.CREATEXML('<FTRBidProfiles/>');                                                                                                                                                       --DUMMY REQUEST XML FOR LOGGING
+    BEGIN
+
+        --LOG THE EXCHANGE FOR NOW UNTIL THIS IS A REAL EXPORT.
+		p_LOGGER.LOG_INFO('MISO FTR Bid Profile submittal not supported.  XML will be logged to the Exchange Log.');
+
+        --*****ASSUME THIS IS A PTP FTR**************************************
+        SELECT   XMLELEMENT("bids",
+                            XMLATTRIBUTES(g_FTR_NAMESPACE_NAME AS "xmlns", 'PTP' AS "bidFTRType"),
+                            XMLELEMENT("aoName", C.PSE_EXTERNAL_IDENTIFIER),
+                            XMLELEMENT("sourceName", D.EXTERNAL_IDENTIFIER),
+                            XMLELEMENT("sinkName", E.EXTERNAL_IDENTIFIER),
+                            XMLELEMENT("OPT_OBL", CASE INSTR(B.COMMODITY_NAME, ' Option')
+                                           WHEN 0 THEN 'OBL'
+                                           ELSE 'OPT'
+                                       END),
+                            XMLELEMENT("peak_offPeak", CASE INSTR(B.COMMODITY_NAME, ' On ')
+                                           WHEN 0 THEN 'OFF-PEAK'
+                                           ELSE 'PEAK'
+                                       END),
+                            XMLELEMENT("type", CASE A.TRANSACTION_TYPE
+                                           WHEN 'Purchase' THEN 'BUY'
+                                           ELSE 'SELL'
+                                       END),
+                            XMLELEMENT("bidCurves", XMLAGG(XMLELEMENT("bidPoint", XMLATTRIBUTES(TO_CHAR(G.QUANTITY) AS "mw", TO_CHAR(G.PRICE) AS "priceperMW"))))
+                           )
+        INTO     p_SUBMIT_XML
+        FROM     INTERCHANGE_TRANSACTION A, IT_COMMODITY B, PURCHASING_SELLING_ENTITY C, SERVICE_POINT D, SERVICE_POINT E, BID_OFFER_SET G
+        WHERE    A.TRANSACTION_ID = p_TRANSACTION_ID
+        AND      B.COMMODITY_ID = A.COMMODITY_ID
+        AND      C.PSE_ID = A.PSE_ID
+        AND      D.SERVICE_POINT_ID = A.SOURCE_ID
+        AND      E.SERVICE_POINT_ID = A.SINK_ID
+        AND      G.TRANSACTION_ID = p_TRANSACTION_ID
+        AND      G.SCHEDULE_STATE = v_SCHEDULE_STATE
+        AND      TRUNC(G.SCHEDULE_DATE) = TRUNC(p_SCHEDULE_DATE)
+        GROUP BY C.PSE_EXTERNAL_IDENTIFIER, D.EXTERNAL_IDENTIFIER, E.EXTERNAL_IDENTIFIER, B.COMMODITY_NAME, A.TRANSACTION_TYPE;
+
+        -- @todo: submit it!
+
+        --LOG THE DETAILS. No Request Headers
+		p_LOGGER.LOG_REQUEST(null, v_REQUEST_XML.GETCLOBVAL, 'text/xml');
+
+    END GET_FTR_BID_PROFILE;
+
+-------------------------------------------------------------------------------------
+    FUNCTION GET_FTR_TRANSACTION_ID(
+        p_ISO_FTR_IDENT IN VARCHAR2,
+        p_TRANSACTION_TYPE IN VARCHAR2,
+        p_ASSET_OWNER_NAME IN VARCHAR2,
+        p_FLOWGATE_NAME IN VARCHAR2,
+        p_SOURCE_NAME IN VARCHAR2,
+        p_SINK_NAME IN VARCHAR2,
+		p_OPT_OBL IN VARCHAR2,
+        p_IS_ON_PEAK IN NUMBER,
+		p_BEGIN_DATE IN DATE,
+		p_END_DATE IN DATE,
+        p_CREATE_IF_NOT_FOUND IN BOOLEAN,
+        p_ERROR_MESSAGE OUT VARCHAR2
+    )
+        RETURN NUMBER IS
+		v_TRANSACTION INTERCHANGE_TRANSACTION%ROWTYPE;
+        v_TRANSACTION_ID NUMBER(9) := 0;
+        v_SOURCE_NAME VARCHAR2(64);
+        v_SINK_NAME VARCHAR2(64);
+        v_CONTRACT INTERCHANGE_CONTRACT%ROWTYPE := MM_MISO_UTIL.GET_CONTRACT_FOR_ASSET_OWNER(p_ASSET_OWNER_NAME);
+		v_TRANSACTION_IDENTIFIER INTERCHANGE_TRANSACTION.TRANSACTION_IDENTIFIER%TYPE;
+		v_TRANSACTION_NAME INTERCHANGE_TRANSACTION.TRANSACTION_NAME%TYPE;
+    BEGIN
+
+		IF LOGS.IS_DEBUG_ENABLED THEN
+			LOGS.LOG_DEBUG('GET_FTR_TRANSACTION_ID');
+		END IF;
+
+		v_TRANSACTION_IDENTIFIER := 'MISO-' || p_ASSET_OWNER_NAME || ':FTR:' || p_ISO_FTR_IDENT;
+		v_TRANSACTION_NAME := 'MISO-' || p_ASSET_OWNER_NAME || ':' || p_SOURCE_NAME || ':FTR:' || p_ISO_FTR_IDENT;
+
+		IF LOGS.IS_DEBUG_ENABLED THEN
+			LOGS.LOG_DEBUG('LOOKING FOR FTR TXN:' || v_TRANSACTION_IDENTIFIER);
+		END IF;
+
+        --FIND THE INTERCHANGE TRANSACTION THAT APPLIES.
+		BEGIN
+			SELECT TRANSACTION_ID
+			INTO v_TRANSACTION_ID
+			FROM INTERCHANGE_TRANSACTION
+			WHERE TRANSACTION_IDENTIFIER = v_TRANSACTION_IDENTIFIER;
+
+			-- 17-jan-206, jbc: while this applies strictly to FTRs where ftrType="PTP",
+			-- we'll update the begin/end dates for all of them. Turns out that MISO FTRs
+			-- are awarded on a calendar year, but allocated on a planning year. So for FTRs that
+			-- cross the Jan 1 boundary, MISO revokes the FTR until the transmission is reserved,
+			-- then re-issues them with the new end date.
+			UPDATE INTERCHANGE_TRANSACTION SET BEGIN_DATE=p_BEGIN_DATE, END_DATE=p_END_DATE
+			WHERE TRANSACTION_ID=v_TRANSACTION_ID;
+
+        --CREATE ONE IF IT DOES NOT EXIST.
+		EXCEPTION
+			WHEN NO_DATA_FOUND THEN
+	            IF p_CREATE_IF_NOT_FOUND THEN
+
+			        v_SOURCE_NAME := CASE WHEN p_FLOWGATE_NAME IS NOT NULL THEN p_FLOWGATE_NAME ELSE p_SOURCE_NAME END;
+			        v_SINK_NAME := CASE WHEN p_FLOWGATE_NAME IS NOT NULL THEN p_FLOWGATE_NAME ELSE p_SINK_NAME END;
+
+-- Do not include period name in agreement type for now.
+-- 					IF NOT p_FLOWGATE_NAME IS NULL THEN
+-- 					    v_TRANSACTION.AGREEMENT_TYPE := 'FGR FTR ' || v_PERIOD_NAME || ' Option';
+-- 					ELSIF p_OPT_OBL = 'OPT' THEN
+-- 					    v_TRANSACTION.AGREEMENT_TYPE := 'FTR ' || v_PERIOD_NAME || ' Option';
+-- 					ELSE
+-- 					    v_TRANSACTION.AGREEMENT_TYPE := 'FTR ' || v_PERIOD_NAME || ' Obligation';
+-- 					END IF;
+
+					IF NOT p_FLOWGATE_NAME IS NULL THEN
+					    v_TRANSACTION.AGREEMENT_TYPE := 'FGR FTR Option';
+					ELSIF p_OPT_OBL = 'OPT' THEN
+					    v_TRANSACTION.AGREEMENT_TYPE := 'FTR Option';
+					ELSE
+					    v_TRANSACTION.AGREEMENT_TYPE := 'FTR Obligation';
+					END IF;
+
+	                --Get the correct values in preparation for adding the txn.
+	                ID.ID_FOR_SERVICE_POINT_XID(v_SOURCE_NAME, TRUE, v_TRANSACTION.SOURCE_ID);
+	                ID.ID_FOR_SERVICE_POINT_XID(v_SINK_NAME, TRUE, v_TRANSACTION.SINK_ID);
+
+	                SELECT COMMODITY_ID
+	                INTO   v_TRANSACTION.COMMODITY_ID
+	                FROM   IT_COMMODITY
+	                WHERE  COMMODITY_TYPE = 'Transmission' AND ROWNUM = 1;
+
+	                IF p_TRANSACTION_TYPE = 'Sale' THEN
+	                    v_TRANSACTION.PURCHASER_ID := v_CONTRACT.BILLING_ENTITY_ID;
+						v_TRANSACTION.SELLER_ID := ID.ID_FOR_PSE('MISO');
+	                ELSE
+	                    v_TRANSACTION.SELLER_ID := v_CONTRACT.BILLING_ENTITY_ID;
+						v_TRANSACTION.PURCHASER_ID := ID.ID_FOR_PSE('MISO');
+	                END IF;
+
+					v_TRANSACTION.TRANSACTION_NAME := v_TRANSACTION_NAME;
+	                v_TRANSACTION.TRANSACTION_IDENTIFIER := v_TRANSACTION_IDENTIFIER;
+	                v_TRANSACTION.TRANSACTION_TYPE := p_TRANSACTION_TYPE;
+	                v_TRANSACTION.TRANSACTION_ID := 0;
+	                v_TRANSACTION.IS_BID_OFFER := 1;
+	                v_TRANSACTION.TRANSACTION_INTERVAL := 'Hour';
+	                v_TRANSACTION.EXTERNAL_INTERVAL := 'Month';
+	                v_TRANSACTION.BEGIN_DATE := p_BEGIN_DATE;
+	                v_TRANSACTION.END_DATE := p_END_DATE;
+	                v_TRANSACTION.SC_ID := MM_MISO_UTIL.GET_MISO_SC_ID;
+					v_TRANSACTION.CONTRACT_ID := v_CONTRACT.CONTRACT_ID;
+					v_TRANSACTION.IS_FIRM := 1;
+					v_TRANSACTION.TRAIT_CATEGORY := 'MISO DEMAND';
+
+	                --Create the transaction and get the new ID to return.
+	                MM_UTIL.PUT_TRANSACTION(v_TRANSACTION_ID, v_TRANSACTION, GA.INTERNAL_STATE, 'Active');
+
+	                IF LOGS.IS_DEBUG_ENABLED THEN
+	                    LOGS.LOG_DEBUG('CREATED TRANSACTION ID=' || TO_CHAR(v_TRANSACTION_ID));
+	                    COMMIT;
+	                END IF;
+	            ELSE
+	                p_ERROR_MESSAGE := 'Transaction does not exist.';
+	            END IF;
+		END;
+
+        RETURN v_TRANSACTION_ID;
+    END GET_FTR_TRANSACTION_ID;
+------------------------------------------------------------------------------------
+FUNCTION GET_IS_ON_PEAK
+	(
+	p_CLASS IN VARCHAR2
+	) RETURN NUMBER IS
+BEGIN
+	RETURN CASE WHEN UPPER(p_CLASS) = 'PEAK' THEN 1 ELSE 0 END;
+END GET_IS_ON_PEAK;
+------------------------------------------------------------------------------------
+    PROCEDURE PUT_FTR_AUCTION_RESULTS(
+        p_XML IN XMLTYPE,
+        p_AUCTION_DATE IN DATE,
+        p_STATUS OUT NUMBER,
+        p_ERROR_MESSAGE OUT VARCHAR2
+    ) AS
+        --Save Auction Results to MM.
+        CURSOR c_XML IS
+            SELECT   EXTRACTVALUE(VALUE(T), '/auctionResult/aoName', g_FTR_NAMESPACE) "AO_NAME",
+					 EXTRACTVALUE(VALUE(T), '/auctionResult/FTR_ID', g_FTR_NAMESPACE) "FTR_ID",
+					 EXTRACTVALUE(VALUE(T), '/auctionResult/flowgateName', g_FTR_NAMESPACE) "FLOWGATE_NAME",
+                     EXTRACTVALUE(VALUE(T), '/auctionResult/sourceName', g_FTR_NAMESPACE) "SOURCE_NAME",
+					 EXTRACTVALUE(VALUE(T), '/auctionResult/sinkName', g_FTR_NAMESPACE) "SINK_NAME",
+                     EXTRACTVALUE(VALUE(T), '/auctionResult/OPT_OBL', g_FTR_NAMESPACE) "OPT_OBL",
+					 EXTRACTVALUE(VALUE(T), '/auctionResult/peak_offPeak', g_FTR_NAMESPACE) "PERIOD_NAME",
+                     EXTRACTVALUE(VALUE(T), '/auctionResult/type', g_FTR_NAMESPACE) "BUY_SELL",
+					 EXTRACTVALUE(VALUE(T), '/auctionResult/mw', g_FTR_NAMESPACE) "AWARDED_AMOUNT",
+					 EXTRACTVALUE(VALUE(T), '/auctionResult/price', g_FTR_NAMESPACE) "AWARDED_PRICE",
+                     EXTRACT(VALUE(T), '//bidCurves', g_FTR_NAMESPACE) "BID_CURVE_XML"
+            FROM     TABLE(XMLSEQUENCE(EXTRACT(p_XML, '//auctionResult', g_FTR_NAMESPACE))) T
+            ORDER BY 1, 2, 3, 4, 5, 6;
+
+        CURSOR c_BID_CURVES(
+            v_XML IN XMLTYPE
+        ) IS
+            SELECT EXTRACTVALUE(VALUE(T), '//mw', g_FTR_NAMESPACE) "POINT_AMOUNT", EXTRACTVALUE(VALUE(T), '//pricePerMW', g_FTR_NAMESPACE) "POINT_PRICE"
+            FROM   TABLE(XMLSEQUENCE(EXTRACT(v_XML, '/bidCurves/bidCurve', g_FTR_NAMESPACE))) T;
+
+        v_TRANSACTION_ID NUMBER(9);
+        v_TRANSACTION_TYPE INTERCHANGE_TRANSACTION.TRANSACTION_TYPE%TYPE;
+        v_SET_NUMBER NUMBER(2);
+        v_SCHEDULE_DATE DATE;
+        v_INTERVAL_BEGIN_DATE DATE;
+        v_INTERVAL_END_DATE DATE;
+        v_BEGIN_DATE DATE;
+        v_END_DATE DATE;
+        v_IS_ON_PEAK NUMBER;
+        v_BID_OFFER_DATE DATE := TRUNC(p_AUCTION_DATE, 'MM') + 1 / 86400;
+    BEGIN
+        UT.CUT_DAY_INTERVAL_RANGE(GA.ELECTRIC_MODEL, p_AUCTION_DATE, ADD_MONTHS(p_AUCTION_DATE, 1) - 1, MM_MISO_UTIL.g_MISO_TIMEZONE, 60, v_INTERVAL_BEGIN_DATE, v_INTERVAL_END_DATE);
+        UT.CUT_DATE_RANGE(GA.ELECTRIC_MODEL, p_AUCTION_DATE, ADD_MONTHS(p_AUCTION_DATE, 1) - 1, MM_MISO_UTIL.g_MISO_TIMEZONE, v_BEGIN_DATE, v_END_DATE);
+
+        --WIPE OUT IT_SCHEDULE FTR DATA FOR THE DATE RANGE.
+--         DELETE      IT_SCHEDULE
+--         WHERE       TRANSACTION_ID IN(SELECT A.TRANSACTION_ID
+--                                       FROM   INTERCHANGE_TRANSACTION A, IT_COMMODITY B
+--                                       WHERE  B.COMMODITY_TYPE = v_COMMODITY_TYPE AND A.COMMODITY_ID = B.COMMODITY_ID AND A.TRANSACTION_TYPE IN('Purchase', 'Sale'))
+--         --TODO: SCHEDULE TYPE IS ALL?  THIS IS NOT A GOOD USE OF INDEX.
+--         AND         SCHEDULE_STATE = GA.INTERNAL_STATE
+--         AND         SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+--         AND         AS_OF_DATE = v_AS_OF_DATE;
+
+        FOR v_XML IN c_XML LOOP
+
+			--DETERMINE AGREEMENT TYPE
+			v_IS_ON_PEAK := GET_IS_ON_PEAK(v_XML.PERIOD_NAME);
+
+			--DETERMINE TRANSACTION TYPE
+			IF v_XML.BUY_SELL = 'BUY' THEN
+			    v_TRANSACTION_TYPE := 'Purchase';
+			ELSE
+			    v_TRANSACTION_TYPE := 'Sale';
+			END IF;
+
+            --GET THE TRANSACTION ID; CREATE TXN IF IT DOES NOT EXIST.
+            v_TRANSACTION_ID := GET_FTR_TRANSACTION_ID(v_XML.FTR_ID, v_TRANSACTION_TYPE, v_XML.AO_NAME, v_XML.FLOWGATE_NAME,
+					v_XML.SOURCE_NAME, v_XML.SINK_NAME, v_XML.OPT_OBL, v_IS_ON_PEAK,
+					TRUNC(p_AUCTION_DATE,'MM'), ADD_MONTHS(TRUNC(p_AUCTION_DATE,'MM'),12), TRUE, p_ERROR_MESSAGE);
+
+            IF p_ERROR_MESSAGE IS NOT NULL THEN
+                p_STATUS := -1;
+                ROLLBACK;
+                RETURN;
+            END IF;
+
+            --SAVE THE AWARDED AMOUNT AND PRICE FOR THE PERIOD.
+            v_SCHEDULE_DATE := v_INTERVAL_BEGIN_DATE;
+
+            WHILE v_SCHEDULE_DATE <= v_INTERVAL_END_DATE LOOP
+                IF v_IS_ON_PEAK = 1 THEN
+                    IF TO_NUMBER(TO_CHAR(v_SCHEDULE_DATE, 'HH24')) BETWEEN g_FTR_ON_PEAK_BEGIN AND g_FTR_ON_PEAK_END THEN
+                        MM_MISO_UTIL.PUT_IT_SCHEDULE_DATA(v_TRANSACTION_ID, v_SCHEDULE_DATE, GA.INTERNAL_STATE, v_XML.AWARDED_AMOUNT, v_XML.AWARDED_PRICE, p_STATUS, p_ERROR_MESSAGE);
+                    END IF;
+                ELSE
+                    IF NOT TO_NUMBER(TO_CHAR(v_SCHEDULE_DATE, 'HH24')) BETWEEN g_FTR_ON_PEAK_BEGIN AND g_FTR_ON_PEAK_END THEN
+                        MM_MISO_UTIL.PUT_IT_SCHEDULE_DATA(v_TRANSACTION_ID, v_SCHEDULE_DATE, GA.INTERNAL_STATE, v_XML.AWARDED_AMOUNT, v_XML.AWARDED_PRICE, p_STATUS, p_ERROR_MESSAGE);
+                    END IF;
+                END IF;
+
+                v_SCHEDULE_DATE := v_SCHEDULE_DATE + 1 / 24;
+            END LOOP;
+
+            --SAVE THE BID CURVE AS EXTERNAL.
+            v_SET_NUMBER := 1;
+            SECURITY_CONTROLS.SET_IS_INTERFACE(TRUE);
+
+            FOR v_BID_CURVES IN c_BID_CURVES(v_XML.BID_CURVE_XML) LOOP
+                BO.PUT_BID_OFFER_SET(v_TRANSACTION_ID, 0, GA.EXTERNAL_STATE, v_BID_OFFER_DATE, v_SET_NUMBER, v_BID_CURVES.POINT_PRICE, v_BID_CURVES.POINT_AMOUNT, 'P', MM_MISO_UTIL.g_MISO_TIMEZONE, p_STATUS);
+                v_SET_NUMBER := v_SET_NUMBER + 1;
+            END LOOP;
+
+            SECURITY_CONTROLS.SET_IS_INTERFACE(FALSE);
+        END LOOP;
+
+        COMMIT;
+    EXCEPTION
+        WHEN OTHERS THEN
+            SECURITY_CONTROLS.SET_IS_INTERFACE(FALSE);
+            p_STATUS := SQLCODE;
+            p_ERROR_MESSAGE := SQLERRM;
+            ROLLBACK;
+    END PUT_FTR_AUCTION_RESULTS;
+
+----------------------------------------------------------------------------------------------------
+
+    PROCEDURE PUT_EXISTING_FTRS(
+        p_XML IN XMLTYPE,
+        p_STATUS OUT NUMBER,
+        p_ERROR_MESSAGE OUT VARCHAR2
+    ) AS
+        --Save Auction Results to MM.
+        CURSOR c_XML IS
+            SELECT   EXTRACTVALUE(VALUE(T), '/ftr/FTRID', g_FTR_NAMESPACE) "FTR_ID",
+                     EXTRACTVALUE(VALUE(T), '/ftr/SegmentID', g_FTR_NAMESPACE) "SEGMENT_ID",
+					 EXTRACTVALUE(VALUE(T), '/ftr/AssetOwner', g_FTR_NAMESPACE) "ASSET_OWNER",
+                     EXTRACTVALUE(VALUE(T), '/ftr/Source', g_FTR_NAMESPACE) "SOURCE_NAME",
+					 EXTRACTVALUE(VALUE(T), '/ftr/Sink', g_FTR_NAMESPACE) "SINK_NAME",
+					 EXTRACTVALUE(VALUE(T), '/ftr/Flowgate', g_FTR_NAMESPACE) "FLOWGATE_NAME",
+                     TO_DATE(EXTRACTVALUE(VALUE(T), '/ftr/StartDate', g_FTR_NAMESPACE), g_DATE_FORMAT) "BEGIN_DATE",
+					 TO_DATE(EXTRACTVALUE(VALUE(T), '/ftr/EndDate', g_FTR_NAMESPACE), g_DATE_FORMAT) "END_DATE",					
+					 EXTRACTVALUE(VALUE(T), '/ftr/Class', g_FTR_NAMESPACE) "FTR_CLASS",
+					 EXTRACTVALUE(VALUE(T), '/ftr/MW', g_FTR_NAMESPACE) "MW",
+					 EXTRACTVALUE(VALUE(T), '/ftr/HedgeType', g_FTR_NAMESPACE) "TYPE"
+            FROM     TABLE(XMLSEQUENCE(EXTRACT(p_XML, '/existingFTRs/ftr', g_FTR_NAMESPACE))) T;
+
+        v_TRANSACTION_ID NUMBER(9);
+        v_TRANSACTION_TYPE INTERCHANGE_TRANSACTION.TRANSACTION_TYPE%TYPE;
+        v_IS_ON_PEAK NUMBER(1);
+        v_AS_OF_DATE DATE := LOW_DATE;
+		v_BEGIN_DATE DATE;
+		v_END_DATE DATE;
+		v_MINIMUM_INTERVAL_NUMBER NUMBER(2) := GET_INTERVAL_NUMBER('HH');
+		v_MISO_SET_ID NUMBER(9);
+    BEGIN
+		BEGIN
+			SELECT HOLIDAY_SET_ID INTO v_MISO_SET_ID
+			FROM HOLIDAY_SET WHERE HOLIDAY_SET_NAME = 'MISO';
+		EXCEPTION
+			WHEN OTHERS THEN
+				v_MISO_SET_ID := 0;
+		END;
+
+		SP.CHECK_SYSTEM_DATE_TIME(MM_MISO_UTIL.g_MISO_TIMEZONE, ADD_MONTHS(SYSDATE, -12), ADD_MONTHS(SYSDATE, 12));
+
+        FOR v_XML IN c_XML LOOP
+			--DETERMINE AGREEMENT TYPE
+			v_IS_ON_PEAK := GET_IS_ON_PEAK(v_XML.FTR_CLASS);
+
+			--DETERMINE TRANSACTION TYPE
+			v_TRANSACTION_TYPE := CASE v_XML.TYPE WHEN 'SOLD' THEN 'Sale' ELSE 'Purchase' END;
+
+            --GET THE TRANSACTION ID; CREATE TXN IF IT DOES NOT EXIST.
+            v_TRANSACTION_ID := GET_FTR_TRANSACTION_ID(v_XML.FTR_ID, v_TRANSACTION_TYPE, v_XML.ASSET_OWNER, v_XML.FLOWGATE_NAME, v_XML.SOURCE_NAME,
+				v_XML.SINK_NAME, v_XML.TYPE, v_IS_ON_PEAK, v_XML.BEGIN_DATE, v_XML.END_DATE, TRUE, p_ERROR_MESSAGE);
+
+            IF p_ERROR_MESSAGE IS NOT NULL THEN
+                p_STATUS := -1;
+                ROLLBACK;
+                RETURN;
+            END IF;
+
+			UT.CUT_DATE_RANGE(1, v_XML.BEGIN_DATE, v_XML.END_DATE, MM_MISO_UTIL.g_MISO_TIMEZONE, v_BEGIN_DATE, v_END_DATE);
+
+			--PUSH THE VALUES TO IT_SCHEDULE.  INSERT/UPDATE IN ONE STEP FOR SPEED.
+			MERGE INTO IT_SCHEDULE A
+			USING
+				(SELECT X.SCHEDULE_DATE
+				FROM
+					(SELECT SDT.CUT_DATE "SCHEDULE_DATE",
+						CASE WHEN (TO_CHAR(SDT.LOCAL_DATE, 'HH24') BETWEEN g_FTR_ON_PEAK_BEGIN AND g_FTR_ON_PEAK_END)
+							AND (NOT TO_CHAR(SDT.LOCAL_DAY_TRUNC_DATE, 'DY') IN ('SAT', 'SUN'))
+							AND IS_HOLIDAY_FOR_SET(SDT.LOCAL_DAY_TRUNC_DATE, v_MISO_SET_ID) = 0 THEN 1 ELSE 0 END "IS_ON_PEAK"
+					FROM SYSTEM_DATE_TIME SDT
+					WHERE SDT.TIME_ZONE = MM_MISO_UTIL.g_MISO_TIMEZONE
+						AND SDT.DATA_INTERVAL_TYPE = 1
+						AND SDT.DAY_TYPE = 1
+						AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+						AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MINIMUM_INTERVAL_NUMBER
+					) X
+				WHERE X.IS_ON_PEAK = v_IS_ON_PEAK) C
+			ON
+				(A.TRANSACTION_ID = v_TRANSACTION_ID
+				AND A.SCHEDULE_TYPE = 1
+				AND A.SCHEDULE_STATE = 1
+				AND A.SCHEDULE_DATE = C.SCHEDULE_DATE
+				AND A.AS_OF_DATE = v_AS_OF_DATE)
+			WHEN MATCHED THEN UPDATE SET A.AMOUNT = v_XML.MW
+			WHEN NOT MATCHED THEN INSERT (TRANSACTION_ID, SCHEDULE_TYPE, SCHEDULE_STATE, SCHEDULE_DATE, AS_OF_DATE, AMOUNT, PRICE)
+				VALUES (v_TRANSACTION_ID, 1, 1, C.SCHEDULE_DATE, v_AS_OF_DATE, v_XML.MW, NULL);
+
+        END LOOP;
+
+        COMMIT;
+    EXCEPTION
+        WHEN OTHERS THEN
+            SECURITY_CONTROLS.SET_IS_INTERFACE(FALSE);
+            p_STATUS := SQLCODE;
+            p_ERROR_MESSAGE := SQLERRM;
+            ROLLBACK;
+    END PUT_EXISTING_FTRS;
+
+
+END MM_MISO_FTR;
+/

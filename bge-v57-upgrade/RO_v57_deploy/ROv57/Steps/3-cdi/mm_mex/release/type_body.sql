@@ -1,0 +1,629 @@
+CREATE OR REPLACE TYPE BODY MEX_CREDENTIALS IS
+----------------------------------------------------------------------------
+MEMBER PROCEDURE ADD_TO_REQUEST(SELF IN MEX_CREDENTIALS, p_REQUEST IN OUT CLOB, p_PRETTY_REQUEST IN OUT CLOB) IS
+v_IDX BINARY_INTEGER;
+BEGIN
+   	CD.BUILD_QUERY_STRING('isUsingUnamePw', SELF.IS_USING_UNAME_PW, p_REQUEST, p_PRETTY_REQUEST);
+	IF SELF.IS_USING_UNAME_PW <> 0 THEN
+	    CD.BUILD_QUERY_STRING('userName', SELF.USERNAME, p_REQUEST, p_PRETTY_REQUEST, FALSE, NULL, TRUE);
+	   	CD.BUILD_QUERY_STRING('password', SELF.PASSWORD, p_REQUEST, p_PRETTY_REQUEST, TRUE);
+	END IF;
+
+   	CD.BUILD_QUERY_STRING('numberOfCertificates', SELF.NUMBER_OF_CERTS, p_REQUEST, p_PRETTY_REQUEST);
+	v_IDX := CERTIFICATES.FIRST;
+	WHILE CERTIFICATES.EXISTS(v_IDX) LOOP
+        CD.BUILD_QUERY_STRING('certificate'||SELF.CERTIFICATES(v_IDX).CERT_TYPE, SELF.CERTIFICATES(v_IDX).CERTIFICATE, p_REQUEST, p_PRETTY_REQUEST, FALSE, TO_CLOB('(certificate)'));
+       	CD.BUILD_QUERY_STRING('certPassword'||SELF.CERTIFICATES(v_IDX).CERT_TYPE, SELF.CERTIFICATES(v_IDX).CERT_PASSWORD, p_REQUEST, p_PRETTY_REQUEST, TRUE);
+		v_IDX := SELF.CERTIFICATES.NEXT(v_IDX);
+	END LOOP;
+END ADD_TO_REQUEST;
+----------------------------------------------------------------------------
+-- Black credentials - no usernames, passwords, or certificates
+CONSTRUCTOR FUNCTION MEX_CREDENTIALS RETURN SELF AS RESULT AS
+BEGIN
+	SELF.IS_USING_UNAME_PW := 0;
+	SELF.NUMBER_OF_CERTS := 0;
+	SELF.CERTIFICATES := MEX_CERTIFICATE_TBL();
+	RETURN;
+END;
+----------------------------------------------------------------------------
+-- Simple username+password credentials
+CONSTRUCTOR FUNCTION MEX_CREDENTIALS
+	(
+	p_USER_NAME IN VARCHAR2,
+	p_PASSWORD IN VARCHAR2,
+	p_PASSWORD_IS_ENCRYPTED IN BOOLEAN := FALSE
+	) RETURN SELF AS RESULT AS
+BEGIN
+	SELF.IS_USING_UNAME_PW := 1;
+	SELF.USERNAME := p_USER_NAME;
+	IF p_PASSWORD_IS_ENCRYPTED THEN
+		SELF.PASSWORD := p_PASSWORD;
+	ELSE
+		SELF.PASSWORD := SECURITY_CONTROLS.ENCODE(p_PASSWORD);
+	END IF;
+	SELF.NUMBER_OF_CERTS := 0;
+	SELF.CERTIFICATES := MEX_CERTIFICATE_TBL();
+	RETURN;
+END;
+----------------------------------------------------------------------------
+-- Single certificate credentials - this version takes *UN*encrypted cert and password
+CONSTRUCTOR FUNCTION MEX_CREDENTIALS
+	(
+	p_CERTIFICATE IN BLOB,
+	p_PASSWORD IN VARCHAR2
+	) RETURN SELF AS RESULT AS
+BEGIN
+	SELF.IS_USING_UNAME_PW := 0;
+	SELF.NUMBER_OF_CERTS := 1;
+	SELF.CERTIFICATES := MEX_CERTIFICATE_TBL(
+							MEX_CERTIFICATE(
+								SECURITY_CONTROLS.ENCODE(p_CERTIFICATE),
+								SECURITY_CONTROLS.ENCODE(p_PASSWORD),
+								SECURITY_CONTROLS.g_AUTH_CERT_TYPE
+								)
+							);
+	RETURN;
+END;
+----------------------------------------------------------------------------
+-- Single certificate credentials - this version takes *en*crypted cert and password
+CONSTRUCTOR FUNCTION MEX_CREDENTIALS
+	(
+	p_CERTIFICATE IN CLOB,
+	p_PASSWORD IN VARCHAR2
+	) RETURN SELF AS RESULT AS
+BEGIN
+	SELF.IS_USING_UNAME_PW := 0;
+	SELF.NUMBER_OF_CERTS := 1;
+	SELF.CERTIFICATES := MEX_CERTIFICATE_TBL(
+							MEX_CERTIFICATE(
+								p_CERTIFICATE,
+								p_PASSWORD,
+								SECURITY_CONTROLS.g_AUTH_CERT_TYPE
+								)
+							);
+	RETURN;
+END;
+----------------------------------------------------------------------------
+END;
+/
+CREATE OR REPLACE TYPE BODY MEX_LOGGER IS
+-----------------------------------------------------------------------------
+-- all methods do nothing - sub-class and override to perform real logging
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_START ( p_MARKET IN VARCHAR2, p_ACTION IN VARCHAR2 ) AS
+BEGIN
+	NULL;
+END LOG_START;
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_ERROR ( p_MESSAGE IN VARCHAR2 ) AS
+BEGIN
+	NULL;
+END LOG_ERROR;
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_WARN ( p_MESSAGE IN VARCHAR2 ) AS
+BEGIN
+	NULL;
+END LOG_WARN;
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_INFO ( p_MESSAGE IN VARCHAR2 ) AS
+BEGIN
+	NULL;
+END LOG_INFO;
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_REQUEST ( p_REQUEST_HEADERS IN CLOB ,
+                               p_REQUEST_BODY IN CLOB ,
+                               p_BODY_CONTENT_TYPE IN VARCHAR2 ) AS
+BEGIN
+	NULL;
+END LOG_REQUEST;
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_RESPONSE ( p_RESPONSE_HEADERS IN CLOB ,
+                                p_RESPONSE_BODY IN CLOB ,
+                                p_BODY_CONTENT_TYPE IN VARCHAR2 ) AS
+BEGIN
+	NULL;
+END LOG_RESPONSE;
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_ATTACHMENT ( p_DESCRIPTION IN VARCHAR2,
+                                  p_ATTACHMENT_TYPE IN VARCHAR2,
+                                  p_ATTACHMENT IN CLOB ) AS
+BEGIN
+	NULL;
+END LOG_ATTACHMENT;
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_DEBUG ( p_MESSAGE IN VARCHAR2 ) AS
+BEGIN
+	NULL;
+END LOG_DEBUG;
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_STOP ( p_RESULT IN MEX_RESULT ) AS
+BEGIN
+	NULL;
+END LOG_STOP;
+-----------------------------------------------------------------------------
+CONSTRUCTOR FUNCTION MEX_LOGGER RETURN SELF AS RESULT AS
+BEGIN
+	SELF.DUMMY := NULL;
+	RETURN;
+END;
+-----------------------------------------------------------------------------
+END;
+/
+CREATE OR REPLACE TYPE BODY MEX_RESULT IS
+-----------------------------------------------------------------------------
+MEMBER FUNCTION GET_COOKIE
+	(
+	p_COOKIE_NAME IN VARCHAR2
+	) RETURN MEX_COOKIE IS
+v_IDX NUMBER;
+v_COOKIE_NAME VARCHAR2(64) := UPPER(p_COOKIE_NAME);
+BEGIN
+	v_IDX := SELF.COOKIES.FIRST;
+	WHILE SELF.COOKIES.EXISTS(v_IDX) LOOP
+		-- found the header?
+		IF UPPER(SELF.COOKIES(v_IDX).NAME) = v_COOKIE_NAME THEN
+			-- return the corresponding value
+			RETURN SELF.COOKIES(v_IDX);
+		END IF;
+		v_IDX := SELF.COOKIES.NEXT(v_IDX);
+	END LOOP;
+	-- never found such a header - return null
+	RETURN NULL;
+END GET_COOKIE;
+-----------------------------------------------------------------------------
+MEMBER FUNCTION GET_HEADER
+	(
+	p_HEADER_NAME IN VARCHAR2
+	) RETURN VARCHAR2 IS
+v_IDX NUMBER;
+v_HEADER_NAME VARCHAR2(64) := UPPER(p_HEADER_NAME);
+BEGIN
+	v_IDX := SELF.HEADER_NAMES.FIRST;
+	WHILE SELF.HEADER_NAMES.EXISTS(v_IDX) LOOP
+		-- found the header?
+		IF UPPER(SELF.HEADER_NAMES(v_IDX)) = v_HEADER_NAME THEN
+			-- return the corresponding value
+			RETURN SELF.HEADER_VALUES(v_IDX);
+		END IF;
+		v_IDX := SELF.HEADER_NAMES.NEXT(v_IDX);
+	END LOOP;
+	-- never found such a header - return null
+	RETURN NULL;
+END GET_HEADER;
+-----------------------------------------------------------------------------
+MEMBER FUNCTION GET_HEADER_VALUES
+	(
+	p_HEADER_NAME IN VARCHAR2
+	) RETURN STRING_COLLECTION IS
+v_IDX NUMBER;
+v_HEADER_NAME VARCHAR2(64) := UPPER(p_HEADER_NAME);
+v_RET STRING_COLLECTION := STRING_COLLECTION();
+BEGIN
+	v_IDX := SELF.HEADER_NAMES.FIRST;
+	WHILE SELF.HEADER_NAMES.EXISTS(v_IDX) LOOP
+		-- found the header?
+		IF UPPER(SELF.HEADER_NAMES(v_IDX)) = v_HEADER_NAME THEN
+			-- add to return value list
+			v_RET.EXTEND();
+			v_RET(v_RET.LAST) := SELF.HEADER_VALUES(v_IDX);
+		END IF;
+		v_IDX := SELF.HEADER_NAMES.NEXT(v_IDX);
+	END LOOP;
+	-- finished examining headers - return accumulated list
+	RETURN v_RET;
+END GET_HEADER_VALUES;
+-----------------------------------------------------------------------------
+CONSTRUCTOR FUNCTION MEX_RESULT
+	(
+	p_HEADER_NAMES IN STRING_COLLECTION,
+	p_HEADER_VALUES IN STRING_COLLECTION,
+	p_RESPONSE IN CLOB
+	) RETURN SELF AS RESULT IS
+v_COOKIE_HEADERS STRING_COLLECTION;
+v_IDX BINARY_INTEGER;
+v_TOKENS PARSE_UTIL.BIG_STRING_TABLE_MP;
+v_COOKIE_VALS MEX_UTIL.PARAMETER_MAP;
+v_SECURE NUMBER(1);
+v_HIDDEN NUMBER(1);
+v_EXPIRES VARCHAR2(64);
+v_DOMAIN VARCHAR2(128);
+v_PATH VARCHAR2(1024);
+v_JDX BINARY_INTEGER;
+v_NAME VARCHAR2(256);
+v_VALUE VARCHAR2(4000);
+v_POS BINARY_INTEGER;
+BEGIN
+	SELF.HEADER_NAMES := p_HEADER_NAMES;
+	SELF.HEADER_VALUES := p_HEADER_VALUES;
+	SELF.RESPONSE := p_RESPONSE;
+
+	-- now determine some of the other fields from the headers
+	SELF.REQUESTID := GET_HEADER('MEX-Request-Id');
+	SELF.RESPONSE_CONTENTTYPE := GET_HEADER('Content-Type');
+	IF NVL(GET_HEADER('MEX-Error-Flag'), '0') = '1' THEN
+		SELF.STATUS_CODE := 1;
+	ELSE
+		SELF.STATUS_CODE := 0;
+	END IF;
+	-- and now the cookies
+	SELF.COOKIES := MEX_COOKIE_TBL();
+	v_COOKIE_HEADERS := GET_HEADER_VALUES('Set-Cookie');
+	-- parse cookies out of headers
+	v_IDX := v_COOKIE_HEADERS.FIRST;
+	WHILE v_COOKIE_HEADERS.EXISTS(v_IDX) LOOP
+		PARSE_UTIL.TOKENS_FROM_BIG_STRING(v_COOKIE_HEADERS(v_IDX), ';', v_TOKENS);
+		-- reset some attributes
+		v_SECURE := 0; v_HIDDEN := 0;
+		v_EXPIRES := NULL; v_DOMAIN := NULL; v_PATH := NULL;
+		v_COOKIE_VALS.DELETE;
+		-- now parse this header
+		v_JDX := v_TOKENS.FIRST;
+		WHILE v_TOKENS.EXISTS(v_JDX) LOOP
+			v_VALUE := v_TOKENS(v_JDX);
+			v_POS := INSTR(v_VALUE,'=');
+			IF v_POS > 1 THEN
+				v_NAME := SUBSTR(v_VALUE, 1, v_POS-1);
+				v_VALUE := SUBSTR(v_VALUE, v_POS+1);
+				IF UPPER(v_NAME) = 'EXPIRES' THEN
+					v_EXPIRES := v_VALUE;
+				ELSIF UPPER(v_NAME) = 'DOMAIN' THEN
+					v_DOMAIN := v_VALUE;
+				ELSIF UPPER(v_NAME) = 'PATH' THEN
+					v_PATH := v_VALUE;
+				ELSE
+					-- this is a cookie value
+					v_COOKIE_VALS(v_NAME) := v_VALUE;
+				END IF;
+			ELSIF UPPER(v_VALUE) = 'SECURE' THEN
+				v_SECURE := 1;
+			ELSIF UPPER(v_VALUE) = 'HTTPONLY' THEN
+				v_HIDDEN := 1;
+			END IF;
+			v_JDX := v_TOKENS.NEXT(v_JDX);
+		END LOOP;
+		-- now create cookie objects from this info
+		v_NAME := v_COOKIE_VALS.FIRST;
+		WHILE v_COOKIE_VALS.EXISTS(v_NAME) LOOP
+			SELF.COOKIES.EXTEND();
+			-- add the new cookie
+			SELF.COOKIES(SELF.COOKIES.LAST) := MEX_COOKIE(v_NAME, v_COOKIE_VALS(v_NAME), v_EXPIRES, v_DOMAIN, v_PATH, v_SECURE, v_HIDDEN);
+			v_NAME := v_COOKIE_VALS.NEXT(v_NAME);
+		END LOOP;
+		-- now to the next header...
+		v_IDX := v_COOKIE_HEADERS.NEXT(v_IDX);
+	END LOOP;
+	-- done!
+	RETURN;
+END;
+-----------------------------------------------------------------------------
+CONSTRUCTOR FUNCTION MEX_RESULT
+	(
+	p_ERROR_MESSAGE IN VARCHAR2
+	) RETURN SELF AS RESULT AS
+BEGIN
+	SELF.REQUESTID := '?';
+	SELF.HEADER_NAMES := STRING_COLLECTION();
+	SELF.HEADER_VALUES := STRING_COLLECTION();
+	SELF.COOKIES := MEX_COOKIE_TBL();
+	SELF.STATUS_CODE := 1;
+	SELF.RESPONSE_CONTENTTYPE := 'text/plain';
+	SELF.RESPONSE := p_ERROR_MESSAGE;
+	-- done!
+	RETURN;
+END;
+-----------------------------------------------------------------------------
+END;
+/
+CREATE OR REPLACE TYPE BODY MM_CREDENTIALS_SET IS
+----------------------------------------------------------------------------
+MEMBER FUNCTION HAS_NEXT RETURN BOOLEAN IS
+BEGIN
+	RETURN SELF.CREDENTIALS.EXISTS(SELF.IDX);
+END HAS_NEXT;
+----------------------------------------------------------------------------
+MEMBER FUNCTION GET_NEXT(SELF IN OUT MM_CREDENTIALS_SET) RETURN MEX_CREDENTIALS IS
+v_CRED MEX_CREDENTIALS;
+BEGIN
+	v_CRED := SELF.CREDENTIALS(SELF.IDX);
+	-- update logger for current credentials
+	SELF.LOGGER.EXTERNAL_ACCOUNT_NAME := v_CRED.EXTERNAL_ACCOUNT_NAME;
+	-- increment internal counter to next set of credentials
+	SELF.IDX := SELF.CREDENTIALS.NEXT(SELF.IDX);
+
+	RETURN v_CRED;
+END GET_NEXT;
+----------------------------------------------------------------------------
+CONSTRUCTOR FUNCTION MM_CREDENTIALS_SET (p_CREDENTIALS MEX_CREDENTIALS_TBL,
+										 p_LOGGER MM_LOGGER_ADAPTER)
+										RETURN SELF AS RESULT IS
+BEGIN
+	SELF.CREDENTIALS := p_CREDENTIALS;
+	SELF.LOGGER := p_LOGGER;
+	SELF.IDX := p_CREDENTIALS.FIRST;
+
+	RETURN;
+END;
+----------------------------------------------------------------------------
+END;
+/
+CREATE OR REPLACE TYPE BODY MM_LOGGER_ADAPTER IS
+-----------------------------------------------------------------------------
+MEMBER FUNCTION IS_LOGGING RETURN BOOLEAN IS
+BEGIN
+	RETURN SELF.LOG_TYPE <> 0;
+END IS_LOGGING;
+-----------------------------------------------------------------------------
+MEMBER FUNCTION IS_LOGGING_EVENTS RETURN BOOLEAN IS
+BEGIN
+	RETURN SELF.LOG_TYPE IN (1,3);
+END IS_LOGGING_EVENTS;
+-----------------------------------------------------------------------------
+MEMBER FUNCTION IS_LOGGING_EXCHANGES RETURN BOOLEAN IS
+BEGIN
+	RETURN SELF.LOG_TYPE IN (2,3);
+END IS_LOGGING_EXCHANGES;
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_START AS
+BEGIN
+	SELF.FINISH_MESSAGE := NULL;
+	LOGS.START_PROCESS(SELF.PROCESS_NAME,
+					   p_EVENT_LEVEL => LEAST( LOGS.CURRENT_LOG_LEVEL,
+												CASE SELF.TRACE_ON
+												WHEN 1 THEN LOGS.c_LEVEL_DEBUG
+												WHEN 2 THEN LOGS.c_LEVEL_ALL
+												ELSE LOGS.c_LEVEL_FATAL
+												END ),
+					   p_KEEP_EVENT_DETAILS => SELF.IS_LOGGING_EXCHANGES);
+	LOGS.SET_PROCESS_TARGET_PARAMETER('External Account', CASE NVL(SELF.EXTERNAL_ACCOUNT_NAME,'?')
+															WHEN '?' THEN '*'
+															ELSE SELF.EXTERNAL_ACCOUNT_NAME
+															END);
+	SELF.FINISH_MESSAGE := NULL;
+	SELF.PROCESS_STARTED := 1;
+END LOG_START;
+-----------------------------------------------------------------------------
+OVERRIDING MEMBER PROCEDURE LOG_START ( p_MARKET IN VARCHAR2, p_ACTION IN VARCHAR2 ) AS
+v_STAT NUMBER;
+v_MKT_ACTION VARCHAR2(130);
+v_PROCEDURE PROCESS_LOG_EVENT.PROCEDURE_NAME%TYPE;
+v_STEP  PROCESS_LOG_EVENT.STEP_NAME%TYPE;
+BEGIN
+	SELF.LAST_EVENT_ID := NULL;
+	SELF.EXCHANGE_IS_ACTIVE := 0;
+
+	v_MKT_ACTION := p_MARKET;
+	IF v_MKT_ACTION IS NOT NULL THEN
+		v_MKT_ACTION := v_MKT_ACTION||'.';
+	END IF;
+	v_MKT_ACTION := v_MKT_ACTION||p_ACTION;
+
+	SELF.MEX_MARKET := p_MARKET;
+	SELF.MEX_ACTION := p_ACTION;
+
+	LOGS.GET_CALLER(v_PROCEDURE, v_STEP);
+	LOGS.LOG_INFO_DETAIL('Starting exchange: '||SELF.EXCHANGE_NAME||' for '||NVL(SELF.EXTERNAL_ACCOUNT_NAME,'*')||CASE WHEN v_MKT_ACTION IS NULL THEN NULL ELSE' ('||v_MKT_ACTION||')' END, v_PROCEDURE, v_STEP);
+
+END LOG_START;
+-----------------------------------------------------------------------------
+OVERRIDING MEMBER PROCEDURE LOG_ERROR ( p_MESSAGE IN VARCHAR2 ) AS
+v_PROCEDURE PROCESS_LOG_EVENT.PROCEDURE_NAME%TYPE;
+v_STEP  PROCESS_LOG_EVENT.STEP_NAME%TYPE;
+BEGIN
+	LOGS.GET_CALLER(v_PROCEDURE, v_STEP);
+	LOGS.LOG_ERROR(P_MESSAGE, v_PROCEDURE, v_STEP);
+END LOG_ERROR;
+-----------------------------------------------------------------------------
+OVERRIDING MEMBER PROCEDURE LOG_WARN ( p_MESSAGE IN VARCHAR2 ) AS
+v_PROCEDURE PROCESS_LOG_EVENT.PROCEDURE_NAME%TYPE;
+v_STEP  PROCESS_LOG_EVENT.STEP_NAME%TYPE;
+BEGIN
+	LOGS.GET_CALLER(v_PROCEDURE, v_STEP);
+	LOGS.LOG_WARN(P_MESSAGE, v_PROCEDURE, v_STEP);
+END LOG_WARN;
+-----------------------------------------------------------------------------
+OVERRIDING MEMBER PROCEDURE LOG_INFO ( p_MESSAGE IN VARCHAR2 ) AS
+v_PROCEDURE PROCESS_LOG_EVENT.PROCEDURE_NAME%TYPE;
+v_STEP  PROCESS_LOG_EVENT.STEP_NAME%TYPE;
+BEGIN
+	LOGS.GET_CALLER(v_PROCEDURE, v_STEP);
+	LOGS.LOG_INFO(P_MESSAGE, v_PROCEDURE, v_STEP);
+END LOG_INFO;
+-----------------------------------------------------------------------------
+OVERRIDING MEMBER PROCEDURE LOG_REQUEST( p_REQUEST_HEADERS IN CLOB ,
+                                  		 p_REQUEST_BODY IN CLOB ,
+                                  		 p_BODY_CONTENT_TYPE IN VARCHAR2 ) AS
+v_MKT_ACTION VARCHAR2(130);
+v_MESSAGE VARCHAR2(4000);
+v_PROCEDURE PROCESS_LOG_EVENT.PROCEDURE_NAME%TYPE;
+v_STEP  PROCESS_LOG_EVENT.STEP_NAME%TYPE;
+BEGIN
+	v_MKT_ACTION := SELF.MEX_MARKET;
+	IF v_MKT_ACTION IS NOT NULL THEN
+		v_MKT_ACTION := v_MKT_ACTION||'.';
+	END IF;
+	v_MKT_ACTION := v_MKT_ACTION||SELF.MEX_ACTION;
+
+	v_MESSAGE := 'Request: '||SELF.EXCHANGE_NAME||' for '||NVL(SELF.EXTERNAL_ACCOUNT_NAME,'*')||CASE WHEN v_MKT_ACTION IS NULL THEN NULL ELSE' ('||v_MKT_ACTION||')' END;
+
+	LOGS.GET_CALLER(v_PROCEDURE, v_STEP);
+	LOGS.LOG_INFO(v_MESSAGE, v_PROCEDURE, v_STEP);
+
+	SELF.LAST_EVENT_ID := LOGS.LAST_EVENT_ID();
+
+	IF NOT p_REQUEST_HEADERS IS NULL THEN
+		LOG_ATTACHMENT('Request Headers','text/plain', p_REQUEST_HEADERS);
+	END IF;
+
+	IF NOT p_REQUEST_BODY IS NULL THEN
+		LOG_ATTACHMENT('Request Body', p_BODY_CONTENT_TYPE, p_REQUEST_BODY);
+	END IF;
+END LOG_REQUEST;
+-----------------------------------------------------------------------------
+OVERRIDING MEMBER PROCEDURE LOG_RESPONSE ( p_RESPONSE_HEADERS IN CLOB ,
+                                  		 p_RESPONSE_BODY IN CLOB ,
+                                  		 p_BODY_CONTENT_TYPE IN VARCHAR2 ) AS
+v_MKT_ACTION VARCHAR2(130);
+v_MESSAGE VARCHAR2(4000);
+v_PROCEDURE PROCESS_LOG_EVENT.PROCEDURE_NAME%TYPE;
+v_STEP  PROCESS_LOG_EVENT.STEP_NAME%TYPE;
+BEGIN
+	v_MKT_ACTION := SELF.MEX_MARKET;
+	IF v_MKT_ACTION IS NOT NULL THEN
+		v_MKT_ACTION := v_MKT_ACTION||'.';
+	END IF;
+	v_MKT_ACTION := v_MKT_ACTION||SELF.MEX_ACTION;
+
+	v_MESSAGE := 'Response: '||SELF.EXCHANGE_NAME||' for '||NVL(SELF.EXTERNAL_ACCOUNT_NAME,'*')||CASE WHEN v_MKT_ACTION IS NULL THEN NULL ELSE' ('||v_MKT_ACTION||')' END;
+
+	LOGS.GET_CALLER(v_PROCEDURE, v_STEP);
+	LOGS.LOG_INFO(v_MESSAGE, v_PROCEDURE, v_STEP);
+
+	SELF.LAST_EVENT_ID := LOGS.LAST_EVENT_ID();
+
+	IF NOT p_RESPONSE_HEADERS IS NULL THEN
+		LOG_ATTACHMENT('Response Headers','text/plain', p_RESPONSE_HEADERS);
+	END IF;
+
+	IF NOT p_RESPONSE_BODY IS NULL THEN
+		LOG_ATTACHMENT('Response Body', p_BODY_CONTENT_TYPE, p_RESPONSE_BODY);
+	END IF;
+
+END LOG_RESPONSE;
+-----------------------------------------------------------------------------
+OVERRIDING MEMBER PROCEDURE LOG_ATTACHMENT ( p_DESCRIPTION IN VARCHAR2,
+                                             p_ATTACHMENT_TYPE IN VARCHAR2,
+                                             p_ATTACHMENT IN CLOB ) AS
+BEGIN
+	LOGS.POST_EVENT_DETAILS(P_DESCRIPTION, P_ATTACHMENT_TYPE, P_ATTACHMENT);
+END LOG_ATTACHMENT;
+-----------------------------------------------------------------------------
+OVERRIDING MEMBER PROCEDURE LOG_DEBUG ( p_MESSAGE IN VARCHAR2 ) AS
+v_PROCEDURE PROCESS_LOG_EVENT.PROCEDURE_NAME%TYPE;
+v_STEP  PROCESS_LOG_EVENT.STEP_NAME%TYPE;
+BEGIN
+	LOGS.GET_CALLER(v_PROCEDURE, v_STEP);
+	LOGS.LOG_DEBUG(P_MESSAGE, v_PROCEDURE, v_STEP);
+END LOG_DEBUG;
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_EXCHANGE_ERROR (p_EXCHANGE_ERROR IN VARCHAR2) AS
+v_PROCEDURE PROCESS_LOG_EVENT.PROCEDURE_NAME%TYPE;
+v_STEP  PROCESS_LOG_EVENT.STEP_NAME%TYPE;
+BEGIN
+	LOGS.GET_CALLER(v_PROCEDURE, v_STEP);
+	LOGS.LOG_ERROR(p_EXCHANGE_ERROR, v_PROCEDURE, v_STEP);
+END LOG_EXCHANGE_ERROR;
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_EXCHANGE_IDENTIFIER (p_EXCHANGE_IDENTIFIER IN VARCHAR2) AS
+v_PROCEDURE PROCESS_LOG_EVENT.PROCEDURE_NAME%TYPE;
+v_STEP  PROCESS_LOG_EVENT.STEP_NAME%TYPE;
+BEGIN
+	LOGS.GET_CALLER(v_PROCEDURE, v_STEP);
+	LOGS.LOG_NOTICE('Exchange Identifier: ' || p_EXCHANGE_IDENTIFIER, v_PROCEDURE, v_STEP);
+END LOG_EXCHANGE_IDENTIFIER;
+-----------------------------------------------------------------------------
+OVERRIDING MEMBER PROCEDURE LOG_STOP ( p_RESULT IN MEX_RESULT ) AS
+v_EVENT_STATUS		VARCHAR2(32);
+v_EXCHANGE_STATUS	VARCHAR2(32);
+v_ERROR_TEXT		VARCHAR2(4000);
+v_MSG				VARCHAR2(512);
+v_RET_CODE			NUMBER;
+v_PROCEDURE PROCESS_LOG_EVENT.PROCEDURE_NAME%TYPE;
+v_STEP  PROCESS_LOG_EVENT.STEP_NAME%TYPE;
+BEGIN
+	-- Reset the Last Event Id
+	SELF.LAST_EVENT_ID := NULL;
+
+	v_ERROR_TEXT := MEX_SWITCHBOARD.GetErrorText(p_RESULT);
+
+	IF p_RESULT.STATUS_CODE NOT IN (MEX_SWITCHBOARD.c_Status_Success, MEX_SWITCHBOARD.c_Status_No_More_Messages) THEN
+		v_RET_CODE := p_RESULT.STATUS_CODE;
+		v_EVENT_STATUS := 'Error';
+		v_EXCHANGE_STATUS := 'Error';
+		v_MSG := v_MSG||' (exchange response may contain more details): ';
+		v_MSG := SUBSTR(v_MSG||v_ERROR_TEXT,1,512);
+	ELSE
+		v_RET_CODE := MEX_SWITCHBOARD.c_Status_Success;
+		v_EVENT_STATUS := 'Normal';
+		v_EXCHANGE_STATUS := 'Success';
+		IF v_ERROR_TEXT IS NULL THEN
+			v_ERROR_TEXT := v_EXCHANGE_STATUS;
+		END IF;
+		v_MSG := SUBSTR(v_MSG||': '||v_ERROR_TEXT,1,512);
+		v_ERROR_TEXT := NULL;
+	END IF;
+
+	-- log an error message if necessary
+	IF v_RET_CODE <> MEX_SWITCHBOARD.c_Status_Success THEN
+		LOGS.GET_CALLER(v_PROCEDURE, v_STEP);
+		LOGS.LOG_ERROR(v_MSG||' ('||p_RESULT.STATUS_CODE||')', v_PROCEDURE, v_STEP);
+	END IF;
+
+	LOGS.GET_CALLER(v_PROCEDURE, v_STEP);
+	LOGS.LOG_INFO_DETAIL('Finished exchange: '||v_MSG||' ('||p_RESULT.STATUS_CODE||')', v_PROCEDURE, v_STEP);
+
+	SELF.EXCHANGE_IS_ACTIVE := 0;
+
+END LOG_STOP;
+-----------------------------------------------------------------------------
+MEMBER PROCEDURE LOG_STOP ( p_STATUS IN NUMBER, p_MESSAGE IN VARCHAR2 ) AS
+v_PROCEDURE PROCESS_LOG_EVENT.PROCEDURE_NAME%TYPE;
+v_STEP  PROCESS_LOG_EVENT.STEP_NAME%TYPE;
+v_STAT	NUMBER;
+BEGIN
+	-- Bug Fix for errant code that calls Log_Stop prior to ever calling Log_Start
+	IF SELF.PROCESS_STARTED = 0 THEN
+		SELF.LOG_START;
+	END IF;
+	SELF.PROCESS_STARTED := 0;
+
+	IF NVL(p_STATUS,GA.SUCCESS) <> GA.SUCCESS THEN
+		LOGS.GET_CALLER(v_PROCEDURE, v_STEP);
+		LOGS.LOG_FATAL(NULL, v_PROCEDURE, v_STEP, p_SQLERRM => p_MESSAGE);
+		LOGS.STOP_PROCESS(SELF.FINISH_MESSAGE, v_STAT, p_STATUS, p_MESSAGE);
+	ELSE
+		LOGS.STOP_PROCESS(SELF.FINISH_MESSAGE, v_STAT);
+	END IF;
+
+END LOG_STOP;
+-----------------------------------------------------------------------------
+MEMBER FUNCTION GET_END_MESSAGE RETURN VARCHAR2
+AS
+BEGIN
+	IF SELF.PROCESS_STARTED = 1 THEN
+		RETURN LOGS.GET_FINISH_MESSAGE;
+	ELSE
+		RETURN SELF.FINISH_MESSAGE;
+	END IF;
+END GET_END_MESSAGE;
+-----------------------------------------------------------------------------
+-- constructor
+CONSTRUCTOR FUNCTION MM_LOGGER_ADAPTER ( p_EXTERNAL_SYSTEM_ID IN NUMBER,
+										 p_EXTERNAL_ACCOUNT_NAME IN VARCHAR2,
+										 p_PROCESS_NAME IN VARCHAR2,
+										 p_EXCHANGE_NAME IN VARCHAR2,
+										 p_LOG_TYPE IN NUMBER := 3,
+										 p_TRACE_ON IN NUMBER := 0
+									   ) RETURN SELF AS RESULT IS
+BEGIN
+	SELF.EXTERNAL_SYSTEM_ID := p_EXTERNAL_SYSTEM_ID;
+
+	SELECT NVL(MAX(EXTERNAL_SYSTEM_NAME),'?')
+    INTO SELF.EXTERNAL_SYSTEM_NAME
+    FROM EXTERNAL_SYSTEM
+    WHERE EXTERNAL_SYSTEM_ID = p_EXTERNAL_SYSTEM_ID;
+
+	SELF.EXTERNAL_ACCOUNT_NAME := p_EXTERNAL_ACCOUNT_NAME;
+	SELF.PROCESS_NAME := p_PROCESS_NAME;
+	SELF.EXCHANGE_NAME := p_EXCHANGE_NAME;
+	SELF.LOG_TYPE := p_LOG_TYPE;
+	SELF.TRACE_ON := p_TRACE_ON;
+	SELF.PROCESS_STARTED := 0;
+	SELF.FINISH_MESSAGE := NULL;
+
+	SELF.LAST_EVENT_ID := NULL;
+
+	RETURN;
+END;
+-----------------------------------------------------------------------------
+END;

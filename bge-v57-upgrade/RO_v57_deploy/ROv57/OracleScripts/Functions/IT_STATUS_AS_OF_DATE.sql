@@ -1,0 +1,28 @@
+CREATE OR REPLACE FUNCTION IT_STATUS_AS_OF_DATE
+	(
+	p_TRANSACTION_ID IN NUMBER,
+	p_AS_OF_DATE IN DATE
+	) RETURN DATE IS
+--Revision: $Revision: 1.17 $
+
+-- Answer the maximun as of date that is less than or equal to the argument as of date.
+
+v_AS_OF_DATE DATE := LOW_DATE;
+
+BEGIN
+
+	SELECT MAX(AS_OF_DATE)
+	INTO v_AS_OF_DATE
+	FROM IT_STATUS
+	WHERE TRANSACTION_ID = p_TRANSACTION_ID
+		AND AS_OF_DATE <= p_AS_OF_DATE;
+
+	RETURN v_AS_OF_DATE;
+
+	EXCEPTION
+		WHEN OTHERS THEN
+			RAISE;
+
+END IT_STATUS_AS_OF_DATE;
+/
+

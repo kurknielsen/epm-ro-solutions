@@ -1,0 +1,160 @@
+CREATE OR REPLACE PACKAGE MM_ISONE_UTIL IS
+
+  -- AUTHOR  : VGODYN
+  -- CREATED : 10/4/2005 3:18:14 PM
+  -- PURPOSE : COMMON CODE FOR MM_ISONE
+
+g_ISONE_SC_ID SC.SC_ID%TYPE;
+
+g_DAYAHEAD  CONSTANT VARCHAR2(8) := 'DayAhead';
+g_HOURAHEAD CONSTANT VARCHAR2(9) := 'HourAhead';
+g_REALTIME  CONSTANT VARCHAR2(8) := 'RealTime';
+g_REGULATION CONSTANT VARCHAR2(10) := 'Regulation';
+
+g_LMP_PRICE_TYPE CONSTANT VARCHAR2(32) := 'Locational Marginal Price';
+g_MLC_PRICE_TYPE CONSTANT VARCHAR2(32) := 'Marginal Loss Component';
+g_MCC_PRICE_TYPE CONSTANT VARCHAR2(32) := 'Marginal Congestion Component';
+g_MCP_PRICE_TYPE CONSTANT VARCHAR2(32) := 'Market Clearing Price';
+
+g_DATE_FORMAT CONSTANT VARCHAR2(16) := 'YYYY-MM-DD';
+g_DATE_TIME_FORMAT CONSTANT VARCHAR2(32) := 'yyyy-mm-dd"T"hh24:mi:ss';
+
+g_ISONE_TIMEZONE CONSTANT CHAR(3) := 'EDT';
+
+/*--TRAIT GROUP ID CONSTANTS --*/
+-- when added, use the range 700-799
+
+-- use with price cap groups g_TG_PRICE_CAP_*
+g_TT_MW CONSTANT NUMBER := 1;
+g_TT_COST CONSTANT NUMBER := 2;
+
+FUNCTION GET_COMMODITY_ID
+	(
+	p_MARKET_TYPE IN VARCHAR2
+	) RETURN NUMBER;
+
+FUNCTION GET_PRICE_INTERVAL
+	(
+	p_MARKET_TYPE IN VARCHAR2
+	) RETURN VARCHAR2;
+
+END MM_ISONE_UTIL;
+/
+CREATE OR REPLACE PACKAGE BODY MM_ISONE_UTIL IS
+
+----------------------------------------------------------------------------------------------------
+
+FUNCTION GET_SC_ID RETURN NUMBER IS
+
+v_SC_ID NUMBER;
+
+BEGIN
+  -- Initialization
+  SELECT SC_ID
+    INTO v_SC_ID
+    FROM SCHEDULE_COORDINATOR
+   WHERE SC_NAME = 'ISONE';
+
+   RETURN v_SC_ID;
+
+EXCEPTION
+  WHEN OTHERS THEN
+
+    IO.PUT_SC(v_SC_ID,
+	 'ISONE', 'ISONE', '?', 0,
+	 '?', '?', 'Active', 'ISONE',
+	 '?', 'Service Point', 'Hour',
+	 'None',  'None', 0, 0, 0, 0, 0.000);
+
+	 If v_SC_ID != -1 THEN
+	 	COMMIT;
+	 END IF;
+
+  RETURN v_SC_ID;
+
+END GET_SC_ID;
+
+----------------------------------------------------------------------------------------------------
+
+FUNCTION GET_COMMODITY_ID(p_MARKET_TYPE IN VARCHAR2) RETURN NUMBER IS
+
+v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE := 0;
+v_ALIAS IT_COMMODITY.COMMODITY_ALIAS%TYPE;
+v_NAME IT_COMMODITY.COMMODITY_NAME%TYPE;
+v_MARKET_TYPE IT_COMMODITY.MARKET_TYPE%TYPE;
+v_COMMODITY_TYPE IT_COMMODITY.COMMODITY_TYPE%TYPE;
+v_COMMODITY_UNIT IT_COMMODITY.COMMODITY_UNIT%TYPE;
+c_COM_TYPE_ENERGY CONSTANT VARCHAR2(6) := 'Energy';
+--c_COM_TYPE_TRANS  CONSTANT VARCHAR2(12) := 'Transmission';
+
+BEGIN
+
+	v_COMMODITY_TYPE := c_COM_TYPE_ENERGY;
+	v_MARKET_TYPE := p_MARKET_TYPE;
+
+	IF p_MARKET_TYPE = g_REGULATION THEN
+		v_NAME := v_MARKET_TYPE;
+		v_ALIAS := 'REG';
+	ELSIF p_MARKET_TYPE = g_REALTIME THEN
+		v_NAME := v_MARKET_TYPE || ' ' || v_COMMODITY_TYPE;
+		v_ALIAS := 'RT';
+	ELSIF p_MARKET_TYPE = g_DAYAHEAD THEN
+		v_NAME := v_MARKET_TYPE || ' ' || v_COMMODITY_TYPE;
+		v_ALIAS := 'DA';
+	ELSE
+		v_NAME := v_MARKET_TYPE || ' ' || v_COMMODITY_TYPE;
+		v_ALIAS := v_NAME;
+	END IF;
+
+    SELECT COMMODITY_ID
+    INTO v_COMMODITY_ID
+    FROM IT_COMMODITY
+	WHERE COMMODITY_NAME = v_NAME;
+
+	RETURN v_COMMODITY_ID;
+
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+	BEGIN
+
+	    v_COMMODITY_UNIT := 'MWH'; -- default
+
+		IO.PUT_IT_COMMODITY(
+		o_OID => v_COMMODITY_ID,
+		p_COMMODITY_NAME => v_NAME, -- lookup key
+		p_COMMODITY_ALIAS => v_ALIAS,
+		p_COMMODITY_DESC => v_NAME,
+		p_COMMODITY_ID => 0,
+		p_COMMODITY_TYPE => v_COMMODITY_TYPE,
+		p_COMMODITY_UNIT => v_COMMODITY_UNIT,
+		p_COMMODITY_UNIT_FORMAT => '?',
+		p_COMMODITY_PRICE_UNIT => 'Dollars',
+		p_COMMODITY_PRICE_FORMAT => '?',
+		p_IS_VIRTUAL => 0,
+		p_MARKET_TYPE => v_MARKET_TYPE
+		);
+
+	END;
+
+	RETURN v_COMMODITY_ID;
+
+END GET_COMMODITY_ID;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_PRICE_INTERVAL
+	(
+	p_MARKET_TYPE IN VARCHAR2
+	) RETURN VARCHAR2 AS
+BEGIN
+	RETURN 'Hour';
+END;
+----------------------------------------------------------------------------------------------------
+BEGIN
+  -- Initialization
+
+    g_ISONE_SC_ID := GET_SC_ID;
+    IF g_ISONE_SC_ID = -1 THEN
+    	MM_ISONE_UTIL.g_ISONE_SC_ID := 0;
+    END IF;
+
+END MM_ISONE_UTIL;
+/

@@ -1,0 +1,177 @@
+/*
+AMI_USAGE
+BGE_CI_STAGING
+COMM_SOLAR_GEN
+CUSTOMER_INFO_STAGING
+MONTHLY_ENERGY_STAGING
+PBS_CUSTOMER_LOOKUP_VIEW
+PLC_ICAP_INT_VALUE
+PLC_TX_INT_VALUE
+STUDYID_EXCEPTION_LOOKUP
+SYSTEM_LOAD_ID_LOOKUP
+*/
+
+CREATE TABLE AMI_USAGE
+(
+  AMI_ACCOUNT_NAME  VARCHAR2(64 BYTE)           NOT NULL,
+  SERVICE_DATE      DATE                        NOT NULL,
+  KW_1              NUMBER(16,4),
+  KW_2              NUMBER(16,4),
+  KW_3              NUMBER(16,4),
+  KW_4              NUMBER(16,4),
+  KW_5              NUMBER(16,4),
+  KW_6              NUMBER(16,4),
+  KW_7              NUMBER(16,4),
+  KW_8              NUMBER(16,4),
+  KW_9              NUMBER(16,4),
+  KW_10             NUMBER(16,4),
+  KW_11             NUMBER(16,4),
+  KW_12             NUMBER(16,4),
+  KW_13             NUMBER(16,4),
+  KW_14             NUMBER(16,4),
+  KW_15             NUMBER(16,4),
+  KW_16             NUMBER(16,4),
+  KW_17             NUMBER(16,4),
+  KW_18             NUMBER(16,4),
+  KW_19             NUMBER(16,4),
+  KW_20             NUMBER(16,4),
+  KW_21             NUMBER(16,4),
+  KW_22             NUMBER(16,4),
+  KW_23             NUMBER(16,4),
+  KW_24             NUMBER(16,4),
+  KW_25             NUMBER(16,4),
+  ENTRY_DATE        DATE,
+  SA_COUNT          NUMBER(16,4)
+);
+
+CREATE TABLE BGE_CI_STAGING
+(
+  BILL_ACCOUNT       NUMBER,
+  SERVICE_POINT      NUMBER,
+  PREMISE_NUMBER     NUMBER,
+  TARIFF_CODE        NUMBER,
+  NODE               NUMBER,
+  POLR_TYPE          VARCHAR2(64 BYTE),
+  SUPPLIER           VARCHAR2(64 BYTE),
+  CITY_COUNTY_CODE   NUMBER,
+  EFFECTIVE_DATE     DATE,
+  TERMINATION_DATE   DATE,
+  SPECIAL_NOTATION   VARCHAR2(64 BYTE),
+  STATUS_INDICATION  VARCHAR2(64 BYTE),
+  REC_TS             TIMESTAMP(6),
+  PROCESS_ROW        CHAR(1 BYTE),
+  ERROR_MESSAGE      VARCHAR2(4000 BYTE),
+  OSUSER             VARCHAR2(30 BYTE),
+  PROCESS_DATE       DATE,
+  RTO_ACCOUNT_ID     VARCHAR2(64 BYTE),
+  IDR_STATUS         CHAR(1 BYTE),
+  RTO_POOL_ID        VARCHAR2(64 BYTE),
+  PLC_BAND           VARCHAR2(64 BYTE),
+  ESP_ID             NUMBER,
+  METER_TYPE         CHAR(1 BYTE),
+  VOLTAGE_LEVEL      VARCHAR2(64 BYTE),
+  RATE_CLASS         VARCHAR2(64 BYTE),
+  AGGR_IDENTIFIER    VARCHAR2(64 BYTE),
+  WEATHER_STATION    VARCHAR2(64 BYTE),
+  POLR_ID            NUMBER,
+  STUDY_ID           VARCHAR2(4 BYTE),
+  FILTER_SEQUENCE    NUMBER
+);
+
+CREATE TABLE COMM_SOLAR_GEN
+(
+  SA_ID                VARCHAR2(64 BYTE),
+  SA_TYPE              VARCHAR2(32 BYTE),
+  SP_ID                VARCHAR2(64 BYTE),
+  SP_START             DATE,
+  SP_STOP              DATE,
+  METER_ID             VARCHAR2(64 BYTE),
+  CHANNEL_ID           VARCHAR2(64 BYTE),
+  UNIT                 VARCHAR2(64 BYTE),
+  USAGE_TYPE           VARCHAR2(64 BYTE),
+  CURRENT_FLOW         CHAR(1 BYTE),
+  SEC_PER_INTERVAL     NUMBER(10),
+  CERTIFIED_FLG        CHAR(1 BYTE),
+  CUT_READING_DATE     DATE,
+  INTERVAL_START_DATE  DATE,
+  VAL                  FLOAT(126),
+  INTERVAL_STATUS      CHAR(1 BYTE),
+  EXTENDEDSTATUS       NUMBER(19),
+  BATCH_NBR            NUMBER(10),
+  BATCH_THREAD_NBR     NUMBER(10),
+  LASTUPDATEDTTM       DATE,
+  DUP_IND              VARCHAR2(2 BYTE),
+  VERSION_NBR          NUMBER(10)
+);
+
+CREATE TABLE CUSTOMER_INFO_STAGING
+(
+  BILL_ACCOUNT       NUMBER(10)                 NOT NULL,
+  SERVICE_POINT      NUMBER(10)                 DEFAULT 0,
+  PREMISE_NUMBER     NUMBER(10)                 DEFAULT NULL                  NOT NULL,
+  TARIFF_CODE        NUMBER(3)                  DEFAULT NULL                  NOT NULL,
+  NODE               NUMBER(11),
+  POLR_TYPE          NUMBER(2),
+  SUPPLIER           CHAR(10 BYTE),
+  CITY_COUNTY_CODE   NUMBER(2),
+  EFFECTIVE_DATE     DATE                       NOT NULL,
+  TERMINATION_DATE   DATE,
+  SPECIAL_NOTATION   CHAR(20 BYTE),
+  STATUS_INDICATION  CHAR(1 BYTE),
+  REC_TS             TIMESTAMP(6)               DEFAULT SYSTIMESTAMP          NOT NULL
+);
+
+CREATE TABLE MONTHLY_ENERGY_STAGING
+(
+  BILL_ACCOUNT     NUMBER(10)                   NOT NULL,
+  SERVICE_POINT    NUMBER(10)                   DEFAULT 0,
+  READ_BEGIN_DATE  DATE                         NOT NULL,
+  READ_END_DATE    DATE                         NOT NULL,
+  BILLED_USAGE     NUMBER,
+  BILLED_KW        NUMBER,
+  READ_CODE        CHAR(2 BYTE)                 NOT NULL,
+  TIME_PERIOD      CHAR(7 BYTE)                 NOT NULL,
+  REC_TS           TIMESTAMP(6)                 DEFAULT systimestamp          NOT NULL
+);
+
+CREATE TABLE PBS_CUSTOMER_LOOKUP_VIEW
+(
+  BILL_ACCOUNT      VARCHAR2(10 BYTE),
+  SERVICE_POINT     VARCHAR2(40 BYTE),
+  STUDY_ID          VARCHAR2(4 BYTE),
+  EFFECTIVE_DATE    DATE,
+  TERMINATION_DATE  DATE
+);
+
+CREATE TABLE PLC_ICAP_INT_VALUE
+(
+  BILL_ACCOUNT    NUMBER(10)                    NOT NULL,
+  SERVICE_POINT   NUMBER(10)                    NOT NULL,
+  PREMISE_NUMBER  NUMBER(10)                    NOT NULL,
+  PEAK_DATE       DATE                          NOT NULL,
+  POINT_VAL       NUMBER                        NOT NULL
+);
+
+CREATE TABLE PLC_TX_INT_VALUE
+(
+  BILL_ACCOUNT    NUMBER(10)                    NOT NULL,
+  SERVICE_POINT   NUMBER(10)                    NOT NULL,
+  PREMISE_NUMBER  NUMBER(10)                    NOT NULL,
+  PEAK_DATE       DATE                          NOT NULL,
+  POINT_VAL       NUMBER                        NOT NULL
+);
+
+CREATE TABLE STUDYID_EXCEPTION_LOOKUP
+(
+  SEGMENT   VARCHAR2(4 BYTE)                    NOT NULL,
+  STUDY_ID  VARCHAR2(7 BYTE)                    NOT NULL,
+  WEIGHT    VARCHAR2(4 BYTE)                    NOT NULL
+);
+
+CREATE TABLE SYSTEM_LOAD_ID_LOOKUP
+(
+  PJM_ID      VARCHAR2(64 BYTE),
+  EMTR_ID     VARCHAR2(50 BYTE),
+  PI_ID       VARCHAR2(50 BYTE),
+  ESOURCE_ID  VARCHAR2(50 BYTE)
+);

@@ -1,0 +1,305 @@
+CREATE OR REPLACE PACKAGE BODY MM_SEM_SETTLEMENT_CALENDAR IS
+----------------------------------------------------------------------------------------
+FUNCTION WHAT_VERSION RETURN VARCHAR IS
+BEGIN
+	RETURN '$Revision: 1.2 $';
+END WHAT_VERSION;
+----------------------------------------------------------------------------------------
+FUNCTION GET_PUBLICATION_DATE
+	(
+	p_PUBLICATION_TYPE IN VARCHAR2,
+	p_MARKET           IN VARCHAR2,
+	p_RUN_IDENTIFIER   IN VARCHAR2,
+	p_SETTLEMENT_DATE  IN DATE
+	) RETURN DATE AS
+	v_PUBLICATION_DATE DATE;
+BEGIN
+	ASSERT(p_PUBLICATION_TYPE IS NOT NULL, 'Publication Type must be specified.', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_PUBLICATION_TYPE IN (c_PUBLICATION_TYPE_INVOICE, c_PUBLICATION_TYPE_REPORT),
+		   'Publication Type specified, ' || p_PUBLICATION_TYPE || ', is invalid. ',
+		   MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_MARKET IS NOT NULL, 'Market must be specified.', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_MARKET IN (c_MARKET_CAPACITY, c_MARKET_ENERGY, c_MARKET_FMOC, c_MARKET_VMOC),
+		   'Market specified, ' || p_MARKET || ', is invalid. ',
+		   MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_RUN_IDENTIFIER IS NOT NULL, 'Run Identifier must be specified.', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_SETTLEMENT_DATE IS NOT NULL, 'Settlement Date must be specified.', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT((p_SETTLEMENT_DATE - TRUNC(p_SETTLEMENT_DATE)) = 0, 'Settlement Date must not have time (00:00).', MSGCODES.c_ERR_ARGUMENT);
+
+	BEGIN
+		SELECT C.PUBLICATION_DATE
+		INTO v_PUBLICATION_DATE
+		FROM SEM_SETTLEMENT_CALENDAR C
+		WHERE C.PUBLICATION_TYPE = p_PUBLICATION_TYPE
+			  AND C.MARKET = p_MARKET
+			  AND C.RUN_IDENTIFIER = p_RUN_IDENTIFIER
+			  AND TRUNC(p_SETTLEMENT_DATE) BETWEEN C.BEGIN_DATE AND C.END_DATE;
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+			ERRS.RAISE(MSGCODES.c_ERR_NO_SUCH_ENTRY,
+					   'No Publication Date was found for PUBLICATION_TYPE=' || p_PUBLICATION_TYPE || ', MARKET=' ||
+					   p_MARKET || ', RUN_IDENTIFIER=' || p_RUN_IDENTIFIER || ', SETTLEMENT_DATE=' ||
+					   TEXT_UTIL.TO_CHAR_DATE(p_SETTLEMENT_DATE));
+	END;
+
+	RETURN v_PUBLICATION_DATE;
+
+END GET_PUBLICATION_DATE;
+----------------------------------------------------------------------------------------
+FUNCTION GET_RUN_IDENTIFIER_ORDER(p_RUN_IDENTIFIER IN VARCHAR2) RETURN NUMBER AS
+	v_ORDER NUMBER(9);
+BEGIN
+	CASE p_RUN_IDENTIFIER
+		WHEN 'P' THEN
+			v_ORDER := -1;
+		WHEN 'F' THEN
+			v_ORDER := 0;
+		ELSE
+			IF REGEXP_LIKE(p_RUN_IDENTIFIER, '(^F\([0-9]+\))') THEN
+				v_ORDER := TO_NUMBER(REGEXP_SUBSTR(p_RUN_IDENTIFIER, '([0-9]+)'));
+			ELSE
+				-- Does not match the correct format. Throw an Exception.
+				ERRS.RAISE_BAD_ARGUMENT('RUN_IDENTIFIER', p_RUN_IDENTIFIER, 'Error occurred when trying to determine the RUN_IDENTIFIER order.');
+			END IF;
+	END CASE;
+	RETURN v_ORDER;
+END GET_RUN_IDENTIFIER_ORDER;
+----------------------------------------------------------------------------------------
+/*
+Returns the best available Run Identifier for the specified
+Settlement Date, Publication Type, and Market that is <= the
+specified Publication Date.
+*/
+FUNCTION GET_RUN_IDENTIFIER
+	(
+	p_PUBLICATION_DATE IN DATE,
+	p_PUBLICATION_TYPE IN VARCHAR2,
+	p_MARKET           IN VARCHAR2,
+	p_SETTLEMENT_DATE  IN DATE
+	) RETURN VARCHAR2 AS
+	v_RUN_IDENTIFIER VARCHAR2(16);
+BEGIN
+
+	ASSERT(p_PUBLICATION_TYPE IS NOT NULL, 'Publication Type must be specified.', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_PUBLICATION_TYPE IN (c_PUBLICATION_TYPE_INVOICE, c_PUBLICATION_TYPE_REPORT),
+		   'Publication Type specified, ' || p_PUBLICATION_TYPE || ', is invalid. ',
+		   MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_MARKET IS NOT NULL, 'Market must be specified.', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_MARKET IN (c_MARKET_CAPACITY, c_MARKET_ENERGY, c_MARKET_FMOC, c_MARKET_VMOC),
+		   'Market specified, ' || p_MARKET || ', is invalid. ',
+		   MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_SETTLEMENT_DATE IS NOT NULL, 'Settlement Date must be specified.', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT((p_SETTLEMENT_DATE - TRUNC(p_SETTLEMENT_DATE)) = 0, 'Settlement Date must not have time (00:00).', MSGCODES.c_ERR_ARGUMENT);
+
+	BEGIN
+		SELECT X.RUN_IDENTIFIER
+		INTO v_RUN_IDENTIFIER
+		FROM (SELECT C.RUN_IDENTIFIER, GET_RUN_IDENTIFIER_ORDER(C.RUN_IDENTIFIER) AS SORT_ORDER
+        	  FROM SEM_SETTLEMENT_CALENDAR C
+        	  WHERE C.PUBLICATION_TYPE = p_PUBLICATION_TYPE
+        	  AND C.MARKET = p_MARKET
+        	  AND C.PUBLICATION_DATE <= p_PUBLICATION_DATE
+        	  AND TRUNC(p_SETTLEMENT_DATE) BETWEEN C.BEGIN_DATE AND C.END_DATE
+			  ORDER BY SORT_ORDER DESC) X
+		WHERE ROWNUM = 1;
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+			ERRS.RAISE(MSGCODES.c_ERR_NO_SUCH_ENTRY,
+					   'No Run Identifier was found for PUBLICATION_DATE=' ||
+					   TEXT_UTIL.TO_CHAR_DATE(p_PUBLICATION_DATE) || ', PUBLICATION_TYPE=' || p_PUBLICATION_TYPE ||
+					   ', MARKET=' || p_MARKET || ', SETTLEMENT_DATE=' || TEXT_UTIL.TO_CHAR_DATE(p_SETTLEMENT_DATE));
+	END;
+
+	RETURN v_RUN_IDENTIFIER;
+
+END GET_RUN_IDENTIFIER;
+----------------------------------------------------------------------------------------
+PROCEDURE SETTLEMENT_CALENDAR
+	(
+	p_BEGIN_DATE       IN DATE,
+	p_END_DATE         IN DATE,
+	p_PUBLICATION_TYPE IN VARCHAR2,
+	p_MARKET           IN VARCHAR2,
+	p_RUN_TYPE         IN VARCHAR2,
+	p_DATE_OPTION      IN VARCHAR2,
+	p_CURSOR           IN OUT GA.REFCURSOR
+	) IS
+BEGIN
+	OPEN p_CURSOR FOR
+		SELECT C.PUBLICATION_DATE,
+			   C.PUBLICATION_TYPE,
+			   C.MARKET,
+			   C.RUN_TYPE,
+			   C.BEGIN_DATE,
+			   C.END_DATE,
+			   C.RUN_IDENTIFIER
+		FROM SEM_SETTLEMENT_CALENDAR C
+		WHERE ((p_DATE_OPTION = 'By Publication Date' AND C.PUBLICATION_DATE BETWEEN TRUNC(p_BEGIN_DATE) AND
+			  TRUNC(p_END_DATE)) OR
+			  (p_DATE_OPTION = 'By Settlement Date' AND ((C.BEGIN_DATE <= p_END_DATE) AND
+			  (C.END_DATE >= p_BEGIN_DATE))))
+			  AND (p_PUBLICATION_TYPE = CONSTANTS.ALL_STRING OR C.PUBLICATION_TYPE = p_PUBLICATION_TYPE)
+			  AND (p_MARKET = CONSTANTS.ALL_STRING OR C.MARKET = p_MARKET)
+			  AND (p_RUN_TYPE = CONSTANTS.ALL_STRING OR C.RUN_TYPE = p_RUN_TYPE)
+		ORDER BY C.PUBLICATION_DATE,
+			   C.PUBLICATION_TYPE,
+			   C.MARKET,
+			   C.RUN_TYPE,
+			   C.BEGIN_DATE;
+END SETTLEMENT_CALENDAR;
+----------------------------------------------------------------------------------------
+PROCEDURE PUT_SETTLEMENT_CALENDAR
+	(
+	p_PUBLICATION_DATE     IN DATE,
+	p_PUBLICATION_TYPE     IN VARCHAR2,
+	p_MARKET               IN VARCHAR2,
+	p_RUN_TYPE             IN VARCHAR2,
+	p_BEGIN_DATE           IN DATE,
+	p_END_DATE             IN DATE,
+	p_RUN_IDENTIFIER       IN VARCHAR2,
+	p_OLD_PUBLICATION_DATE IN DATE := NULL,
+	p_OLD_PUBLICATION_TYPE IN VARCHAR2 := NULL,
+	p_OLD_MARKET           IN VARCHAR2 := NULL,
+	p_OLD_RUN_TYPE         IN VARCHAR2 := NULL,
+	p_OLD_BEGIN_DATE	   IN DATE := NULL
+	) IS
+	v_END_DATE                  DATE;
+	v_DUP_ENTRY_EXISTS          NUMBER(1) := 0;
+	v_EXISTING_PUBLICATION_DATE DATE;
+	v_STATEMENT_TYPE_ID			NUMBER(9);
+	v_IS_UPDATING				BOOLEAN;
+BEGIN
+	-- End Date is allowed to be NULL, assume equal to BEGIN_DATE
+	v_END_DATE := NVL(p_END_DATE, p_BEGIN_DATE);
+
+	-- Validate all parameters
+	ASSERT(p_PUBLICATION_DATE IS NOT NULL, 'Publication Date must be specified.', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_PUBLICATION_TYPE IS NOT NULL, 'Publication Type must be specified.', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_PUBLICATION_TYPE IN (c_PUBLICATION_TYPE_INVOICE, c_PUBLICATION_TYPE_REPORT),
+		   'Publication Type specified, ' || p_PUBLICATION_TYPE || ', is invalid. ',
+		   MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_MARKET IS NOT NULL, 'Market must be specified.', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_MARKET IN (c_MARKET_CAPACITY, c_MARKET_ENERGY, c_MARKET_FMOC, c_MARKET_VMOC),
+		   'Market specified, ' || p_MARKET || ', is invalid. ',
+		   MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_RUN_TYPE IS NOT NULL, 'Run Type must be specified.', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_RUN_TYPE IN (c_RUN_TYPE_INDICATIVE,c_RUN_TYPE_INITIAL,c_RUN_TYPE_M4,c_RUN_TYPE_M13,c_RUN_TYPE_ADHOC),'Run Type specified, ' || p_RUN_TYPE || ', is invalid. ',
+		   MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(p_BEGIN_DATE IS NOT NULL, 'Begin Date must be specified.', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(v_END_DATE >= p_BEGIN_DATE, 'Begin Date must come before End Date.', MSGCODES.c_ERR_DATE_RANGE);
+	ASSERT(p_RUN_IDENTIFIER IS NOT NULL, 'Run Identifier must be specified.', MSGCODES.c_ERR_ARGUMENT);
+
+	-- Validate p_RUN_IDENTIFIER
+	CASE p_RUN_TYPE
+		WHEN 'Indicative' THEN
+			ASSERT(p_RUN_IDENTIFIER = 'P',
+				   'Run Identifier specified, ' || p_RUN_IDENTIFIER ||
+				   ', is invalid. It must be P when Run Type is Indicative.',
+				   MSGCODES.c_ERR_ARGUMENT);
+		WHEN 'Initial' THEN
+			ASSERT(p_RUN_IDENTIFIER = 'F',
+				   'Run Identifier specified, ' || p_RUN_IDENTIFIER ||
+				   ', is invalid. It must be F when Run Type is Initial.',
+				   MSGCODES.c_ERR_ARGUMENT);
+		ELSE
+			ASSERT(REGEXP_LIKE(p_RUN_IDENTIFIER, '(^F\([0-9]+\))'),
+				   'Run Identifier specified, ' || p_RUN_IDENTIFIER ||
+				   ', is invalid. It must be in the format F(#).',
+				   MSGCODES.c_ERR_ARGUMENT);
+	END CASE;
+
+	BEGIN
+		UT.PUT_TEMPORAL_DATA_UI('SEM_SETTLEMENT_CALENDAR',
+							p_BEGIN_DATE,
+							v_END_DATE,
+							p_OLD_BEGIN_DATE,
+							FALSE,
+							'PUBLICATION_DATE',
+							UT.GET_LITERAL_FOR_DATE(p_PUBLICATION_DATE),
+							UT.GET_LITERAL_FOR_DATE(p_OLD_PUBLICATION_DATE),
+							TRUE,
+                            'PUBLICATION_TYPE',
+							UT.GET_LITERAL_FOR_STRING(p_PUBLICATION_TYPE),
+							UT.GET_LITERAL_FOR_STRING(p_OLD_PUBLICATION_TYPE),
+							TRUE,
+							'MARKET',
+							UT.GET_LITERAL_FOR_STRING(p_MARKET),
+							UT.GET_LITERAL_FOR_STRING(p_OLD_MARKET),
+							TRUE,
+							'RUN_TYPE',
+							UT.GET_LITERAL_FOR_STRING(p_RUN_TYPE),
+							UT.GET_LITERAL_FOR_STRING(p_OLD_RUN_TYPE),
+							TRUE,
+                            'RUN_IDENTIFIER',
+							UT.GET_LITERAL_FOR_STRING(p_RUN_IDENTIFIER),
+							NULL,
+							FALSE);
+	EXCEPTION
+		WHEN DUP_VAL_ON_INDEX THEN
+			ERRS.RAISE(MSGCODES.c_ERR_DUP_ENTRY,
+				'Publication Date=' || TEXT_UTIL.TO_CHAR_DATE(p_PUBLICATION_DATE) ||
+				', Publication Type=' || p_PUBLICATION_TYPE ||
+				', Market=' || p_MARKET ||
+				', Run Type=' || p_RUN_TYPE ||
+				', Begin Date=' || TEXT_UTIL.TO_CHAR_DATE(p_BEGIN_DATE));
+	END;
+
+	-- Create the associated Statement Type if necessary
+	IF REGEXP_LIKE(p_RUN_IDENTIFIER, '(^F\([0-9]+\))') THEN
+		v_STATEMENT_TYPE_ID := MM_UTIL.DETERMINE_STATEMENT_TYPE('F', REGEXP_SUBSTR(p_RUN_IDENTIFIER, '([0-9]+)'), EC.ES_SEM, MM_SEM_UTIL.g_STATEMENT_TYPE_SETTLEMENT);
+	END IF;
+END PUT_SETTLEMENT_CALENDAR;
+----------------------------------------------------------------------------------------
+PROCEDURE DELETE_SETTLEMENT_CALENDAR
+	(
+	p_PUBLICATION_DATE     IN DATE,
+	p_PUBLICATION_TYPE     IN VARCHAR2,
+	p_MARKET               IN VARCHAR2,
+	p_RUN_TYPE             IN VARCHAR2,
+	p_BEGIN_DATE 		   IN DATE
+	) IS
+BEGIN
+	DELETE FROM SEM_SETTLEMENT_CALENDAR C
+	WHERE C.PUBLICATION_DATE = p_PUBLICATION_DATE
+	  AND C.PUBLICATION_TYPE = p_PUBLICATION_TYPE
+	  AND C.MARKET = p_MARKET
+	  AND C.RUN_TYPE = p_RUN_TYPE
+	  AND C.BEGIN_DATE = p_BEGIN_DATE;
+END DELETE_SETTLEMENT_CALENDAR;
+----------------------------------------------------------------------------------------
+PROCEDURE RUN_IDENTIFIERS(p_CURSOR IN OUT GA.REFCURSOR) IS
+	v_REGEXP VARCHAR2(32) := '(^P$|^F$|^F\([0-9]+\))'; -- this picks up all the P, F, & F(n) statement types
+BEGIN
+	OPEN p_CURSOR FOR
+		SELECT EXTERNAL_IDENTIFIER
+		FROM EXTERNAL_SYSTEM_IDENTIFIER, STATEMENT_TYPE
+		WHERE EXTERNAL_SYSTEM_ID = EC.ES_SEM
+			  AND ENTITY_DOMAIN_ID = EC.ED_STATEMENT_TYPE
+			  AND IDENTIFIER_TYPE = MM_SEM_UTIL.g_STATEMENT_TYPE_SETTLEMENT
+			  AND REGEXP_LIKE(EXTERNAL_IDENTIFIER, v_REGEXP)
+			  AND EXTERNAL_SYSTEM_IDENTIFIER.ENTITY_ID = STATEMENT_TYPE.STATEMENT_TYPE_ID
+		ORDER BY STATEMENT_TYPE_ORDER;
+END RUN_IDENTIFIERS;
+----------------------------------------------------------------------------------------
+FUNCTION GET_MARKET_NAME_FOR_ABBREV(p_MARKET_ABBREV VARCHAR2) RETURN VARCHAR2 IS
+v_MARKET VARCHAR2(16);
+BEGIN
+	CASE p_MARKET_ABBREV
+        WHEN 'EN' THEN
+        	v_MARKET := MM_SEM_SETTLEMENT_CALENDAR.c_MARKET_ENERGY;
+        WHEN 'CA' THEN
+        	v_MARKET := MM_SEM_SETTLEMENT_CALENDAR.c_MARKET_CAPACITY;
+        WHEN 'MO' THEN
+        	v_MARKET := MM_SEM_SETTLEMENT_CALENDAR.c_MARKET_VMOC;
+		WHEN 'VMOC' THEN
+        	v_MARKET := MM_SEM_SETTLEMENT_CALENDAR.c_MARKET_VMOC;
+        WHEN 'FMO' THEN
+        	v_MARKET := MM_SEM_SETTLEMENT_CALENDAR.c_MARKET_FMOC;
+        ELSE
+        	ERRS.RAISE_BAD_ARGUMENT('MARKET_ABBREV', p_MARKET_ABBREV, 'Must be EN, CA, MO, or FMO.');
+    END CASE;
+	RETURN v_MARKET;
+END GET_MARKET_NAME_FOR_ABBREV;
+----------------------------------------------------------------------------------------
+END MM_SEM_SETTLEMENT_CALENDAR;
+/

@@ -1,0 +1,148 @@
+<SystemObjectConfiguration xmlns="http://www.newenergyassoc.com/mighty/configuration" scriptCreateDate="2010-05-24 11:05:02" isProductScript="0"><MainObjects>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>SCHEDULING</name>
+        <category>Layout</category>
+      </Path>
+    </Path>
+    <name>SCHEDULING_PJM_GENERATION</name>
+    <category>Layout</category>
+    <displayName>PJM Generation</displayName>
+    <order>9</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="701" name="Pane Type">Aggregate</Attribute>
+    <Attribute id="704" name="Navigation Style">Tabs</Attribute>
+    <Attribute id="711" name="Expand Menu OnLoad">0</Attribute>
+    <Object>
+      <name>SCHEDULING_PJM_GEN_DEFAULTS</name>
+      <category>Layout</category>
+      <displayName>Unit Details</displayName>
+      <order>4</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="701" name="Pane Type">System View</Attribute>
+      <Attribute id="708" name="View Reference">Scheduling.PJM.Generation.UnitDefaults</Attribute>
+      <Attribute id="711" name="Expand Menu OnLoad">0</Attribute>
+    </Object>
+    <Object>
+      <name>SCHEDULING_PJM_GEN_PCCURVES</name>
+      <category>Layout</category>
+      <displayName>Price and Cost Curves</displayName>
+      <order>3</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="701" name="Pane Type">Aggregate</Attribute>
+      <Attribute id="704" name="Navigation Style">Tabs</Attribute>
+      <Attribute id="711" name="Expand Menu OnLoad">0</Attribute>
+      <Object>
+        <name>SCHEDULING_PJM_GEN_SCHED_DETAILS</name>
+        <category>Layout</category>
+        <displayName>Schedule Offers</displayName>
+        <order>0</order>
+        <isHidden>0</isHidden>
+        <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+        <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+        <Attribute id="701" name="Pane Type">System View</Attribute>
+        <Attribute id="708" name="View Reference">Scheduling.PJM.Generation.PCCurves</Attribute>
+        <Attribute id="711" name="Expand Menu OnLoad">0</Attribute>
+      </Object>
+      <Object>
+        <name>SCHEDULING_PJM_GEN_UNIT_SCHEDULES</name>
+        <category>Layout</category>
+        <displayName>Schedule Details</displayName>
+        <order>1</order>
+        <isHidden>0</isHidden>
+        <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+        <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+        <Attribute id="701" name="Pane Type">System View</Attribute>
+        <Attribute id="708" name="View Reference">Scheduling.PJM.Generation.UnitSchedules</Attribute>
+        <Attribute id="711" name="Expand Menu OnLoad">0</Attribute>
+      </Object>
+    </Object>
+    <Object>
+      <name>SCHEDULING_PJM_GEN_REGULATION</name>
+      <category>Layout</category>
+      <displayName>Regulation</displayName>
+      <order>5</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="701" name="Pane Type">System View</Attribute>
+      <Attribute id="708" name="View Reference">Scheduling.PJM.Generation.Regulation</Attribute>
+      <Attribute id="711" name="Expand Menu OnLoad">0</Attribute>
+    </Object>
+    <Object>
+      <name>SCHEDULING_PJM_GEN_SPIN</name>
+      <category>Layout</category>
+      <displayName>Spinning Reserves</displayName>
+      <order>6</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="701" name="Pane Type">System View</Attribute>
+      <Attribute id="708" name="View Reference">Scheduling.PJM.Generation.SpinningReserves</Attribute>
+      <Attribute id="711" name="Expand Menu OnLoad">0</Attribute>
+    </Object>
+    <Object>
+      <name>SCHEDULING_PJM_GEN_STATUS</name>
+      <category>Layout</category>
+      <displayName>Daily Bid Status</displayName>
+      <order>0</order>
+      <isHidden>0</isHidden>
+      <Attribute id="701" name="Pane Type">System View</Attribute>
+      <Attribute id="708" name="View Reference">Scheduling.PJM.Generation.StatusSummary</Attribute>
+    </Object>
+    <Object>
+      <name>SCHEDULING_PJM_GEN_UPDATES</name>
+      <category>Layout</category>
+      <displayName>Units by Hour</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="701" name="Pane Type">System View</Attribute>
+      <Attribute id="708" name="View Reference">Scheduling.PJM.Generation.UnitUpdates</Attribute>
+      <Attribute id="711" name="Expand Menu OnLoad">0</Attribute>
+    </Object>
+    <Object>
+      <name>SCHEDULING_PJM_GEN_UPDATE_SUMM</name>
+      <category>Layout</category>
+      <displayName>Units by Day</displayName>
+      <order>1</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="701" name="Pane Type">System View</Attribute>
+      <Attribute id="708" name="View Reference">Scheduling.PJM.Generation.UnitUpdateSummary</Attribute>
+      <Attribute id="711" name="Expand Menu OnLoad">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>SCHEDULING</name>
+        <category>Layout</category>
+      </Path>
+    </Path>
+    <name>SCHEDULING_OTHER1</name>
+    <category>Layout</category>
+    <displayName>Other</displayName>
+    <order>92</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="701" name="Pane Type">System View</Attribute>
+    <Attribute id="708" name="View Reference">Scheduling.Other1</Attribute>
+    <Attribute id="711" name="Expand Menu OnLoad">0</Attribute>
+  </Object>
+</MainObjects>
+</SystemObjectConfiguration>

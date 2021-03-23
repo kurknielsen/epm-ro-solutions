@@ -1,0 +1,275 @@
+CREATE OR REPLACE PACKAGE LOGS_IMPL IS
+-- $Revision: 1.5 $
+
+-- Author  : AGRIFFIS
+-- Created : 7/09/2010
+-- Purpose : Actual interaction with PROCESS_LOG_EVENT, switched out with the testing LOG_IMPL for unit test 
+-- benchmark capturing purposes
+
+FUNCTION WHAT_VERSION RETURN VARCHAR2;
+
+PROCEDURE PUT_PROCESS_LOG_EVENT
+    (p_RECORD IN PROCESS_LOG_EVENT%ROWTYPE);
+
+PROCEDURE PUT_PROCESS_LOG_EVENT
+    (
+    p_PROCESS_ID IN NUMBER,
+    p_EVENT_ID IN NUMBER,
+    p_EVENT_LEVEL IN NUMBER, 
+    p_EVENT_TIMESTAMP IN TIMESTAMP, 
+    p_EVENT_TEXT IN VARCHAR2
+    );
+    
+-- Overload for aggregated error logging
+PROCEDURE PUT_PROCESS_LOG_EVENT
+    (
+	p_RECORD IN PROCESS_LOG_EVENT%ROWTYPE,
+    p_EVENT_TEXT_CLOB  IN CLOB,
+    p_DETAIL_TYPE      IN VARCHAR2 := NULL,
+    p_CONTENT_TYPE     IN VARCHAR2 := NULL
+	);
+
+PROCEDURE PUT_PROCESS_LOG_TRACE
+    (p_RECORD IN PROCESS_LOG_EVENT%ROWTYPE);
+    
+PROCEDURE PUT_PROCESS_LOG_TEMP_TRACE
+    (p_RECORD IN PROCESS_LOG_EVENT%ROWTYPE);
+    
+PROCEDURE PUT_PROCESS_LOG_EVENT_DETAIL
+    (
+    p_EVENT_ID IN NUMBER,
+    p_DETAIL_TYPE IN VARCHAR2,
+    p_CONTENT_TYPE IN VARCHAR2,
+    p_CONTENTS IN CLOB
+    );
+    
+PROCEDURE PUT_PROCESS_LOG
+    (
+    p_PROCESS_ID IN NUMBER,
+    p_PROCESS_NAME IN VARCHAR2,
+    p_PROCESS_TYPE IN VARCHAR2,
+    p_USER_ID IN NUMBER,
+    p_PARENT_PROCESS_ID IN NUMBER,
+    p_PROCESS_START_TIME IN DATE,
+    p_PROCESS_STOP_TIME IN DATE,
+    p_PROGRESS_TOTALWORK IN NUMBER,
+    p_PROGRESS_UNITS IN VARCHAR2,
+    p_CAN_TERMINATE IN NUMBER,
+    p_WAS_TERMINATED IN NUMBER,
+    p_NEXT_EVENT_CLEANUP IN DATE,
+    p_SCHEMA_NAME IN VARCHAR2,
+    p_SESSION_PROGRAM IN VARCHAR2,
+    p_SESSION_MACHINE IN VARCHAR2,
+    p_SESSION_OSUSER IN VARCHAR2,
+    p_SESSION_SID IN VARCHAR2,
+    p_SESSION_SERIALNUM IN VARCHAR2,
+    p_UNIQUE_SESSION_CID IN VARCHAR2,
+    p_JOB_NAME IN VARCHAR2
+    );
+
+PROCEDURE PUT_PROCESS_TARGET_PARAMETER
+	(
+	p_PROCESS_ID		IN NUMBER,
+	p_PARAMETER_NAME	IN VARCHAR2,
+	p_PARAMETER_VAL		IN VARCHAR2
+	);
+
+PROCEDURE CLEAR_LOGS_CLOB;
+
+FUNCTION GET_LOGS_CLOB RETURN CLOB;
+
+END LOGS_IMPL;
+/
+CREATE OR REPLACE PACKAGE BODY LOGS_IMPL IS
+----------------------------------------------------------------------------------------------------
+-- Constants
+c_DETAIL_TYPE CONSTANT VARCHAR2(30) := 'Message Detail';
+----------------------------------------------------------------------------------------------------
+FUNCTION WHAT_VERSION RETURN VARCHAR2 IS
+BEGIN
+    RETURN '$Revision: 1.5 $';
+END WHAT_VERSION;
+---------------------------------------------------------------------------------------------------
+PROCEDURE PUT_PROCESS_LOG_EVENT
+    (p_RECORD IN PROCESS_LOG_EVENT%ROWTYPE) AS
+    
+BEGIN
+
+    INSERT INTO PROCESS_LOG_EVENT VALUES p_RECORD;
+    
+END PUT_PROCESS_LOG_EVENT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_PROCESS_LOG_EVENT
+    (
+    p_PROCESS_ID IN NUMBER,
+    p_EVENT_ID IN NUMBER,
+    p_EVENT_LEVEL IN NUMBER, 
+    p_EVENT_TIMESTAMP IN TIMESTAMP, 
+    p_EVENT_TEXT IN VARCHAR2
+    ) AS
+    
+BEGIN
+
+    INSERT INTO PROCESS_LOG_EVENT (PROCESS_ID, EVENT_ID, EVENT_LEVEL, EVENT_TIMESTAMP, EVENT_TEXT)
+    VALUES (p_PROCESS_ID, p_EVENT_ID, p_EVENT_LEVEL, p_EVENT_TIMESTAMP, p_EVENT_TEXT);
+    
+END PUT_PROCESS_LOG_EVENT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_PROCESS_LOG_EVENT
+    (
+	p_RECORD IN PROCESS_LOG_EVENT%ROWTYPE,
+    p_EVENT_TEXT_CLOB  IN CLOB,
+    p_DETAIL_TYPE      IN VARCHAR2 := NULL,
+    p_CONTENT_TYPE     IN VARCHAR2 := NULL
+	) AS
+    
+BEGIN
+    INSERT INTO PROCESS_LOG_EVENT VALUES p_RECORD;
+	IF p_EVENT_TEXT_CLOB IS NOT NULL THEN
+		PUT_PROCESS_LOG_EVENT_DETAIL(
+			p_RECORD.EVENT_ID,
+			NVL(p_DETAIL_TYPE, c_DETAIL_TYPE), 
+			NVL(p_CONTENT_TYPE, CONSTANTS.MIME_TYPE_TEXT), 
+			p_EVENT_TEXT_CLOB);
+	END IF;
+
+END PUT_PROCESS_LOG_EVENT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_PROCESS_LOG_TRACE
+    (p_RECORD IN PROCESS_LOG_EVENT%ROWTYPE) AS
+    
+BEGIN
+
+    INSERT INTO PROCESS_LOG_TRACE VALUES p_RECORD;
+    
+END PUT_PROCESS_LOG_TRACE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_PROCESS_LOG_TEMP_TRACE
+    (p_RECORD IN PROCESS_LOG_EVENT%ROWTYPE) AS
+    
+BEGIN
+
+    INSERT INTO PROCESS_LOG_TEMP_TRACE VALUES p_RECORD;
+    
+END PUT_PROCESS_LOG_TEMP_TRACE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_PROCESS_LOG_EVENT_DETAIL
+    (
+    p_EVENT_ID IN NUMBER,
+    p_DETAIL_TYPE IN VARCHAR2,
+    p_CONTENT_TYPE IN VARCHAR2,
+    p_CONTENTS IN CLOB
+    ) AS
+    
+BEGIN
+
+    INSERT INTO PROCESS_LOG_EVENT_DETAIL (EVENT_ID, DETAIL_TYPE, CONTENT_TYPE, CONTENTS)
+    VALUES (p_EVENT_ID, p_DETAIL_TYPE, p_CONTENT_TYPE, p_CONTENTS);
+
+END PUT_PROCESS_LOG_EVENT_DETAIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_PROCESS_LOG
+    (
+    p_PROCESS_ID IN NUMBER,
+    p_PROCESS_NAME IN VARCHAR2,
+    p_PROCESS_TYPE IN VARCHAR2,
+    p_USER_ID IN NUMBER,
+    p_PARENT_PROCESS_ID IN NUMBER,
+    p_PROCESS_START_TIME IN DATE,
+    p_PROCESS_STOP_TIME IN DATE,
+    p_PROGRESS_TOTALWORK IN NUMBER,
+    p_PROGRESS_UNITS IN VARCHAR2,
+    p_CAN_TERMINATE IN NUMBER,
+    p_WAS_TERMINATED IN NUMBER,
+    p_NEXT_EVENT_CLEANUP IN DATE,
+    p_SCHEMA_NAME IN VARCHAR2,
+    p_SESSION_PROGRAM IN VARCHAR2,
+    p_SESSION_MACHINE IN VARCHAR2,
+    p_SESSION_OSUSER IN VARCHAR2,
+    p_SESSION_SID IN VARCHAR2,
+    p_SESSION_SERIALNUM IN VARCHAR2,
+    p_UNIQUE_SESSION_CID IN VARCHAR2,
+    p_JOB_NAME IN VARCHAR2
+    ) AS
+         
+BEGIN
+
+    INSERT INTO PROCESS_LOG
+        (PROCESS_ID,
+         PROCESS_NAME,
+         PROCESS_TYPE,
+         USER_ID,
+         PARENT_PROCESS_ID,
+         PROCESS_START_TIME,
+         PROCESS_STOP_TIME,
+         PROGRESS_TOTALWORK,
+         PROGRESS_UNITS,
+         CAN_TERMINATE,
+         WAS_TERMINATED,
+         NEXT_EVENT_CLEANUP,
+         SCHEMA_NAME,
+         SESSION_PROGRAM,
+         SESSION_MACHINE,
+         SESSION_OSUSER,
+         SESSION_SID,
+         SESSION_SERIALNUM,
+         UNIQUE_SESSION_CID,
+         JOB_NAME)
+     VALUES (p_PROCESS_ID,
+            p_PROCESS_NAME,
+            p_PROCESS_TYPE,
+            p_USER_ID,
+            p_PARENT_PROCESS_ID,
+            p_PROCESS_START_TIME,
+            p_PROCESS_STOP_TIME,
+            p_PROGRESS_TOTALWORK,
+            p_PROGRESS_UNITS,
+            p_CAN_TERMINATE,
+            p_WAS_TERMINATED,
+            p_NEXT_EVENT_CLEANUP,
+            p_SCHEMA_NAME,
+            p_SESSION_PROGRAM,
+            p_SESSION_MACHINE,
+            p_SESSION_OSUSER,
+            p_SESSION_SID,
+            p_SESSION_SERIALNUM,
+            p_UNIQUE_SESSION_CID,
+            p_JOB_NAME);
+            
+END PUT_PROCESS_LOG;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_PROCESS_TARGET_PARAMETER
+	(
+	p_PROCESS_ID		IN NUMBER,
+	p_PARAMETER_NAME	IN VARCHAR2,
+	p_PARAMETER_VAL		IN VARCHAR2
+	) AS
+BEGIN
+	UPDATE PROCESS_LOG_TARGET_PARAMETER
+		SET PARAMETER_VAL = p_PARAMETER_VAL
+	WHERE PROCESS_ID = p_PROCESS_ID
+		AND PARAMETER_NAME = p_PARAMETER_NAME;
+
+	IF SQL%NOTFOUND THEN
+		INSERT INTO PROCESS_LOG_TARGET_PARAMETER
+			(PROCESS_ID, PARAMETER_NAME, PARAMETER_VAL)
+		VALUES
+			(p_PROCESS_ID,
+			 p_PARAMETER_NAME,
+			 p_PARAMETER_VAL);
+	END IF;
+END PUT_PROCESS_TARGET_PARAMETER;
+----------------------------------------------------------------------------------------------------
+PROCEDURE CLEAR_LOGS_CLOB AS
+BEGIN
+	RAISE_APPLICATION_ERROR(-20000, 'UNIMPLEMTED PROCEDURE: CLEAR_LOGS_CLOB. This procedure is only required for Unit Testing. You may have the wrong version of LOGS_IMPL compiled in the schema.', TRUE);
+END CLEAR_LOGS_CLOB;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_LOGS_CLOB RETURN CLOB IS
+BEGIN
+	RAISE_APPLICATION_ERROR(-20000, 'UNIMPLEMTED PROCEDURE: GET_LOGS_CLOB. This procedure is only required for Unit Testing. You may have the wrong version of LOGS_IMPL compiled in the schema.', TRUE);
+	RETURN NULL;
+END GET_LOGS_CLOB;
+----------------------------------------------------------------------------------------------------
+END LOGS_IMPL;
+/

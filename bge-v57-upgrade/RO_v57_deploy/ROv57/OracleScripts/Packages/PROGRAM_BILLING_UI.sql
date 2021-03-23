@@ -1,0 +1,610 @@
+CREATE OR REPLACE PACKAGE PROGRAM_BILLING_UI IS
+-- $Revision: 1.4 $
+
+-- Calculates program billing results for all accounts for the specified bill cycles and
+-- programs.
+-- %param p_BILL_CYCLE_IDs		List of bill cycles for which to compute results.
+--			This can be a singleton collection containing
+--			CONSTANTS.ALL_ID.
+-- %param p_PROGRAM_IDs		List of SmartGrid programs for which to compute
+--			results. This can be a singleton collection
+--			containing CONSTANTS.ALL_ID.
+-- %param p_BEGIN_DATE			Start of date range to calculate. All bill cycle
+--			periods that overlap the specified date range
+--			will be calculated.
+-- %param p_END_DATE			End of date range to calculate.
+-- %param p_TRACE_ON			Flag indicating whether or not trace/debug data
+--			should be emitted during processing.
+-- %param p_PROCESS_ID			ID of PROCESS_LOG entry that represents this
+--			calculation.
+-- %param p_PROCESS_STATUS		Final disposition of process. See LOGS.c_LEVEL_*
+--			constants for possible values.
+-- %param p_MESSAGE			Process’s finish message.
+FUNCTION WHAT_VERSION RETURN VARCHAR2;
+
+PROCEDURE CALC_BY_BILL_CYCLE
+	(
+	p_BILL_CYCLE_IDs IN NUMBER_COLLECTION,
+	p_PROGRAM_IDs IN NUMBER_COLLECTION,
+	p_DATE_RANGE_BEGIN IN DATE,
+	p_DATE_RANGE_END IN DATE,
+	p_TRACE_ON IN NUMBER,
+	p_PROCESS_ID OUT VARCHAR2,
+	p_PROCESS_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	);
+
+-- Queries for program billing results, summarized at the bill cycle and program level.
+-- %param p_BILL_CYCLE_IDs		List of bill cycles for which to query results. This
+--			can be a singleton collection containing
+--			CONSTANTS.ALL_ID.
+-- %param p_PROGRAM_IDs		List of SmartGrid programs for which to query
+--			results. This can be a singleton collection
+--			containing CONSTANTS.ALL_ID.
+-- %param p_BEGIN_DATE			Start of date range to query.
+-- %param p_END_DATE			End of date range to query.
+-- %param p_CURSOR			Query results. This set will include one record per
+--			matching entry in PROGRAM_BILL_SUMMARY.
+PROCEDURE BILL_CYCLE_PROGRAM_RESULTS
+	(
+	p_BILL_CYCLE_IDs IN NUMBER_COLLECTION,
+	p_PROGRAM_IDs IN NUMBER_COLLECTION,
+	p_DATE_RANGE_BEGIN IN DATE,
+	p_DATE_RANGE_END IN DATE,
+	p_CURSOR OUT GA.REFCURSOR
+	);
+
+-- Queries for job details for a given program billing summary record. This will return
+-- one record for each process that contributed to current results and indicate how many
+-- service locations were calculated by that job as well as how many calculations had
+-- warnings or errors.
+-- %param p_BILL_SUMMARY_ID		ID of the PROGRAM_BILL_SUMMARY record for which to
+--			query job details.
+-- %param p_CURSOR			Query results. This set will include one record per
+--			distinct PROCESS_ID found in this summary record’s
+--			set of child records (PROGRAM_BILL_RESULTS).
+PROCEDURE BILL_CYCLE_PROGRAM_JOBS
+	(
+	p_BILL_SUMMARY_ID IN VARCHAR2,
+	p_CURSOR OUT GA.REFCURSOR
+	);
+
+-- Queries for job details for a given program billing summary record. This will return
+-- one record for each process that contributed to current results and indicate how many
+-- service locations were calculated by that job as well as how many calculations had
+-- warnings or errors.
+-- %param p_BILL_SUMMARY_ID		ID of the PROGRAM_BILL_SUMMARY record for which to
+--			query status details.
+-- %param p_PROCESS_ID			ID of the Process for which to query status details.
+--			This value is optional: NULL means return details
+--			for all processes.
+-- %param p_RESULT_STATUS		Status of records to query. This value is optional:
+--			NULL means return all details regardless of status.
+-- %param p_BILL_PERIOD		The current record’s bill period will be returned 
+--			and will be formatted like so:
+--			YYYY/MM/DD -> YYYY/MM/DD (Bill Cycle Name)
+-- %param p_PROGRAM_NAME		The current record’s program name will be returned.
+-- %param p_CALCULATED_BY		If p_PROCESS_ID is not NULL then the process owner
+--			will be returned.
+-- %param p_CALCUALTED WHEN		If p_PROCESS_ID is not NULL then the process stop
+--			time will be returned.
+-- %param p_CURSOR			Query results. This set will include one record per
+--			matching entry in PROGRAM_BILL_RESULTS.
+PROCEDURE JOB_STATUS_DETAILS
+	(
+	p_BILL_SUMMARY_ID IN VARCHAR2,
+	p_PROCESS_ID IN VARCHAR2,
+	p_RESULT_STATUS IN VARCHAR2,
+	p_BILL_PERIOD OUT VARCHAR2,
+	p_PROGRAM_NAME OUT VARCHAR2,
+	p_CALCULATED_BY OUT VARCHAR2,
+	p_CALCULATED_WHEN OUT VARCHAR2,
+	p_CURSOR OUT GA.REFCURSOR
+	);
+
+-- Queries for log events for the specified result record.
+-- %param p_BILL_RESULT_ID		ID of the PROGRAM_BILL_RESULT record for which to
+--			query log events.
+-- %param p_CURSOR			Query results. This set will include one record per
+--			matching entry in PROGRAM_BILL_RESULTS.
+PROCEDURE BILLING_RESULT_LOG_EVENTS
+	(
+	p_BILL_RESULT_ID IN VARCHAR2,
+	p_CURSOR OUT GA.REFCURSOR
+	);
+
+-- Calculates program billing results for the specified accounts and programs.
+-- %param p_ACCOUNT_IDs		List of accounts for which to compute results. This
+--			can be a singleton collection containing
+--			CONSTANTS.ALL_ID.
+-- %param p_PROGRAM_IDs		List of SmartGrid programs for which to compute
+--			results. This can be a singleton collection
+--			containing CONSTANTS.ALL_ID.
+-- %param p_BEGIN_DATE			Start of date range to calculate. All bill cycle
+--			periods that overlap the specified date range
+--			will be calculated.
+-- %param p_END_DATE			End of date range to calculate.
+-- %param p_TRACE_ON			Flag indicating whether or not trace/debug data
+--			should be emitted during processing.
+-- %param p_PROCESS_ID			ID of PROCESS_LOG entry that represents this
+--			calculation.
+-- %param p_PROCESS_STATUS		Final disposition of process. See LOGS.c_LEVEL_*
+--			constants for possible values.
+-- %param p_MESSAGE			Process’s finish message.
+PROCEDURE CALC_BY_ACCOUNT
+	(
+	p_ACCOUNT_ID IN NUMBER_COLLECTION,
+	p_PROGRAM_IDs IN NUMBER_COLLECTION,
+	p_DATE_RANGE_BEGIN IN DATE,
+	p_DATE_RANGE_END IN DATE,
+	p_TRACE_ON IN NUMBER,
+	p_PROCESS_ID OUT VARCHAR2,
+	p_PROCESS_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	);
+
+-- Queries for program billing results and shows account/service location level results.
+-- %param p_ACCOUNT_IDs		List of accounts for which to query results. This
+--			can be a singleton collection containing
+--			CONSTANTS.ALL_ID.
+-- %param p_PROGRAM_ID			ID of SmartGrid program for which to query
+--			results. This can be CONSTANTS.ALL_ID.
+-- %param p_BEGIN_DATE			Start of date range to query.
+-- %param p_END_DATE			End of date range to query.
+-- %param p_CURSOR			Query results. This set will include one record per
+--			matching entry in PROGRAM_BILL_RESULT.
+PROCEDURE ACCOUNT_RESULTS
+	(
+	p_ACCOUNT_ID IN NUMBER_COLLECTION,
+	p_PROGRAM_ID IN NUMBER,
+	p_DATE_RANGE_BEGIN IN DATE,
+	p_DATE_RANGE_END IN DATE,
+	p_CURSOR OUT GA.REFCURSOR
+	);
+
+-- Queries for billing determinants for a specified program billing result record.
+-- %param p_BILL_RESULT_ID		ID of result record for which to show determinants.
+-- %param p_CURSOR			Query results. This set will include one record per
+--			matching entry in PROGRAM_BILL_DETERMINANT.
+PROCEDURE RESULT_DETERMINANTS
+	(
+	p_BILL_RESULT_ID IN VARCHAR2,
+	p_CURSOR OUT GA.REFCURSOR
+	);
+
+-- Queries for billing determinant details for a determinant record.
+-- %param p_BILL_DETERMINANT_ID	ID of determinant record for which to show details.
+-- %param p_TIME_ZONE			Time Zone in which to display interval data.
+-- %param p_CURSOR			Query results. This set will include one record per
+--			matching entry in PROGRAM_BILL_DETERMINANT_DTL.
+PROCEDURE DETERMINANT_DETAILS
+	(
+	p_BILL_DETERMINANT_ID IN VARCHAR2,
+	p_TIME_ZONE IN VARCHAR2,
+	p_CURSOR OUT GA.REFCURSOR
+	);
+
+-- Returns the bill period in string format PERIOD_BEGIN -> PERIOD_END
+-- $param p_BILL_RESULD_ID		ID of the Bill Result record whose bill period we want.
+-- %param RETURN				Bill period string
+FUNCTION GET_BILL_PERIOD_FOR_RESULT
+	(
+	p_BILL_RESULT_ID IN NUMBER
+	) RETURN VARCHAR2;
+
+END PROGRAM_BILLING_UI;
+/
+CREATE OR REPLACE PACKAGE BODY PROGRAM_BILLING_UI IS
+-----------------------------------------------------------------
+FUNCTION WHAT_VERSION RETURN VARCHAR2 IS
+BEGIN
+    RETURN '$Revision: 1.4 $';
+END WHAT_VERSION;
+---------------------------------------------------------------------------------------------------
+PROCEDURE CALC_BY_BILL_CYCLE
+	(
+	p_BILL_CYCLE_IDs IN NUMBER_COLLECTION,
+	p_PROGRAM_IDs IN NUMBER_COLLECTION,
+	p_DATE_RANGE_BEGIN IN DATE,
+	p_DATE_RANGE_END IN DATE,
+	p_TRACE_ON IN NUMBER,
+	p_PROCESS_ID OUT VARCHAR2,
+	p_PROCESS_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+
+BEGIN
+
+	PROGRAM_BILLING.CALC_PROGRAM_BILLS(p_BILL_CYCLE_IDs, 0, p_PROGRAM_IDs, p_DATE_RANGE_BEGIN,
+		p_DATE_RANGE_END, p_TRACE_ON, p_PROCESS_ID, p_PROCESS_STATUS, p_MESSAGE);
+
+END CALC_BY_BILL_CYCLE;
+-----------------------------------------------------------------
+PROCEDURE BILL_CYCLE_PROGRAM_RESULTS
+	(
+	p_BILL_CYCLE_IDs IN NUMBER_COLLECTION,
+	p_PROGRAM_IDs IN NUMBER_COLLECTION,
+	p_DATE_RANGE_BEGIN IN DATE,
+	p_DATE_RANGE_END IN DATE,
+	p_CURSOR OUT GA.REFCURSOR
+	) AS
+
+	v_ALLOWED_PROGRAMS NUMBER_COLLECTION;
+	v_TEMP_TBL ID_TABLE;
+
+BEGIN
+
+	IF UT.NUMBER_COLLECTION_CONTAINS(p_PROGRAM_IDs, CONSTANTS.ALL_ID) THEN
+		v_TEMP_TBL := SD.GET_ALLOWED_ENTITY_ID_TABLE(SD.g_ACTION_SELECT_PROG_BILLING,
+															EC.ED_PROGRAM);
+		UT.CONVERT_ID_TABLE_TO_NUM_COLL(v_TEMP_TBL, v_ALLOWED_PROGRAMS);
+	ELSE
+		v_ALLOWED_PROGRAMS := SD.GET_ALLOWED_IDS_FROM_SELECTION(SD.g_ACTION_SELECT_PROG_BILLING,
+												EC.ED_PROGRAM,
+												p_PROGRAM_IDs,
+												FALSE);
+	END IF;
+
+
+
+	OPEN p_CURSOR FOR
+	SELECT DISTINCT TO_CHAR(SUMM.BILL_SUMMARY_ID) AS BILL_SUMMARY_ID, CYC.BILL_CYCLE_ID,
+		CYC.BILL_CYCLE_NAME,
+		SUMM.BEGIN_DATE,
+		SUMM.END_DATE,
+		PROG.PROGRAM_ID,
+		PROG.PROGRAM_NAME,
+		SUMM.BILL_AMOUNT,
+		SUMM.ENTRY_DATE,
+		SUMM.NUM_SERVICE_LOCATIONS,
+		SUMM.NUM_WARNINGS,
+		SUMM.NUM_ERRORS
+	FROM PROGRAM_BILL_SUMMARY SUMM,
+		BILL_CYCLE CYC,
+		PROGRAM PROG,
+		TABLE(CAST(p_BILL_CYCLE_IDs AS NUMBER_COLLECTION)) c_IDS,
+		TABLE(CAST(v_ALLOWED_PROGRAMS AS NUMBER_COLLECTION)) p_IDS
+	WHERE (SUMM.BILL_CYCLE_ID = c_IDS.COLUMN_VALUE
+				OR c_IDS.COLUMN_VALUE = CONSTANTS.ALL_ID)
+		  AND (SUMM.PROGRAM_ID = p_IDS.COLUMN_VALUE
+		  		OR p_IDS.COLUMN_VALUE = SD.g_ALL_DATA_ENTITY_ID)
+		  AND SUMM.END_DATE >= p_DATE_RANGE_BEGIN
+		  AND SUMM.BEGIN_DATE <= p_DATE_RANGE_END
+		  AND PROG.PROGRAM_ID = SUMM.PROGRAM_ID
+		  AND CYC.BILL_CYCLE_ID = SUMM.BILL_CYCLE_ID
+	ORDER BY PROG.PROGRAM_NAME, CYC.BILL_CYCLE_NAME, SUMM.BEGIN_DATE;
+
+END BILL_CYCLE_PROGRAM_RESULTS;
+-----------------------------------------------------------------
+PROCEDURE BILL_CYCLE_PROGRAM_JOBS
+	(
+	p_BILL_SUMMARY_ID IN VARCHAR2,
+	p_CURSOR OUT GA.REFCURSOR
+	) AS
+
+	v_PROGRAM_ID NUMBER(9);
+
+BEGIN
+
+	SELECT SUMM.PROGRAM_ID
+	INTO v_PROGRAM_ID
+	FROM PROGRAM_BILL_SUMMARY SUMM
+	WHERE SUMM.BILL_SUMMARY_ID = TO_NUMBER(p_BILL_SUMMARY_ID);
+
+	SD.VERIFY_ENTITY_IS_ALLOWED(SD.g_ACTION_SELECT_PROG_BILLING,
+		v_PROGRAM_ID, EC.ED_PROGRAM);
+
+	OPEN p_CURSOR FOR
+	SELECT TO_CHAR(RST.BILL_SUMMARY_ID) AS BILL_SUMMARY_ID,
+		TO_CHAR(PLOG.PROCESS_ID) AS PROCESS_ID,
+		PLOG.PROCESS_STOP_TIME,
+		NVL(USR.USER_DISPLAY_NAME, USR.USER_NAME) AS WHO,
+		COUNT(RST.SERVICE_LOCATION_ID) AS NUM_SL,
+		SUM(CASE WHEN RST.RESULT_STATUS = 'Error' THEN 1 ELSE NULL END) AS NUM_ERR,
+		SUM(CASE WHEN RST.RESULT_STATUS = 'Warning' THEN 1 ELSE NULL END) AS NUM_WARN
+	FROM PROGRAM_BILL_RESULT RST,
+		PROCESS_LOG PLOG,
+		APPLICATION_USER USR
+	WHERE RST.BILL_SUMMARY_ID = p_BILL_SUMMARY_ID
+		AND PLOG.PROCESS_ID = RST.PROCESS_ID
+		AND USR.USER_ID = PLOG.USER_ID
+	GROUP BY RST.BILL_SUMMARY_ID, PLOG.PROCESS_ID, PLOG.PROCESS_STOP_TIME, USR.USER_NAME,
+		USR.USER_DISPLAY_NAME;
+
+END BILL_CYCLE_PROGRAM_JOBS;
+-----------------------------------------------------------------
+FUNCTION GET_BILL_PERIOD_FOR_SUMMARY
+	(
+	p_BILL_SUMMARY_ID IN NUMBER
+	) RETURN VARCHAR2 IS
+
+	v_RST VARCHAR2(32);
+
+BEGIN
+
+	SELECT TEXT_UTIL.TO_CHAR_DATE_RANGE(SUMM.BEGIN_DATE, SUMM.END_DATE)
+	INTO v_RST
+	FROM PROGRAM_BILL_SUMMARY SUMM
+	WHERE SUMM.BILL_SUMMARY_ID = p_BILL_SUMMARY_ID;
+
+	RETURN v_RST;
+
+END GET_BILL_PERIOD_FOR_SUMMARY;
+-----------------------------------------------------------------
+FUNCTION GET_BILL_PERIOD_FOR_RESULT
+	(
+	p_BILL_RESULT_ID IN NUMBER
+	) RETURN VARCHAR2 IS
+
+	v_RST VARCHAR2(32);
+
+BEGIN
+
+	SELECT TEXT_UTIL.TO_CHAR_DATE_RANGE(SUMM.BEGIN_DATE, SUMM.END_DATE)
+	INTO v_RST
+	FROM PROGRAM_BILL_RESULT RST,
+		 PROGRAM_BILL_SUMMARY SUMM
+	WHERE RST.BILL_RESULT_ID = p_BILL_RESULT_ID
+		AND SUMM.BILL_SUMMARY_ID = RST.BILL_SUMMARY_ID;
+
+	RETURN v_RST;
+
+END GET_BILL_PERIOD_FOR_RESULT;
+-----------------------------------------------------------------
+PROCEDURE JOB_STATUS_DETAILS
+	(
+	p_BILL_SUMMARY_ID IN VARCHAR2,
+	p_PROCESS_ID IN VARCHAR2,
+	p_RESULT_STATUS IN VARCHAR2,
+	p_BILL_PERIOD OUT VARCHAR2,
+	p_PROGRAM_NAME OUT VARCHAR2,
+	p_CALCULATED_BY OUT VARCHAR2,
+	p_CALCULATED_WHEN OUT VARCHAR2,
+	p_CURSOR OUT GA.REFCURSOR
+	) AS
+
+	v_PROGRAM_ID NUMBER(9);
+
+BEGIN
+
+	SELECT SUMM.PROGRAM_ID, PROG.PROGRAM_NAME
+	INTO v_PROGRAM_ID, p_PROGRAM_NAME
+	FROM PROGRAM PROG,
+		PROGRAM_BILL_SUMMARY SUMM
+	WHERE SUMM.BILL_SUMMARY_ID = p_BILL_SUMMARY_ID
+		AND PROG.PROGRAM_ID = SUMM.PROGRAM_ID;
+
+	SD.VERIFY_ENTITY_IS_ALLOWED(SD.g_ACTION_SELECT_PROG_BILLING,
+								v_PROGRAM_ID,
+								EC.ED_PROGRAM);
+
+	p_BILL_PERIOD := GET_BILL_PERIOD_FOR_SUMMARY(TO_NUMBER(p_BILL_SUMMARY_ID));
+
+	IF p_PROCESS_ID IS NOT NULL THEN
+		SELECT NVL(USR.USER_DISPLAY_NAME, USR.USER_NAME),
+			TEXT_UTIL.TO_CHAR_TIME(PLOG.PROCESS_STOP_TIME)
+		INTO p_CALCULATED_BY, p_CALCULATED_WHEN
+		FROM PROCESS_LOG PLOG,
+			APPLICATION_USER USR
+		WHERE PLOG.PROCESS_ID = TO_NUMBER(p_PROCESS_ID)
+			AND USR.USER_ID = PLOG.USER_ID;
+	END IF;
+
+	OPEN p_CURSOR FOR
+	SELECT RST.BILL_RESULT_ID, ACCT.ACCOUNT_ID, ACCT.ACCOUNT_NAME, ACCT.ACCOUNT_EXTERNAL_IDENTIFIER,
+		SL.SERVICE_LOCATION_ID, SL.SERVICE_LOCATION_NAME, RST.RESULT_STATUS,
+		RST.BILL_AMOUNT
+	FROM PROGRAM_BILL_RESULT RST,
+		ACCOUNT ACCT,
+		SERVICE_LOCATION SL
+	WHERE RST.BILL_SUMMARY_ID = TO_NUMBER(p_BILL_SUMMARY_ID)
+		AND RST.PROCESS_ID = NVL(TO_NUMBER(p_PROCESS_ID), RST.PROCESS_ID)
+		AND (RST.RESULT_STATUS = p_RESULT_STATUS OR p_RESULT_STATUS = 'All')
+		AND ACCT.ACCOUNT_ID = RST.ACCOUNT_ID
+		AND SL.SERVICE_LOCATION_ID = RST.SERVICE_LOCATION_ID;
+
+END JOB_STATUS_DETAILS;
+-----------------------------------------------------------------
+PROCEDURE BILLING_RESULT_LOG_EVENTS
+	(
+	p_BILL_RESULT_ID IN VARCHAR2,
+	p_CURSOR OUT GA.REFCURSOR
+	) AS
+
+	v_PROGRAM_ID NUMBER(9);
+	v_PROCESS_ID NUMBER;
+	v_SL_ID NUMBER(9);
+	v_PERIOD_BEGIN DATE;
+
+BEGIN
+
+	SELECT SUMM.PROGRAM_ID, RST.SERVICE_LOCATION_ID, RST.PROCESS_ID,
+		SUMM.BEGIN_DATE
+	INTO v_PROGRAM_ID, v_SL_ID, v_PROCESS_ID, v_PERIOD_BEGIN
+	FROM PROGRAM_BILL_RESULT RST,
+		PROGRAM_BILL_SUMMARY SUMM
+	WHERE RST.BILL_RESULT_ID = TO_NUMBER(p_BILL_RESULT_ID)
+		AND SUMM.BILL_SUMMARY_ID = RST.BILL_SUMMARY_ID;
+
+	SD.VERIFY_ENTITY_IS_ALLOWED(SD.g_ACTION_SELECT_PROG_BILLING,
+								v_PROGRAM_ID,
+								EC.ED_PROGRAM);
+
+	LOG_UTIL.LOG_EVENTS_BY_ENTITY(EC.ED_SERVICE_LOCATION,
+								v_SL_ID,
+								v_PROCESS_ID,
+								NULL,
+								NULL,
+								p_CURSOR,
+								v_PERIOD_BEGIN);
+
+END BILLING_RESULT_LOG_EVENTS;
+-----------------------------------------------------------------
+PROCEDURE CALC_BY_ACCOUNT
+	(
+	p_ACCOUNT_ID IN NUMBER_COLLECTION,
+	p_PROGRAM_IDs IN NUMBER_COLLECTION,
+	p_DATE_RANGE_BEGIN IN DATE,
+	p_DATE_RANGE_END IN DATE,
+	p_TRACE_ON IN NUMBER,
+	p_PROCESS_ID OUT VARCHAR2,
+	p_PROCESS_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+
+BEGIN
+
+	PROGRAM_BILLING.CALC_PROGRAM_BILLS(p_ACCOUNT_ID, 1, p_PROGRAM_IDs, p_DATE_RANGE_BEGIN,
+		p_DATE_RANGE_END, p_TRACE_ON, p_PROCESS_ID, p_PROCESS_STATUS, p_MESSAGE);
+
+END CALC_BY_ACCOUNT;
+-----------------------------------------------------------------
+PROCEDURE ACCOUNT_RESULTS
+	(
+	p_ACCOUNT_ID IN NUMBER_COLLECTION,
+	p_PROGRAM_ID IN NUMBER,
+	p_DATE_RANGE_BEGIN IN DATE,
+	p_DATE_RANGE_END IN DATE,
+	p_CURSOR OUT GA.REFCURSOR
+	) AS
+
+	v_PROGRAM_IDS ID_TABLE;
+
+BEGIN
+
+	IF p_PROGRAM_ID = CONSTANTS.ALL_ID THEN
+		v_PROGRAM_IDS := SD.GET_ALLOWED_ENTITY_ID_TABLE(SD.g_ACTION_SELECT_PROG_BILLING,
+														EC.ED_PROGRAM);
+	ELSE
+		SD.VERIFY_ENTITY_IS_ALLOWED(SD.g_ACTION_SELECT_PROG_BILLING,
+								p_PROGRAM_ID,
+								EC.ED_PROGRAM);
+		v_PROGRAM_IDS := ID_TABLE();
+		v_PROGRAM_IDS.EXTEND;
+		v_PROGRAM_IDS(1) := ID_TYPE(p_PROGRAM_ID);
+	END IF;
+
+
+	OPEN p_CURSOR FOR
+	SELECT DISTINCT TO_CHAR(RST.BILL_RESULT_ID) AS BILL_RESULT_ID,
+		PROG.PROGRAM_ID,
+		PROG.PROGRAM_NAME,
+		ACCT.ACCOUNT_ID,
+		ACCT.ACCOUNT_NAME,
+		ACCT.ACCOUNT_EXTERNAL_IDENTIFIER,
+		SL.SERVICE_LOCATION_ID,
+		SL.SERVICE_LOCATION_NAME,
+		SUMM.BEGIN_DATE,
+		SUMM.END_DATE,
+		RST.BILL_AMOUNT,
+		RST.ENTRY_DATE,
+		RST.RESULT_STATUS
+	FROM PROGRAM_BILL_SUMMARY SUMM,
+		PROGRAM_BILL_RESULT RST,
+		TABLE(CAST(p_ACCOUNT_ID AS NUMBER_COLLECTION)) AID,
+		TABLE(CAST(v_PROGRAM_IDS AS ID_TABLE)) PID,
+		PROGRAM PROG,
+		ACCOUNT ACCT,
+		SERVICE_LOCATION SL
+	WHERE (SUMM.PROGRAM_ID = PID.ID
+		  		OR PID.ID = SD.g_ALL_DATA_ENTITY_ID)
+		AND RST.BILL_SUMMARY_ID = SUMM.BILL_SUMMARY_ID
+		AND (RST.ACCOUNT_ID = AID.COLUMN_VALUE OR
+				AID.COLUMN_VALUE = CONSTANTS.ALL_ID)
+		AND SUMM.END_DATE >= p_DATE_RANGE_BEGIN
+		AND SUMM.BEGIN_DATE <= p_DATE_RANGE_END
+		AND ACCT.ACCOUNT_ID = RST.ACCOUNT_ID
+		AND SL.SERVICE_LOCATION_ID = RST.SERVICE_LOCATION_ID
+		AND PROG.PROGRAM_ID = SUMM.PROGRAM_ID
+	ORDER BY ACCT.ACCOUNT_NAME, SL.SERVICE_LOCATION_NAME, PROG.PROGRAM_NAME, SUMM.BEGIN_DATE;
+
+END ACCOUNT_RESULTS;
+-----------------------------------------------------------------
+PROCEDURE RESULT_DETERMINANTS
+	(
+	p_BILL_RESULT_ID IN VARCHAR2,
+	p_CURSOR OUT GA.REFCURSOR
+	) AS
+
+	v_PROGRAM_ID NUMBER(9);
+
+BEGIN
+
+	SELECT SUMM.PROGRAM_ID
+	INTO v_PROGRAM_ID
+	FROM PROGRAM_BILL_RESULT RST,
+		PROGRAM_BILL_SUMMARY SUMM
+	WHERE RST.BILL_RESULT_ID = p_BILL_RESULT_ID
+		AND SUMM.BILL_SUMMARY_ID = RST.BILL_SUMMARY_ID;
+
+	SD.VERIFY_ENTITY_IS_ALLOWED(SD.g_ACTION_SELECT_PROG_BILLING,
+								 v_PROGRAM_ID,
+								 EC.ED_PROGRAM);
+
+	OPEN p_CURSOR FOR
+	SELECT DT.BILL_DETERMINANT_ID,
+		DT.DETERMINANT_TYPE,
+		T.DER_TYPE_ID,
+		CASE WHEN T.DER_TYPE_ID = CONSTANTS.NOT_ASSIGNED THEN
+			'NA'
+		ELSE
+			T.DER_TYPE_NAME
+		END AS RESOURCE_TYPE,
+		DT.BILL_QUANTITY,
+		DT.BILL_QUANTITY_UNIT,
+		DT.BILL_RATE,
+		DT.BILL_AMOUNT
+	FROM PROGRAM_BILL_DETERMINANT DT,
+		DER_TYPE T
+	WHERE DT.BILL_RESULT_ID = p_BILL_RESULT_ID
+		AND T.DER_TYPE_ID = DT.DER_TYPE_ID
+	ORDER BY DT.DETERMINANT_TYPE, T.DER_TYPE_NAME;
+
+END RESULT_DETERMINANTS;
+-----------------------------------------------------------------
+PROCEDURE DETERMINANT_DETAILS
+	(
+	p_BILL_DETERMINANT_ID IN VARCHAR2,
+	p_TIME_ZONE IN VARCHAR2,
+	p_CURSOR OUT GA.REFCURSOR
+	) AS
+
+BEGIN
+
+	OPEN p_CURSOR FOR
+	SELECT EVT.EVENT_NAME,
+		DET.DETERMINANT_TYPE,
+		CASE WHEN DET.DETERMINANT_TYPE = 'DLC Daily' THEN
+			TEXT_UTIL.TO_CHAR_DATE(DTL.DETERMINANT_DATE)
+		ELSE
+			FROM_CUT_AS_HED(DTL.DETERMINANT_DATE, p_TIME_ZONE, GET_INTERVAL_ABBREVIATION(P.PROGRAM_INTERVAL))
+		END AS DETERMINANT_DATE,
+		DTL.BILL_AMOUNT,
+		DTL.BILL_RATE,
+		DTL.BILL_QUANTITY,
+		DET.BILL_QUANTITY_UNIT,
+		DER.BEGIN_DATE,
+		DER.DER_NAME,
+		DER.DER_ID,
+		EVT.EVENT_ID,
+		FROM_CUT(EVT.START_TIME, p_TIME_ZONE) AS EVENT_START_TIME,
+		FROM_CUT(EVT.STOP_TIME, p_TIME_ZONE) AS EVENT_STOP_TIME
+	FROM PROGRAM_BILL_DETERMINANT DET,
+		PROGRAM_BILL_DETERMINANT_DTL DTL,
+		PROGRAM_BILL_RESULT RST,
+		PROGRAM_BILL_SUMMARY SUMM,
+		PROGRAM P,
+		DR_EVENT EVT,
+		DISTRIBUTED_ENERGY_RESOURCE DER
+	WHERE DET.BILL_DETERMINANT_ID = TO_NUMBER(p_BILL_DETERMINANT_ID)
+		AND DTL.BILL_DETERMINANT_ID = DET.BILL_DETERMINANT_ID
+		AND RST.BILL_RESULT_ID = DET.BILL_RESULT_ID
+		AND SUMM.BILL_SUMMARY_ID = RST.BILL_SUMMARY_ID
+		AND P.PROGRAM_ID = SUMM.PROGRAM_ID
+		AND EVT.EVENT_ID (+) = NVL(DTL.EVENT_ID, -1)
+		AND DER.DER_ID (+) = NVL(DTL.DER_ID, -1);
+
+END DETERMINANT_DETAILS;
+-----------------------------------------------------------------
+END PROGRAM_BILLING_UI;
+/

@@ -1,0 +1,309 @@
+<SystemObjectConfiguration xmlns="http://www.newenergyassoc.com/mighty/configuration" scriptCreateDate="2008-11-05 13:34:20" isProductScript="0"><MainObjects>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>ERCOT:LMP:Query Market Clearing Prices</name>
+    <category>Data Exchange</category>
+    <displayName>ERCOT:LMP:Query Market Clearing Prices</displayName>
+    <order>901</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Object>
+      <name>Sched:ERCOT:LMP:Query Market Clearing Prices</name>
+      <category>Action</category>
+      <displayName>Sched:ERCOT:LMP:Query Market Clearing Prices</displayName>
+      <order>0</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_ERCOT_LMP.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Market Clearing Prices&quot;</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:ERCOT:Settlement:Import Monthly Initial Settlement Totals</name>
+    <category>Data Exchange</category>
+    <displayName>ERCOT: Settlement: Import Monthly Initial Settlement Totals</displayName>
+    <order>909</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_ERCOT_SETTLEMENT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Import Monthly Initial Settlement Totals&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:ERCOT:Settlement:Import Annual Initial Settlement Totals</name>
+    <category>Data Exchange</category>
+    <displayName>ERCOT: Settlement: Import Annual Initial Settlement Totals</displayName>
+    <order>906</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_ERCOT_SETTLEMENT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Import Annual Initial Settlement Totals&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:ERCOT:Settlement:Import Monthly Final Settlement Totals</name>
+    <category>Data Exchange</category>
+    <displayName>ERCOT: Settlement: Import Monthly Final Settlement Totals</displayName>
+    <order>908</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_ERCOT_SETTLEMENT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Import Monthly Final Settlement Totals&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:ERCOT:Extract:Import Load Extract</name>
+    <category>Data Exchange</category>
+    <displayName>ERCOT: Extract: Import Load Extract</displayName>
+    <order>903</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_ERCOT_EXTRACT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Import Load Extract&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:ERCOT:Extract:Import Load Extract From File</name>
+    <category>Data Exchange</category>
+    <displayName>ERCOT: Extract: Import Load Extract From File</displayName>
+    <order>904</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:ERCOT:Settlement:Import Annual True-Up Settlement Totals</name>
+    <category>Data Exchange</category>
+    <displayName>ERCOT: Settlement: Import Annual True-Up Settlement Totals</displayName>
+    <order>907</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_ERCOT_SETTLEMENT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Import Annual True-Up Settlement Totals&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:ERCOT:Settlement:Import Monthly True-Up Settlement Totals</name>
+    <category>Data Exchange</category>
+    <displayName>ERCOT: Settlement: Import Monthly True-Up Settlement Totals</displayName>
+    <order>910</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_ERCOT_SETTLEMENT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Import Monthly True-Up Settlement Totals&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:ERCOT:Settlement:Import Annual Final Settlement Totals</name>
+    <category>Data Exchange</category>
+    <displayName>ERCOT: Settlement: Import Annual Final Settlement Totals</displayName>
+    <order>905</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_ERCOT_SETTLEMENT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Import Annual Final Settlement Totals&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>ERCOT:LMP:Query Ancillary Service Prices</name>
+    <category>Data Exchange</category>
+    <displayName>ERCOT:LMP:Query Ancillary Service Prices</displayName>
+    <order>902</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Object>
+      <name>Sched:ERCOT:LMP:Query Ancillary Service Prices</name>
+      <category>Action</category>
+      <displayName>Sched:ERCOT:LMP:Query Ancillary Service Prices</displayName>
+      <order>0</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_ERCOT_LMP.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Ancillary Service Prices&quot;</Attribute>
+    </Object>
+  </Object>
+</MainObjects>
+<ReferencedObjects/>
+<ConditionalFormats/>
+</SystemObjectConfiguration>

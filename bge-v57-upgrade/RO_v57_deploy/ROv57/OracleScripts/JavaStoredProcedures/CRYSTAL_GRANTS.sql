@@ -1,0 +1,8 @@
+GRANT JAVASYSPRIV to RTO;
+
+BEGIN
+
+	DBMS_JAVA.GRANT_PERMISSION('RTO','SYS:java.io.FilePermission','TEMP_DIRECTORY','read,write');
+
+END;
+/

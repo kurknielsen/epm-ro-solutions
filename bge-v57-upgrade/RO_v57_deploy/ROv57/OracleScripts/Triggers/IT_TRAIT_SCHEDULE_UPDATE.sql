@@ -1,0 +1,76 @@
+CREATE OR REPLACE TRIGGER IT_TRAIT_SCHEDULE_UPDATE
+	BEFORE INSERT OR UPDATE OR DELETE ON IT_TRAIT_SCHEDULE
+	FOR EACH ROW
+
+DECLARE
+x_TABLE_IS_MUTATING EXCEPTION;
+PRAGMA EXCEPTION_INIT(x_TABLE_IS_MUTATING,-4091);
+v_SYSDATE DATE := SYSDATE;
+v_BEGIN_DATE DATE;
+v_END_DATE DATE;
+v_TX_ID NUMBER;
+v_CUT_DATE DATE;
+v_SUB_DAILY BOOLEAN;
+BEGIN
+	-- 12-oct-2009, jbc, BZ 19289: don't do anything if the trait doesn't affect the status,
+	-- no matter what the reason for invoking the trigger is.
+	IF NOT MM.TRAIT_AFFECTS_STATUS(:old.TRANSACTION_ID, :old.TRAIT_GROUP_ID, :old.TRAIT_INDEX) THEN
+		RETURN; -- this trait does not affect the bid/offer status
+	END IF;
+	
+	IF DELETING THEN
+		IF :old.SCHEDULE_STATE <> 1 THEN -- internal only
+			RETURN;
+		END IF;
+		v_TX_ID := :old.TRANSACTION_ID;
+		v_CUT_DATE := :old.SCHEDULE_DATE;
+	ELSE
+		IF :new.SCHEDULE_STATE <> 1 THEN -- internal only
+			RETURN;
+		END IF;
+		IF NOT MM.TRAIT_AFFECTS_STATUS(:new.TRANSACTION_ID, :new.TRAIT_GROUP_ID, :new.TRAIT_INDEX) THEN
+	        RETURN; -- this trait does not affect the bid/offer status
+        END IF;
+		IF UPDATING THEN
+			IF NOT MM.NO_OP_UPDATE_AFFECTS_STATUS(:new.TRANSACTION_ID, :new.TRAIT_GROUP_ID, :new.TRAIT_INDEX)
+				 AND NVL(:new.TRAIT_VAL, '?') = NVL(:old.TRAIT_VAL, '?') THEN
+				RETURN; -- no change to data? then don't change status
+			END IF;
+		END IF;
+		v_TX_ID := :new.TRANSACTION_ID;
+		v_CUT_DATE := :new.SCHEDULE_DATE;
+	END IF;
+	
+	v_SUB_DAILY := TO_NUMBER(TO_CHAR(v_CUT_DATE,'SS')) = 0;
+	MM.GET_AFFECTED_DATE_RANGE(v_TX_ID, v_CUT_DATE, v_SUB_DAILY, v_BEGIN_DATE, v_END_DATE);
+    --UT.DEBUG_TRACE('(Sub-Daily = ' || sys.diutil.BOOL_TO_INT(V_sub_daily) || '; Cut Date = ' || TO_CHAR(v_CUT_DATE, 'YYYY-MM-DD HH24:MI:SS') || ') Date Range: ' || TO_CHAR(v_BEGIN_DATE, 'YYYY-MM-DD HH24:MI:SS') || ' to ' || TO_CHAR(v_END_DATE, 'YYYY-MM-DD HH24:MI:SS'));
+
+	IF v_SUB_DAILY THEN
+		v_END_DATE := v_BEGIN_DATE;
+	END IF;
+
+	UPDATE IT_TRAIT_SCHEDULE_STATUS SET
+		REVIEW_STATUS = 'Changed',
+		REVIEW_DATE = NULL,
+		REVIEWED_BY_ID = NULL,
+		SUBMIT_STATUS = NULL,
+		SUBMIT_DATE = NULL,
+		SUBMITTED_BY_ID = NULL,
+		MARKET_STATUS = NULL,
+		MARKET_STATUS_DATE = NULL,
+		PROCESS_MESSAGE = NULL,
+		ENTRY_DATE = v_SYSDATE
+	WHERE TRANSACTION_ID = v_TX_ID
+		AND SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE;
+
+	IF SQL%NOTFOUND THEN
+        INSERT INTO IT_TRAIT_SCHEDULE_STATUS(TRANSACTION_ID, SCHEDULE_DATE, CREATE_DATE, REVIEW_STATUS, ENTRY_DATE)
+        VALUES(v_TX_ID, v_CUT_DATE, v_SYSDATE, 'Pending', v_SYSDATE);
+	END IF;
+
+EXCEPTION
+	WHEN x_TABLE_IS_MUTATING THEN
+		NULL; -- This happens if this record is being deleted as a cascade from the transaction being deleted.
+			  -- In this case we can safely proceed, skipping the above logic.
+END IT_TRAIT_SCHEDULE_UPDATE;
+/

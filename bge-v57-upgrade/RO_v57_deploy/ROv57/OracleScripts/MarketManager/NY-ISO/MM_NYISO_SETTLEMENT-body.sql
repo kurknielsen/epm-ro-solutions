@@ -1,0 +1,4629 @@
+CREATE OR REPLACE PACKAGE BODY MM_NYISO_SETTLEMENT IS
+
+--g_STATEMENT_TYPE NUMBER(9) := 1; -- put everything in Forecast statement type for now
+g_CHARGE_VIEW_TYPE VARCHAR2(8) := 'FORMULA';
+g_MISC_PRODUCT_EXT_ID VARCHAR2(20) := 'NY:Other';
+g_ANC_SERV_PRODUCT    VARCHAR2(20) := 'NY:LSEAncSrv';
+g_DAM_ENERG_PRODUCT   VARCHAR2(20) := 'NY:LSEDAMMkt';
+g_VIRT_MKT_CUST       VARCHAR2(20) := 'NY:VirtMktCust';
+g_NYISO_DSS           VARCHAR2(10) := 'NYISO-DSS';
+g_PRELIM              VARCHAR2(6) := 'Prelim';
+g_HIST                VARCHAR2(4) := 'Hist';
+g_ET_QUERY_SETTL_STATEMENTS VARCHAR(64) := 'IMPORT SETTLEMENT STATEMENTS';
+----------------------------------------------------------------------------------------------
+
+FUNCTION WHAT_VERSION RETURN VARCHAR2 IS
+BEGIN
+    RETURN '$Revision: 1.1 $';
+END WHAT_VERSION;
+---------------------------------------------------------------------------------------------------
+FUNCTION ADJUST_TO_5_MIN(p_DATE_TIME IN DATE) RETURN DATE AS
+
+	v_NEAREST_MIN   NUMBER := 5;
+	v_ADJUSTED_DATE DATE;
+	v_MIN           NUMBER(2);
+
+BEGIN
+
+	v_MIN := TO_NUMBER(TO_CHAR(p_DATE_TIME, 'MI'));
+
+	--Check if the number of minutes is on a 5 minute interval
+	IF MOD(v_MIN, v_NEAREST_MIN) = 0 THEN
+		v_ADJUSTED_DATE := p_DATE_TIME;
+
+	ELSE
+
+		v_ADJUSTED_DATE := TRUNC(p_DATE_TIME, 'HH') +
+						   (TRUNC((p_DATE_TIME - TRUNC(p_DATE_TIME, 'HH')) * 24 /
+								  (v_NEAREST_MIN / 60)) + 1) /
+						   (60 / v_NEAREST_MIN) / 24;
+	END IF;
+
+	RETURN v_ADJUSTED_DATE;
+
+END ADJUST_TO_5_MIN;
+
+----------------------------------------------------------------------------------------------
+PROCEDURE GET_SERVICE_POINT(p_SERVICE_POINT_IDENT IN VARCHAR2,
+							p_CREATE_IF_NOT_FOUND IN BOOLEAN,
+							p_SERVICE_POINT_NAME  OUT VARCHAR2,
+							p_SERVICE_POINT_ID OUT NUMBER) AS
+
+v_PTID_NAME NYISO_PTID_NODE.PTID_NAME%TYPE;
+v_PTID_TYPE NYISO_PTID_NODE.PTID_TYPE%TYPE;
+v_SVC_TYPE  SERVICE_POINT.SERVICE_POINT_TYPE%TYPE;
+v_ZONE_ID   SERVICE_POINT.SERVICE_ZONE_ID%TYPE;
+v_ZONE_NAME SERVICE_ZONE.SERVICE_ZONE_ALIAS%TYPE;
+
+BEGIN
+
+
+	BEGIN -- lookup name and id for this point
+		SELECT SERVICE_POINT_NAME, SERVICE_POINT_ID
+	  	  INTO p_SERVICE_POINT_NAME, p_SERVICE_POINT_ID
+	  	  FROM SERVICE_POINT
+	 	WHERE EXTERNAL_IDENTIFIER = p_SERVICE_POINT_IDENT;
+	 EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+
+				SELECT T.PTID_NAME, T.PTID_TYPE
+				 INTO v_PTID_NAME, v_PTID_TYPE
+				 FROM NYISO_PTID_NODE T
+				WHERE T.PTID = p_SERVICE_POINT_IDENT;
+
+				p_SERVICE_POINT_NAME := v_PTID_NAME;
+				v_SVC_TYPE := MM_NYISO.GET_NODE_TYPE(v_PTID_NAME, v_PTID_TYPE);
+				v_ZONE_ID := 0;
+
+    			BEGIN -- lookup zone for this point
+                    SELECT SZ.SERVICE_ZONE_ID
+                      INTO v_ZONE_ID
+                      FROM SERVICE_ZONE SZ, NYISO_PTID_NODE P
+                     WHERE P.ZONE_NAME = SZ.SERVICE_ZONE_ALIAS
+                       AND P.PTID_NAME = v_PTID_NAME;
+                EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+
+					-- get zone name to add
+    				BEGIN
+        				SELECT ZONE_NAME
+        				  INTO v_ZONE_NAME
+        				  FROM NYISO_PTID_NODE
+        				 WHERE PTID_NAME = v_PTID_NAME;
+    				EXCEPTION
+    				WHEN OTHERS THEN NULL;
+    				END;
+
+    				IF v_ZONE_NAME IS NOT NULL THEN
+        				-- insert new service zone
+        				IO.PUT_SERVICE_ZONE(
+            				o_OID => v_ZONE_ID,
+            				p_SERVICE_ZONE_NAME => v_ZONE_NAME,
+            				p_SERVICE_ZONE_ALIAS => v_ZONE_NAME,
+            				p_SERVICE_ZONE_DESC => 'Created via NYISO Settlement Import',
+            				p_SERVICE_ZONE_ID => 0,
+							p_EXTERNAL_IDENTIFIER => NULL,						
+            				p_MARKET_PRICE_ID => 0,
+							p_CONTROL_AREA_ID => 0,
+							p_TIME_ZONE => NULL
+        				);
+    				END IF;
+			     END;
+
+
+                IF p_CREATE_IF_NOT_FOUND THEN
+                    IO.PUT_SERVICE_POINT(o_OID => p_SERVICE_POINT_ID,
+                             p_SERVICE_POINT_NAME      => v_PTID_NAME,
+                             p_SERVICE_POINT_ALIAS     => v_PTID_NAME,
+                             p_SERVICE_POINT_DESC      => 'Created by Market Manager via MM_NYISO_SETTLEMENT',
+                             p_SERVICE_POINT_ID        => 0,
+                             p_SERVICE_POINT_TYPE      => 'Retail',
+                             p_TP_ID                   => 0,
+                             p_CA_ID                   => 0,
+                             p_EDC_ID                  => 0,
+                             p_ROLLUP_ID               => 0,
+                             p_SERVICE_REGION_ID       => 0,
+                             p_SERVICE_AREA_ID         => 0,
+                             p_SERVICE_ZONE_ID         => v_ZONE_ID,
+                             p_TIME_ZONE               => 'Eastern',
+                             p_LATITUDE                => NULL,
+                             p_LONGITUDE               => NULL,
+                             p_EXTERNAL_IDENTIFIER     => p_SERVICE_POINT_IDENT,
+                             p_IS_INTERCONNECT         => 0,
+                             p_NODE_TYPE               => v_SVC_TYPE,
+                             p_SERVICE_POINT_NERC_CODE => NULL,
+			     p_PIPELINE_ID             => 0,
+			     p_MILE_MARKER             => NULL);
+                    COMMIT;
+
+                END IF;
+
+	END;
+
+END GET_SERVICE_POINT;
+----------------------------------------------------------------------------------------------
+FUNCTION GET_NYISO_CONTRACT_ID(p_ISO_SOURCE IN VARCHAR2) RETURN NUMBER AS
+
+	v_ID NUMBER;
+
+
+BEGIN
+
+	--Get the contract Id based on the custom entity attribute
+	SELECT TEA.OWNER_ENTITY_ID
+	    INTO v_ID
+	    FROM TEMPORAL_ENTITY_ATTRIBUTE TEA
+	     WHERE TEA.ATTRIBUTE_ID IN
+		   (SELECT EA.ATTRIBUTE_ID
+			  FROM ENTITY_ATTRIBUTE EA
+			   WHERE EA.ATTRIBUTE_NAME = g_NYISO_DSS)
+	     AND TEA.ATTRIBUTE_VAL = p_ISO_SOURCE;
+
+		RETURN v_ID;
+
+END GET_NYISO_CONTRACT_ID;
+----------------------------------------------------------------------------------------------
+FUNCTION GET_PSE_ID(p_ISO_SOURCE IN VARCHAR2) RETURN NUMBER AS
+
+	v_CONTRACT_ID NUMBER;
+	v_ID          NUMBER;
+
+BEGIN
+	v_CONTRACT_ID := GET_NYISO_CONTRACT_ID(p_ISO_SOURCE);
+
+	SELECT PSE_ID
+	  INTO v_ID
+	  FROM INTERCHANGE_CONTRACT A, PURCHASING_SELLING_ENTITY B
+	 WHERE A.CONTRACT_ID = v_CONTRACT_ID
+	   AND B.PSE_ID = A.BILLING_ENTITY_ID
+	   AND ROWNUM = 1;
+
+	RETURN v_ID;
+
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		RETURN ID.ID_FOR_PSE_EXTERNAL_IDENTIFIER('NYISO');
+
+END GET_PSE_ID;
+----------------------------------------------------------------------------------------------
+FUNCTION GET_TXN_ID(p_EXT_ID   IN VARCHAR2,
+					p_NAME     IN VARCHAR2) RETURN NUMBER IS
+
+	v_TXN_ID         NUMBER(9);
+	v_SC_ID          NUMBER(9) := MM_NYISO_UTIL.g_NYISO_SC_ID;
+	v_COMMODITY_ID   NUMBER(9) := MM_NYISO_UTIL.GET_COMMODITY_ID('RealTime');
+	v_TXN_TYPE       INTERCHANGE_TRANSACTION.TRANSACTION_TYPE%TYPE := 'Market Result';
+	v_TRANS_INTERVAL INTERCHANGE_TRANSACTION.TRANSACTION_INTERVAL%TYPE := 'Hour';
+
+	v_TRANSACTION INTERCHANGE_TRANSACTION%ROWTYPE;
+
+BEGIN
+	SELECT TRANSACTION_ID
+	  INTO v_TXN_ID
+	  FROM INTERCHANGE_TRANSACTION
+	 WHERE TRANSACTION_IDENTIFIER = p_EXT_ID
+	   AND TRANSACTION_TYPE = v_TXN_TYPE
+	   AND TRANSACTION_INTERVAL = v_TRANS_INTERVAL
+	   AND SC_ID = v_SC_ID
+	   AND COMMODITY_ID = v_COMMODITY_ID;
+
+	RETURN v_TXN_ID;
+
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+
+		--create the transaction
+		v_TRANSACTION.TRANSACTION_ID         := 0;
+		v_TRANSACTION.TRANSACTION_NAME       := p_NAME;
+		v_TRANSACTION.TRANSACTION_ALIAS      := NULL;
+		v_TRANSACTION.TRANSACTION_DESC       := 'Generated by Market Manager via Settlements import';
+		v_TRANSACTION.TRANSACTION_TYPE       := v_TXN_TYPE;
+		v_TRANSACTION.TRANSACTION_IDENTIFIER := p_EXT_ID;
+		v_TRANSACTION.TRANSACTION_INTERVAL   := v_TRANS_INTERVAL;
+		v_TRANSACTION.BEGIN_DATE             := TO_DATE('1/1/2004',
+														'MM/DD/YYYY');
+		v_TRANSACTION.END_DATE               := TO_DATE('12/31/2020',
+														'MM/DD/YYYY');
+		v_TRANSACTION.SC_ID                  := v_SC_ID;
+		v_TRANSACTION.COMMODITY_ID           := v_COMMODITY_ID;
+
+		MM_UTIL.PUT_TRANSACTION(v_TXN_ID,
+								v_TRANSACTION,
+								GA.INTERNAL_STATE,
+								'Active');
+		RETURN v_TXN_ID;
+
+END GET_TXN_ID;
+---------------------------------------------------------------------------------------------------
+FUNCTION GET_STATEMENT_TYPE(p_INVOICE_VERSION IN NUMBER) RETURN NUMBER AS
+
+	v_ATTRIBUTE_VAL     TEMPORAL_ENTITY_ATTRIBUTE.ATTRIBUTE_VAL%TYPE;
+	v_STATEMENT_TYPE_ID NUMBER(9);
+
+BEGIN
+
+	--Map the invoice version number to statement types names
+	CASE p_INVOICE_VERSION
+		WHEN 0 THEN
+			v_ATTRIBUTE_VAL := 'Uninvoiced';
+		WHEN 1 THEN
+			v_ATTRIBUTE_VAL := 'Initial';
+		WHEN 2 THEN
+			v_ATTRIBUTE_VAL := '4 Month';
+		WHEN 3 THEN
+			v_ATTRIBUTE_VAL := '12 Month';
+	END CASE;
+
+	--Get the statement type Id based on the Statement Type entity attribute
+	SELECT TEA.OWNER_ENTITY_ID
+	  INTO v_STATEMENT_TYPE_ID
+	  FROM TEMPORAL_ENTITY_ATTRIBUTE TEA
+	 WHERE TEA.ATTRIBUTE_ID IN
+		   (SELECT EA.ATTRIBUTE_ID
+			  FROM ENTITY_ATTRIBUTE EA
+			 WHERE EA.ATTRIBUTE_NAME = 'NYISO')
+	   AND TEA.ATTRIBUTE_VAL = v_ATTRIBUTE_VAL;
+
+	RETURN v_STATEMENT_TYPE_ID;
+
+END GET_STATEMENT_TYPE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE UPDATE_SCHEDULE(p_TXN_NAME        IN VARCHAR2,
+						  p_EXT_ID          IN VARCHAR2,
+						  p_DATE            IN DATE,
+						  p_CHARGE_AMOUNT   IN NUMBER,
+						  p_INVOICE_VERSION IN NUMBER,
+						  p_STATUS          OUT NUMBER) IS
+
+	v_TXN_ID            INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+	v_STATEMENT_TYPE_ID NUMBER(9);
+
+BEGIN
+
+	p_STATUS := GA.SUCCESS;
+	--GET TRANSACTION ID BASED ON NAME AND EXTERNAL IDENTIFIER
+	v_TXN_ID := GET_TXN_ID(p_EXT_ID, p_TXN_NAME);
+
+	--USE STATEMENT TYPE ENTITY ATTRIBUTE TO GET THE STATEMENT_TYPE_ID
+	v_STATEMENT_TYPE_ID := GET_STATEMENT_TYPE(p_INVOICE_VERSION);
+
+	ITJ.PUT_IT_SCHEDULE(p_TRANSACTION_ID => v_TXN_ID,
+					   p_SCHEDULE_TYPE  => v_STATEMENT_TYPE_ID,
+					   p_SCHEDULE_STATE => GA.INTERNAL_STATE,
+					   p_SCHEDULE_DATE  => p_DATE,
+					   p_AS_OF_DATE     => SYSDATE,
+					   p_AMOUNT         => p_CHARGE_AMOUNT,
+					   p_PRICE          => NULL,
+					   p_STATUS         => p_STATUS);
+
+END UPDATE_SCHEDULE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE DELETE_BILLING_STATEMENT(p_ENTITY_ID      IN NUMBER,
+								   p_PRODUCT_ID     IN NUMBER,
+								   p_COMPONENT_ID   IN NUMBER,
+								   p_STATEMENT_TYPE IN NUMBER,
+								   p_DATE           IN DATE) AS
+
+BEGIN
+
+	DELETE BILLING_STATEMENT
+	 WHERE ENTITY_ID = p_ENTITY_ID
+	   AND PRODUCT_ID = p_PRODUCT_ID
+	   AND COMPONENT_ID = p_COMPONENT_ID
+	   AND STATEMENT_TYPE = p_STATEMENT_TYPE
+	   AND STATEMENT_STATE = GA.EXTERNAL_STATE
+	   AND STATEMENT_DATE = p_DATE
+	   AND AS_OF_DATE = LOW_DATE;
+
+	/*DELETE BILLING_STATEMENT
+	 WHERE ENTITY_ID = v_PSE_ID
+	   AND STATEMENT_TYPE = v_LAST_STATEMENT_TYPE
+	   AND STATEMENT_STATE = GA.EXTERNAL
+	   AND STATEMENT_DATE = v_LAST_DATE
+	   AND AS_OF_DATE = LOW_DATE;*/
+
+END DELETE_BILLING_STATEMENT;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_FORMULA_CHARGE_VAR_VAL(p_CHARGE_ID   IN NUMBER,
+									p_CHARGE_DATE IN DATE,
+									p_VAR_NAME    IN VARCHAR2,
+									p_ITERATOR_ID IN NUMBER := 0)
+	RETURN NUMBER IS
+
+	v_VARIABLE_VAL FORMULA_CHARGE_VARIABLE.VARIABLE_VAL%TYPE;
+
+BEGIN
+	SELECT VARIABLE_VAL
+	  INTO v_VARIABLE_VAL
+	  FROM FORMULA_CHARGE_VARIABLE
+	 WHERE CHARGE_ID = p_CHARGE_ID
+	   AND CHARGE_DATE = p_CHARGE_DATE
+	   AND VARIABLE_NAME = p_VAR_NAME
+	   AND ITERATOR_ID = p_ITERATOR_ID;
+
+	RETURN v_VARIABLE_VAL;
+
+END GET_FORMULA_CHARGE_VAR_VAL;
+------------------------------------------------------------------------------------------------
+FUNCTION GET_FORMULA_CHARGE(p_CHARGE_ID   IN NUMBER,
+							p_CHARGE_DATE IN DATE,
+							p_ITERATOR_ID IN NUMBER) RETURN FORMULA_CHARGE%ROWTYPE IS
+
+	v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+BEGIN
+
+	BEGIN
+		SELECT *
+		  INTO v_FORMULA_CHARGE
+		  FROM FORMULA_CHARGE
+		 WHERE CHARGE_ID = p_CHARGE_ID
+		   AND ITERATOR_ID = p_ITERATOR_ID
+		   AND CHARGE_DATE = p_CHARGE_DATE;
+
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+			v_FORMULA_CHARGE.CHARGE_DATE   := p_CHARGE_DATE;
+			v_FORMULA_CHARGE.CHARGE_FACTOR := 1.0;
+			v_FORMULA_CHARGE.ITERATOR_ID   := p_ITERATOR_ID;
+			v_FORMULA_CHARGE.CHARGE_ID     := p_CHARGE_ID;
+	END;
+
+	RETURN v_FORMULA_CHARGE;
+
+END GET_FORMULA_CHARGE;
+------------------------------------------------------------------------------------------------
+PROCEDURE PUT_FORMULA_CHARGE(p_CHARGE_ID       IN NUMBER,
+							 p_CHARGE_DATE     IN DATE,
+							 p_CHARGE_QUANTITY IN NUMBER,
+							 p_CHARGE_RATE     IN NUMBER,
+							 p_CHARGE_FACTOR IN NUMBER := 1,
+                             p_ITERATOR_ID IN NUMBER := 0) AS
+
+	v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+
+BEGIN
+	-- null charge ID? then skip it
+	/*IF p_CHARGE_ID IS NULL THEN
+		RETURN;
+	END IF;*/
+
+	/*v_ITERATOR_ID    := GET_SOURCE_SINK_ITERATOR_ID(p_CHARGE_ID,
+													p_SOURCE_NAME,
+													p_SINK_NAME);*/
+	v_FORMULA_CHARGE := GET_FORMULA_CHARGE(p_CHARGE_ID,
+										   p_CHARGE_DATE,
+										   0);
+
+	--  IF p_CHARGE_RATE IS NULL AND v_FORMULA_CHARGE.CHARGE_RATE IS NULL THEN
+	--      v_FORMULA_CHARGE.CHARGE_RATE := NVL(p_PRICE1,0)-NVL(p_PRICE2,0);
+
+/*	IF NOT p_CHARGE_RATE IS NULL THEN v_FORMULA_CHARGE.CHARGE_RATE := p_CHARGE_RATE; END IF;
+	IF NOT p_CHARGE_QUANTITY IS NULL THEN v_FORMULA_CHARGE.CHARGE_QUANTITY := p_CHARGE_QUANTITY; END IF;
+	IF NOT p_CHARGE_FACTOR IS NULL THEN v_FORMULA_CHARGE.CHARGE_FACTOR := p_CHARGE_FACTOR; END IF;
+	IF NOT p_CHARGE_AMOUNT IS NULL THEN v_FORMULA_CHARGE.CHARGE_AMOUNT := p_CHARGE_AMOUNT; END IF;*/
+
+    v_FORMULA_CHARGE.Charge_Id := p_CHARGE_ID;
+    v_FORMULA_CHARGE.Iterator_Id := p_ITERATOR_ID;
+    v_FORMULA_CHARGE.Charge_Date := p_CHARGE_DATE;
+    v_FORMULA_CHARGE.Charge_Quantity := p_CHARGE_QUANTITY;
+    v_FORMULA_CHARGE.Charge_Rate := p_CHARGE_RATE;
+    v_FORMULA_CHARGE.Charge_Factor := p_CHARGE_FACTOR;
+    v_FORMULA_CHARGE.Charge_Amount := p_CHARGE_QUANTITY * p_CHARGE_RATE;
+
+
+	PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+END PUT_FORMULA_CHARGE;
+-----------------------------------------------------------------------------------------------
+PROCEDURE PUT_FORMULA_CHARGE_VAR(p_CHARGE_ID       IN NUMBER,
+								 p_CHARGE_DATE     IN DATE,
+								 p_VAR_NAME        IN VARCHAR,
+								 p_VAR_VAL         IN NUMBER,
+                                 p_ITERATOR_ID IN NUMBER := 0) AS
+
+	v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+
+BEGIN
+
+	v_FORMULA_CHARGE_VAR.CHARGE_ID   := p_CHARGE_ID;
+	v_FORMULA_CHARGE_VAR.CHARGE_DATE := p_CHARGE_DATE;
+	v_FORMULA_CHARGE_VAR.ITERATOR_ID := p_ITERATOR_ID;
+	v_FORMULA_CHARGE_VAR.VARIABLE_NAME := p_VAR_NAME;
+	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_VAR_VAL;
+
+	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+END PUT_FORMULA_CHARGE_VAR;
+-----------------------------------------------------------------------------------------------
+FUNCTION GET_ID_FOR_MARKET_PRICE(p_MARKET_PRICE_NAME   IN VARCHAR2,
+								 p_MARKET_TYPE         IN VARCHAR2, --'DayAhead', 'RealTime', 'Market Result'
+								 p_MARKET_PRICE_TYPE   IN VARCHAR2, --Locational Marginal Price', 'Marginal Congestion Component', 'Marginal Loss Component', NY_TotalCollected
+								 p_COMMODITY_ID        IN NUMBER,
+								 p_SC_ID               IN NUMBER,
+								 p_CREATE_IF_NOT_FOUND IN BOOLEAN,
+								 p_MESSAGE             OUT VARCHAR2,
+								 p_POD_ID              IN NUMBER :=0)
+	RETURN NUMBER IS
+
+	v_EXTERNAL_IDENTIFIER MARKET_PRICE.EXTERNAL_IDENTIFIER%TYPE;
+	v_MARKET_PRICE_ID     NUMBER := NULL;
+	v_MKT_PRICE_INTERVAL      VARCHAR2(9);
+
+BEGIN
+
+	IF p_MARKET_PRICE_NAME IS NULL THEN
+		v_MARKET_PRICE_ID := 0;
+		RETURN v_MARKET_PRICE_ID;
+	END IF;
+
+	v_MKT_PRICE_INTERVAL := MM_NYISO_UTIL.GET_PRICE_INTERVAL(p_MARKET_TYPE);  --'Hour' or '5 Minute'
+	v_EXTERNAL_IDENTIFIER := LTRIM(RTRIM(p_MARKET_PRICE_NAME));
+
+	IF p_MARKET_PRICE_NAME IS NOT NULL THEN
+		BEGIN
+
+			SELECT MARKET_PRICE_ID
+			  INTO v_MARKET_PRICE_ID
+			  FROM MARKET_PRICE T
+			 WHERE EXTERNAL_IDENTIFIER = p_MARKET_PRICE_NAME;
+
+		EXCEPTION
+			WHEN NO_DATA_FOUND THEN
+				IF p_CREATE_IF_NOT_FOUND THEN
+
+					IO.PUT_MARKET_PRICE(v_MARKET_PRICE_ID,
+										p_MARKET_PRICE_NAME,
+										NULL, -- ALIAS
+										'Created by MarketManager via Settlements import', -- DESC
+										0,
+										p_MARKET_PRICE_TYPE, -- MARKET_PRICE_TYPE
+										v_MKT_PRICE_INTERVAL, --MARKET_PRICE_INTERVAL
+										p_MARKET_TYPE, --MARKET_TYPE
+										p_COMMODITY_ID,
+										NULL, -- SERVICE_POINT_TYPE
+										v_EXTERNAL_IDENTIFIER, -- EXTERNAL_IDENTIFIER
+										0, -- EDC_ID
+										p_SC_ID, -- SC_ID
+										p_POD_ID, -- POD_ID
+										0);
+
+				ELSE
+					v_MARKET_PRICE_ID := GA.NO_DATA_FOUND;
+				END IF;
+
+			WHEN OTHERS THEN
+				RAISE;
+		END;
+	END IF;
+
+	RETURN v_MARKET_PRICE_ID;
+
+END GET_ID_FOR_MARKET_PRICE;
+-------------------------------------------------------------------------------------------------
+FUNCTION GET_COMPONENT(p_LINE_ITEM_NAME IN VARCHAR2) RETURN NUMBER IS
+
+	v_COMPONENT_ID NUMBER;
+BEGIN
+	BEGIN
+		-- first check external ID
+		SELECT COMPONENT_ID
+		  INTO v_COMPONENT_ID
+		  FROM COMPONENT
+		 WHERE UPPER(EXTERNAL_IDENTIFIER) = UPPER(TRIM(p_LINE_ITEM_NAME));
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+			-- then check description
+			BEGIN
+				SELECT COMPONENT_ID
+				  INTO v_COMPONENT_ID
+				  FROM COMPONENT
+				 WHERE UPPER(COMPONENT_DESC) =
+					   UPPER(TRIM(p_LINE_ITEM_NAME));
+			EXCEPTION
+				WHEN NO_DATA_FOUND THEN
+					-- None? Then create a component
+					SELECT OID.NEXTVAL INTO v_COMPONENT_ID FROM DUAL;
+					INSERT INTO COMPONENT
+						(COMPONENT_ID,
+						 COMPONENT_NAME,
+						 COMPONENT_ALIAS,
+						 COMPONENT_DESC,
+						 RATE_STRUCTURE,
+						 CHARGE_TYPE,
+						 EXTERNAL_IDENTIFIER,
+						 ENTRY_DATE)
+					VALUES
+						(v_COMPONENT_ID,
+						 SUBSTR(TRIM(p_LINE_ITEM_NAME), 1, 32),
+						 'Generated by NY Import',
+						 p_LINE_ITEM_NAME,
+						 'External',
+						 'NY Charge',
+						 SUBSTR(TRIM(p_LINE_ITEM_NAME), 1, 32),
+						 SYSDATE);
+				WHEN TOO_MANY_ROWS THEN
+					-- ??
+					LOGS.LOG_WARN('More than one component found with Desc. of '''||p_LINE_ITEM_NAME||'''. Using the first one.');
+					SELECT COMPONENT_ID
+					  INTO v_COMPONENT_ID
+					  FROM COMPONENT
+					 WHERE UPPER(COMPONENT_DESC) =
+						   UPPER(TRIM(p_LINE_ITEM_NAME))
+					   AND ROWNUM = 1; -- just grab the first one
+			END;
+		WHEN TOO_MANY_ROWS THEN
+			-- ??
+			LOGS.LOG_WARN('More than one component found with Ext.ID of '''||p_LINE_ITEM_NAME||'''. Using the first one.');
+			SELECT COMPONENT_ID
+			  INTO v_COMPONENT_ID
+			  FROM COMPONENT
+			 WHERE UPPER(EXTERNAL_IDENTIFIER) =
+				   UPPER(TRIM(p_LINE_ITEM_NAME))
+			   AND ROWNUM = 1; -- just grab the first one
+	END;
+	RETURN v_COMPONENT_ID;
+END GET_COMPONENT;
+---------------------------------------------------------------------------------------------------
+FUNCTION GET_PRODUCT(p_PRODUCT_NAME IN VARCHAR2) RETURN NUMBER IS
+
+	v_PRODUCT_ID NUMBER;
+BEGIN
+
+	BEGIN
+		SELECT PRODUCT_ID
+		  INTO v_PRODUCT_ID
+		  FROM PRODUCT T
+		 WHERE UPPER(PRODUCT_EXTERNAL_IDENTIFIER) = UPPER(p_PRODUCT_NAME);
+
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+			-- use default product for unknown components
+			BEGIN
+				SELECT PRODUCT_ID
+				  INTO v_PRODUCT_ID
+				  FROM PRODUCT
+				 WHERE UPPER(PRODUCT.PRODUCT_EXTERNAL_IDENTIFIER) =
+					   UPPER(g_MISC_PRODUCT_EXT_ID);
+			EXCEPTION
+				WHEN NO_DATA_FOUND THEN
+					-- None? then create the product
+					SELECT OID.NEXTVAL INTO v_PRODUCT_ID FROM DUAL;
+					INSERT INTO PRODUCT
+						(PRODUCT_ID,
+						 PRODUCT_NAME,
+						 PRODUCT_ALIAS,
+						 PRODUCT_DESC,
+						 PRODUCT_EXTERNAL_IDENTIFIER,
+						 BEGIN_DATE,
+						 END_DATE,
+						 ENTRY_DATE)
+					VALUES
+						(v_PRODUCT_ID,
+						 'NY Other Charges',
+						 'NY Other Charges',
+						 'Generated by NY Import - Product to group unknown/unshadowed components',
+						 g_MISC_PRODUCT_EXT_ID,
+						 TO_DATE('01/01/2001', 'MM/DD/YYYY'),
+						 NULL,
+						 SYSDATE);
+				WHEN TOO_MANY_ROWS THEN
+					-- ??
+					LOGS.LOG_WARN('More than one product with Ext.ID of '''||g_MISC_PRODUCT_EXT_ID||'''. Using the first one.');
+					SELECT PRODUCT_ID
+					  INTO v_PRODUCT_ID
+					  FROM PRODUCT
+					 WHERE UPPER(PRODUCT.PRODUCT_EXTERNAL_IDENTIFIER) =
+						   UPPER(g_MISC_PRODUCT_EXT_ID)
+					   AND ROWNUM = 1; -- just grab the first one
+			END;
+
+	END;
+	RETURN v_PRODUCT_ID;
+END GET_PRODUCT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE GET_PRODUCT_COMPONENT
+	(
+	p_LINE_ITEM_NAME IN VARCHAR2,
+	p_PRODUCT_ID OUT NUMBER,
+	p_COMPONENT_ID OUT NUMBER
+	) AS
+BEGIN
+	-- First get the component
+	p_COMPONENT_ID := GET_COMPONENT(p_LINE_ITEM_NAME);
+	p_PRODUCT_ID := GET_PRODUCT(p_COMPONENT_ID);
+END GET_PRODUCT_COMPONENT;
+---------------------------------------------------------------------------------------------------
+FUNCTION GET_CHARGE_ID(p_PSE_ID           IN NUMBER,
+					   p_COMPONENT_ID     IN NUMBER,
+					   p_STATEMENT_TYPE   IN NUMBER,
+					   p_CHARGE_DATE      IN DATE,
+					   p_CHARGE_VIEW_TYPE IN VARCHAR2) RETURN NUMBER IS
+	v_CHARGE_ID NUMBER;
+BEGIN
+	SELECT CHARGE_ID
+	  INTO v_CHARGE_ID
+	  FROM BILLING_STATEMENT A
+	 WHERE ENTITY_ID = p_PSE_ID
+	   AND COMPONENT_ID = p_COMPONENT_ID
+	   AND STATEMENT_TYPE = p_STATEMENT_TYPE
+	   AND STATEMENT_STATE = GA.EXTERNAL_STATE
+	   AND STATEMENT_DATE = p_CHARGE_DATE
+	   AND AS_OF_DATE = (SELECT MAX(AS_OF_DATE)
+						   FROM BILLING_STATEMENT
+						  WHERE ENTITY_ID = A.ENTITY_ID
+							AND PRODUCT_ID = A.PRODUCT_ID
+							AND COMPONENT_ID = A.COMPONENT_ID
+							AND STATEMENT_TYPE = A.STATEMENT_TYPE
+							AND STATEMENT_STATE = A.STATEMENT_STATE
+							AND STATEMENT_DATE = A.STATEMENT_DATE
+							AND AS_OF_DATE <= SYSDATE);
+
+	UPDATE BILLING_STATEMENT
+	   SET CHARGE_VIEW_TYPE = p_CHARGE_VIEW_TYPE
+	 WHERE CHARGE_ID = v_CHARGE_ID;
+
+	RETURN v_CHARGE_ID;
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		RETURN NULL;
+END GET_CHARGE_ID;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_BILLING_STATEMENT(p_BILLING_STATEMENT IN OUT BILLING_STATEMENT%ROWTYPE,
+							    p_CHARGE_ID         IN NUMBER,
+								p_COMPONENT_ID      IN NUMBER,
+								p_CHARGE_QUANT      IN NUMBER,
+								p_CHARGE_RATE       IN NUMBER,
+								p_CHARGE_AMT        IN NUMBER,
+								p_BILL_QUANT        IN NUMBER := 0,
+								p_BILL_AMT          IN NUMBER := 0) AS
+BEGIN
+
+	p_BILLING_STATEMENT.CHARGE_ID       := p_CHARGE_ID;
+	p_BILLING_STATEMENT.COMPONENT_ID    := p_COMPONENT_ID;
+	p_BILLING_STATEMENT.CHARGE_QUANTITY := p_CHARGE_QUANT;
+	p_BILLING_STATEMENT.CHARGE_RATE     := p_CHARGE_RATE;
+	p_BILLING_STATEMENT.CHARGE_AMOUNT   := p_CHARGE_AMT;
+
+	IF p_BILL_QUANT = 0 THEN
+		p_BILLING_STATEMENT.BILL_QUANTITY := p_BILLING_STATEMENT.CHARGE_QUANTITY;
+	ELSE
+		p_BILLING_STATEMENT.BILL_QUANTITY := p_BILL_QUANT;
+	END IF;
+
+	IF p_BILL_AMT = 0 THEN
+		p_BILLING_STATEMENT.BILL_AMOUNT := p_BILLING_STATEMENT.CHARGE_AMOUNT;
+	ELSE
+		p_BILLING_STATEMENT.BILL_AMOUNT := p_BILL_AMT;
+	END IF;
+
+	IF p_CHARGE_ID = 0 THEN
+		PC.GET_CHARGE_ID(p_BILLING_STATEMENT);
+	END IF;
+	PC.PUT_BILLING_STATEMENT(p_BILLING_STATEMENT);
+
+END PUT_BILLING_STATEMENT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_INVOICE_SUMMARY(p_RECORDS        IN MEX_NY_INVOICE_TBL,
+								 p_INVOICE_POSTED OUT BOOLEAN,
+								 p_STATUS         OUT NUMBER,
+								 p_LOGGER        IN OUT NOCOPY MM_LOGGER_ADAPTER) IS
+v_IDX      BINARY_INTEGER;
+v_REC_DATA MEX_NY_INVOICE;
+
+BEGIN
+
+	p_STATUS  := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN p_INVOICE_POSTED := FALSE; END IF; -- nothing to do
+
+    v_IDX := p_RECORDS.FIRST;
+	--CHECK IF NYISO POSTED ANY INVOICE RECENTLY
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+		v_REC_DATA := p_RECORDS(v_IDX);
+		IF (v_REC_DATA.INVOICE_VERSION > 3) OR (v_REC_DATA.INVOICE_VERSION = 0) THEN
+			--"	If "Invoice Version Number" is greater than 3  --> these are invoices
+			--that store final bill closeouts which anyway will go away after December 2006
+			p_INVOICE_POSTED := FALSE;
+		ELSE
+			--"	If "Invoice Version Number" is 1, 2 or 3 ' then get the historical version
+			--of the reports, which means import "Initial", "4 Month" and "12 Month"
+			--settlement data into the system
+			p_INVOICE_POSTED := TRUE;
+		END IF;
+
+		EXIT WHEN p_INVOICE_POSTED = TRUE;
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_INVOICE_SUMMARY: ' ||
+					 SQLERRM);
+
+END IMPORT_INVOICE_SUMMARY;
+-------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_INVOICE_SUMMARY(p_CSV     IN CLOB,
+								 p_LOG_TYPE    IN NUMBER,
+    							 p_TRACE_ON    IN NUMBER,
+								 p_STATUS  OUT NUMBER,
+								 p_MESSAGE OUT VARCHAR2) AS
+
+	v_RECORDS        MEX_NY_INVOICE_TBL;
+	v_INVOICE_POSTED BOOLEAN;
+	v_DSS_ERROR_MESSAGE_TYPE NUMBER;
+	v_LOGGER  MM_LOGGER_ADAPTER;
+
+BEGIN
+	--For testing
+    p_STATUS := GA.SUCCESS;
+	v_LOGGER := MM_UTIL.GET_LOGGER(EC.ES_NYISO_DSS,
+                                   NULL,
+                                   'Import NYISO-DSS Invoice file',
+                                   'Import NYISO-DSS Invoice file',
+                                   p_LOG_TYPE,
+                                   p_TRACE_ON);
+	MM_UTIL.START_EXCHANGE(TRUE, v_LOGGER);
+	MEX_NYISO_SETTLEMENT.PARSE_INVOICE_SUMMARY(p_CSV,
+											   v_RECORDS,
+											   v_DSS_ERROR_MESSAGE_TYPE,
+											   p_STATUS,
+											   V_logger);
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_INVOICE_SUMMARY(v_RECORDS,
+							   v_INVOICE_POSTED,
+							   p_STATUS,
+							   v_LOGGER);
+	END IF;
+
+END IMPORT_INVOICE_SUMMARY;
+-------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_INVOICE_SUMMARY(p_CRED        IN MEX_CREDENTIALS,
+								 p_DATE                   IN DATE,
+								 p_DOC_LIST               IN MEX_NY_DOC_IDENT_TBL,
+								 p_INVOICE_POSTED         OUT BOOLEAN,
+								 p_DSS_ERROR_MESSAGE_TYPE OUT NUMBER,
+								 p_STATUS                 OUT NUMBER,
+								 p_LOGGER      IN OUT NOCOPY MM_LOGGER_ADAPTER) IS
+
+	v_RECORDS   MEX_NY_INVOICE_TBL;
+
+BEGIN
+
+	MEX_NYISO_SETTLEMENT.FETCH_INVOICE_SUMMARY(p_DATE,
+											   p_DOC_LIST,
+											   p_CRED,
+											   v_RECORDS,
+											   p_DSS_ERROR_MESSAGE_TYPE,
+											   p_STATUS,
+											   p_LOGGER);
+
+    IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+    ELSE
+        IMPORT_INVOICE_SUMMARY(v_RECORDS,
+					   p_INVOICE_POSTED,
+					   p_STATUS,
+					   p_LOGGER);
+	END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_INVOICE_SUMMARY: ' || SQLERRM);
+END IMPORT_INVOICE_SUMMARY;
+-----------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NYISO_RATES(p_RECORDS    IN MEX_NY_RATES_TBL,
+						     p_ISO_SOURCE IN VARCHAR2,
+							 p_STATUS     OUT NUMBER,
+							 p_LOGGER     IN OUT NOCOPY MM_LOGGER_ADAPTER) IS
+
+	v_REC_DATA MEX_NY_RATES;
+	v_IDX      BINARY_INTEGER;
+	v_SC_ID    NUMBER(9) := MM_NYISO_UTIL.g_NYISO_SC_ID;
+
+	--MARKET PRICE IDs
+	v_MARKET_PRICE_ID_OATT NUMBER(9);
+	v_MARKET_PRICE_ID_VSS  NUMBER(9);
+	v_MARKET_PRICE_ID_MST  NUMBER(9);
+
+	v_PRODUCT_ID           NUMBER(9);
+	v_PSE_ID               NUMBER(9);
+	v_BILLING_STATEMENT    BILLING_STATEMENT%ROWTYPE;
+
+	--CHARGE IDs
+	v_OATT_SCHED1_ID       NUMBER(9);
+	v_OATT_SCHED2_ID       NUMBER(9);
+	v_MST_SCHED1_ID        NUMBER(9);
+
+	--COMPONENT IDs
+	v_OATT1_COMP_ID       NUMBER(9);
+	v_OATT2_COMP_ID       NUMBER(9);
+	v_MST_COMP_ID         NUMBER(9);
+
+	--CHAREGE TOTALS
+	v_OATT_STLM NUMBER;
+	v_MST_STLM  NUMBER;
+	v_VSS_STLM  NUMBER;
+
+	v_LAST_DATE  DATE;
+	v_LAST_STATEMENT_TYPE BINARY_INTEGER;
+	v_LAST_INV_VERSION NUMBER(1);
+
+	v_MESSAGE VARCHAR2(256);
+
+	CURSOR c_ORDERED_RECORDSET IS
+		SELECT INVOICE_VERSION,CHARGE_DATE,MST_RATE,OATT_RATE,VSS_RATE,RT_LSE_LOAD,MST_STLM, OATT_STLM, VSS_STLM
+          FROM TABLE(CAST(p_RECORDS AS MEX_NY_RATES_TBL))
+		  WHERE INVOICE_VERSION < 4
+		  ORDER BY INVOICE_VERSION,CHARGE_DATE;
+
+
+	PROCEDURE GET_TOTAL_SETTLEMENT(p_CHARGE_DATE      IN DATE,
+								   p_INV_VERS       IN NUMBER,
+								   p_MST_STLM  OUT NUMBER,
+								   p_OATT_STLM OUT NUMBER,
+								   p_VSS_STLM  OUT NUMBER) AS
+
+		CURSOR c_RATES_STLMN IS
+
+			SELECT SUM(A.MST_STLM) "MST_STLM",
+				   SUM(A.OATT_STLM) "OATT_STLM",
+				   SUM(A.VSS_STLM) "VSS_STLM"
+			  FROM TABLE(CAST(p_RECORDS AS MEX_NY_RATES_TBL)) A
+			WHERE TRUNC(A.CHARGE_DATE) = p_CHARGE_DATE
+			   AND A.INVOICE_VERSION = p_INV_VERS;
+
+	BEGIN
+
+		FOR v_RATES_STLM IN c_RATES_STLMN LOOP
+			p_MST_STLM  := v_RATES_STLM.MST_STLM;
+			p_OATT_STLM := v_RATES_STLM.OATT_STLM;
+			p_VSS_STLM  := v_RATES_STLM.VSS_STLM;
+		END LOOP;
+
+	END GET_TOTAL_SETTLEMENT;
+
+BEGIN
+
+	p_STATUS := GA.SUCCESS;
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+
+	--First get the market price ids
+	v_MARKET_PRICE_ID_OATT := GET_ID_FOR_MARKET_PRICE('NY:OATTRate', 'Market Result', 'NY_TotalCollected', 0, v_SC_ID,TRUE,v_MESSAGE);
+	v_MARKET_PRICE_ID_VSS := GET_ID_FOR_MARKET_PRICE('NY:VSSRate', 'Market Result', 'NY_TotalCollected', 0, v_SC_ID,TRUE,v_MESSAGE);
+	v_MARKET_PRICE_ID_MST := GET_ID_FOR_MARKET_PRICE('NY:MSTRate', 'Market Result', 'NY_TotalCollected', 0, v_SC_ID,TRUE,v_MESSAGE);
+
+	v_PSE_ID     := GET_PSE_ID(p_ISO_SOURCE);
+	v_PRODUCT_ID := GET_PRODUCT(g_ANC_SERV_PRODUCT);
+
+	--get component IDs
+	v_OATT1_COMP_ID := GET_COMPONENT('NYISO:OATTSched1');
+	v_OATT2_COMP_ID := GET_COMPONENT('NYISO:OATTSched2');
+	v_MST_COMP_ID   := GET_COMPONENT('NYISO:MSTSched1');
+
+	v_IDX := p_RECORDS.FIRST;
+
+	v_BILLING_STATEMENT.ENTITY_ID := v_PSE_ID;
+	v_BILLING_STATEMENT.ENTITY_TYPE := 'PSE';
+	v_BILLING_STATEMENT.STATEMENT_STATE := GA.EXTERNAL_STATE;
+	v_BILLING_STATEMENT.PRODUCT_ID := v_PRODUCT_ID;
+	v_BILLING_STATEMENT.STATEMENT_DATE := TRUNC(p_RECORDS(v_IDX).CHARGE_DATE);
+	v_BILLING_STATEMENT.STATEMENT_END_DATE := TRUNC(p_RECORDS(v_IDX).CHARGE_DATE);
+	v_BILLING_STATEMENT.AS_OF_DATE := LOW_DATE;
+    v_BILLING_STATEMENT.CHARGE_VIEW_TYPE := g_CHARGE_VIEW_TYPE;
+
+	--Loop over records
+	FOR v_REC_DATA IN c_ORDERED_RECORDSET LOOP
+
+        IF v_LAST_DATE IS NULL OR (v_LAST_DATE <> TRUNC(v_REC_DATA.CHARGE_DATE)) OR
+          (v_LAST_DATE = TRUNC(v_REC_DATA.CHARGE_DATE) AND v_LAST_INV_VERSION <> v_REC_DATA.INVOICE_VERSION) THEN
+
+           --update totals for the charge_id just completed
+           IF v_LAST_STATEMENT_TYPE IS NOT NULL THEN
+                GET_TOTAL_SETTLEMENT(v_LAST_DATE, v_LAST_INV_VERSION, v_MST_STLM, v_OATT_STLM, v_VSS_STLM);
+                PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_MST_SCHED1_ID, v_MST_COMP_ID, v_MST_STLM, 1, v_MST_STLM);
+                PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_OATT_SCHED1_ID, v_OATT1_COMP_ID, v_OATT_STLM, 1, v_OATT_STLM);
+                PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_OATT_SCHED2_ID, v_OATT2_COMP_ID, v_VSS_STLM, 1, v_VSS_STLM);
+           END IF;
+
+           	v_LAST_DATE := TRUNC(v_REC_DATA.CHARGE_DATE);
+			v_LAST_INV_VERSION := v_REC_DATA.INVOICE_VERSION;
+			v_LAST_STATEMENT_TYPE := GET_STATEMENT_TYPE(v_REC_DATA.INVOICE_VERSION);
+
+            -- clear out billing statement
+        	DELETE BILLING_STATEMENT
+        	  WHERE ENTITY_ID = v_PSE_ID
+        		AND STATEMENT_TYPE = v_LAST_STATEMENT_TYPE
+        		AND STATEMENT_STATE = GA.EXTERNAL_STATE
+        		AND STATEMENT_DATE = v_LAST_DATE
+        		AND AS_OF_DATE = LOW_DATE
+        		AND PRODUCT_ID = v_PRODUCT_ID
+        		AND (COMPONENT_ID = v_OATT1_COMP_ID OR
+        			 COMPONENT_ID = v_OATT2_COMP_ID OR
+					 COMPONENT_ID = v_MST_COMP_ID);
+
+            v_BILLING_STATEMENT.STATEMENT_TYPE := v_LAST_STATEMENT_TYPE;
+            v_BILLING_STATEMENT.STATEMENT_DATE := v_LAST_DATE;
+            v_BILLING_STATEMENT.STATEMENT_END_DATE := v_LAST_DATE;
+
+			PUT_BILLING_STATEMENT(v_BILLING_STATEMENT, 0, v_OATT1_COMP_ID, 0, 1, 0);
+			PUT_BILLING_STATEMENT(v_BILLING_STATEMENT, 0, v_OATT2_COMP_ID, 0, 1, 0);
+			PUT_BILLING_STATEMENT(v_BILLING_STATEMENT, 0, v_MST_COMP_ID, 0, 1, 0);
+
+			-- get charge IDs
+			v_OATT_SCHED1_ID := GET_CHARGE_ID(v_PSE_ID, v_OATT1_COMP_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE,'Formula');
+			v_OATT_SCHED2_ID := GET_CHARGE_ID(v_PSE_ID, v_OATT2_COMP_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE,'Formula');
+			v_MST_SCHED1_ID := GET_CHARGE_ID(v_PSE_ID, v_MST_COMP_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE,'Formula');
+
+        END IF;
+
+		--Create market prices based on VSS Rate and OATT / MST Rate
+		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID_OATT,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.OATT_RATE,0,p_STATUS,v_MESSAGE);
+		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID_MST,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.MST_RATE,0,p_STATUS,v_MESSAGE);
+		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID_VSS,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.VSS_RATE,0,p_STATUS,v_MESSAGE);
+
+		--put the data
+        --NY: OATT Schedule 1
+        PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED1_ID,v_REC_DATA.CHARGE_DATE,'RTLSELoad',v_REC_DATA.RT_LSE_LOAD);
+        PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED1_ID,v_REC_DATA.CHARGE_DATE,'OATTRate',v_REC_DATA.OATT_RATE);
+        PUT_FORMULA_CHARGE(v_OATT_SCHED1_ID, v_REC_DATA.CHARGE_DATE, v_REC_DATA.RT_LSE_LOAD, -v_REC_DATA.OATT_RATE);
+
+        --NY: MST Schedule 1
+        PUT_FORMULA_CHARGE_VAR(v_MST_SCHED1_ID,v_REC_DATA.CHARGE_DATE,'RTLSELoad',v_REC_DATA.RT_LSE_LOAD);
+        PUT_FORMULA_CHARGE_VAR(v_MST_SCHED1_ID,v_REC_DATA.CHARGE_DATE,'MSTRate',v_REC_DATA.MST_RATE);
+        PUT_FORMULA_CHARGE(v_MST_SCHED1_ID, v_REC_DATA.CHARGE_DATE, v_REC_DATA.RT_LSE_LOAD, -v_REC_DATA.MST_RATE);
+
+        --NY: OATT Schedule 2 (VSS)
+        PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED2_ID,v_REC_DATA.CHARGE_DATE,'RTLSELoad',v_REC_DATA.RT_LSE_LOAD);
+        PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED2_ID,v_REC_DATA.CHARGE_DATE,'VSSRate',v_REC_DATA.VSS_RATE);
+        PUT_FORMULA_CHARGE(v_OATT_SCHED2_ID, v_REC_DATA.CHARGE_DATE, v_REC_DATA.RT_LSE_LOAD, -v_REC_DATA.VSS_RATE);
+
+	END LOOP;
+
+	--Update billing statement with totals for the day
+	GET_TOTAL_SETTLEMENT(v_LAST_DATE, v_LAST_INV_VERSION, v_MST_STLM, v_OATT_STLM, v_VSS_STLM);
+	PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_MST_SCHED1_ID, v_MST_COMP_ID, v_MST_STLM, 1, v_MST_STLM);
+	PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_OATT_SCHED1_ID, v_OATT1_COMP_ID, v_OATT_STLM, 1, v_OATT_STLM);
+	PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_OATT_SCHED2_ID, v_OATT2_COMP_ID, v_VSS_STLM, 1, v_VSS_STLM);
+	COMMIT;
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_NYISO_RATES: ' ||
+					 SQLERRM);
+
+END IMPORT_NYISO_RATES;
+------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NYISO_RATES(p_CSV     IN CLOB,
+							 p_ISO_NAME IN VARCHAR2,
+							 p_LOG_TYPE    IN NUMBER,
+    						 p_TRACE_ON    IN NUMBER,
+							 p_STATUS  OUT NUMBER,
+							 p_MESSAGE OUT VARCHAR2) AS
+
+	v_RECORDS MEX_NY_RATES_TBL;
+	v_LOGGER  MM_LOGGER_ADAPTER;
+BEGIN
+	--For testing
+    p_STATUS := GA.SUCCESS;
+	v_LOGGER := MM_UTIL.GET_LOGGER(EC.ES_NYISO_DSS,
+                                   NULL,
+                                   'Import NYISO-DSS Rates file',
+                                   'Import NYISO-DSS Rates file',
+                                   p_LOG_TYPE,
+                                   p_TRACE_ON);
+	MM_UTIL.START_EXCHANGE(TRUE, v_LOGGER);
+
+    MEX_NYISO_SETTLEMENT.PARSE_NYISO_RATES(p_CSV,
+										   v_RECORDS,
+										   p_STATUS,
+										   v_LOGGER);
+	IF LOGS.GET_ERROR_COUNT() = 0 THEN
+		IMPORT_NYISO_RATES(v_RECORDS, p_ISO_NAME, p_STATUS, v_LOGGER);
+	END IF;
+
+END IMPORT_NYISO_RATES;
+------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NYISO_RATES(p_CRED        IN MEX_CREDENTIALS,
+							 p_DATE        IN DATE,
+							 p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+							 p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+							 p_STATUS      OUT NUMBER,
+							 p_LOGGER      IN OUT NOCOPY MM_LOGGER_ADAPTER) IS
+
+	v_RECORDS      MEX_NY_RATES_TBL;
+
+BEGIN
+
+	MEX_NYISO_SETTLEMENT.FETCH_NYISO_RATES(p_DATE,
+										   p_DOC_LIST,
+										   p_CRED,
+										   p_REPORT_TYPE,
+										   v_RECORDS,
+										   p_STATUS,
+										   p_LOGGER);
+
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+    ELSE
+        IMPORT_NYISO_RATES(v_RECORDS, p_CRED.EXTERNAL_ACCOUNT_NAME, p_STATUS, p_LOGGER);
+	END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_NYISO_RATES: ' ||
+					 SQLERRM);
+
+END IMPORT_NYISO_RATES;
+-----------------------------------------------------------------------------------------------------------------
+/*PROCEDURE IMPORT_NYISO_RATES(p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+							 p_STATUS      OUT NUMBER,
+							 p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_RECORDS      MEX_NY_RATES_TBL;
+	v_EXT_CREDS    EXTERNAL_CREDENTIAL_TBL;
+    v_EXCHANGE_ID    NUMBER(9);
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+	MEX_NYISO_SETTLEMENT.GET_NYISO_RATES(p_REPORT_TYPE,
+										   v_RECORDS,
+										   p_STATUS,
+										   p_MESSAGE);
+
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+    ELSE
+        IMPORT_NYISO_RATES(v_RECORDS, v_EXT_CREDS(v_EXT_CREDS.FIRST).ISO_ACCOUNT_NAME, p_STATUS, p_MESSAGE);
+        --LOG THE RESPONSE
+        MEX_UTIL.PUT_EXCHANGE_LOG('NYISO',
+							      'IN',
+							      'Sttl:Imp ' || SUBSTR(MEX_NYISO_SETTLEMENT.g_DSS_NYISO_RATES_REP_NAME || '_' || p_REPORT_TYPE,1,23),
+							      'Normal',
+							      p_MESSAGE,
+							      NULL,
+							      NULL,
+							      v_EXCHANGE_ID);
+	END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.IMPORT_NYISO_RATES: ' ||
+					 SQLERRM;
+
+END IMPORT_NYISO_RATES;*/
+-----------------------------------------------------------------------------------------------------------------
+/*PROCEDURE FETCH_NYISO_RATES(p_DATE        IN DATE,
+							 p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+							 p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+							 p_STATUS      OUT NUMBER,
+							 p_LOGGER      IN OUT NOCOPY MM_LOGGER_ADAPTER) IS
+
+	v_EXT_CREDS    EXTERNAL_CREDENTIAL_TBL;
+
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+	MEX_NYISO_SETTLEMENT.FETCH_NYISO_RATES(p_DATE,
+										   p_DOC_LIST,
+										   v_EXT_CREDS(v_EXT_CREDS.FIRST),
+										   p_REPORT_TYPE,
+										   p_STATUS,
+										   p_MESSAGE);
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.IMPORT_NYISO_RATES: ' ||
+					 SQLERRM;
+
+END FETCH_NYISO_RATES;*/
+------------------------------------------------------------------------------------------------------------------
+
+PROCEDURE IMPORT_NYISO_RESID(p_RECORDS 		IN MEX_NY_RESIDUAL_TBL,
+							 p_ISO_SOURCE 	IN VARCHAR,
+						     p_STATUS  		OUT NUMBER,
+							 p_LOGGER  		IN OUT NOCOPY mm_logger_adapter) IS
+
+	TYPE TOTALS_ID_MAP   	IS TABLE OF NUMBER INDEX BY BINARY_INTEGER;
+	v_DAM_ENGY_TTL_CHG_QTY_MAP 	TOTALS_ID_MAP;
+	v_DAM_ENGY_TTL_CHG_AMT_MAP 	TOTALS_ID_MAP;
+	v_DAM_LOSS_TTL_CHG_QTY_MAP 	TOTALS_ID_MAP;
+	v_DAM_LOSS_TTL_CHG_AMT_MAP 	TOTALS_ID_MAP;
+	v_BAL_ENGY_TTL_CHG_QTY_MAP 	TOTALS_ID_MAP;
+	v_BAL_ENGY_TTL_CHG_AMT_MAP 	TOTALS_ID_MAP;
+	v_BAL_LOSS_TTL_CHG_QTY_MAP 	TOTALS_ID_MAP;
+	v_BAL_LOSS_TTL_CHG_AMT_MAP 	TOTALS_ID_MAP;
+	v_BAL_CONG_TTL_CHG_QTY_MAP 	TOTALS_ID_MAP;
+	v_BAL_CONG_TTL_CHG_AMT_MAP 	TOTALS_ID_MAP;
+
+	v_REC_DATA 				MEX_NY_RESIDUAL;
+	v_BILLING_STATEMENT 	BILLING_STATEMENT%ROWTYPE;
+	v_PRODUCT_ID        	NUMBER(9);
+	v_PSE_ID            	NUMBER(9);
+
+	v_LAST_STATEMENT_TYPE 	BINARY_INTEGER;
+	v_LAST_DATE 			DATE;
+	v_LAST_INV_VERSION  	NUMBER(1);
+	v_CHARGE_RATE       	NUMBER;
+	v_CHARGE_QTY        	NUMBER;
+
+	v_IDX      				  BINARY_INTEGER;
+	v_SC_ID                   NUMBER(9) := MM_NYISO_UTIL.g_NYISO_SC_ID;
+
+	--MARKET PRICE IDs
+	v_MKT_PR_ID_DAM_EN_CR     NUMBER(9);
+	v_MKT_PR_ID_DAM_EN_CH     NUMBER(9);
+	v_MKT_PR_ID_DAM_LMBP_EN   NUMBER(9);
+	v_MKT_PR_ID_DAM_LS_CR     NUMBER(9);
+	v_MKT_PR_ID_DAM_LS_CH     NUMBER(9);
+	v_MKT_PR_ID_DAM_LMBP_LS   NUMBER(9);
+	v_MKT_PR_ID_DAM_TUC_LS    NUMBER(9);
+	v_MKT_PR_ID_BAL_EN_CR     NUMBER(9);
+	v_MKT_PR_ID_BAL_EN_CH     NUMBER(9);
+	v_MKT_PR_ID_BAL_LMBP_EN   NUMBER(9);
+	v_MKT_PR_ID_BAL_LS_CR     NUMBER(9);
+	v_MKT_PR_ID_BAL_LS_CH     NUMBER(9);
+	v_MKT_PR_ID_BAL_LMBP_LS   NUMBER(9);
+	v_MKT_PR_ID_BAL_TUC_LS    NUMBER(9);
+	v_MKT_PR_ID_BAL_CONG_CR   NUMBER(9);
+	v_MKT_PR_ID_BAL_CONG_CH   NUMBER(9);
+	v_MKT_PR_ID_BAL_LMBP_CONG NUMBER(9);
+	v_MKT_PR_ID_BAL_TUC_CONG  NUMBER(9);
+
+	--COMPONENT IDs
+	v_DAM_ENGY_RESID_COMP_ID    NUMBER(9);
+	v_DAM_LOSS_RESID_COMP_ID	NUMBER(9);
+	v_BAL_ENGY_RESID_COMP_ID    NUMBER(9);
+	v_BAL_LOSS_RESID_COMP_ID    NUMBER(9);
+	v_BAL_CONG_RESID_COMP_ID    NUMBER(9);
+	v_OATT1_COMPONENT_ID        NUMBER(9);
+
+	--CHARGE IDs
+	v_DAM_ENGY_RESID_CHARGE_ID  NUMBER(9);
+	v_DAM_LOSS_RESID_CHARGE_ID  NUMBER(9);
+	v_BAL_ENGY_RESID_CHARGE_ID  NUMBER(9);
+	v_BAL_LOSS_RESID_CHARGE_ID  NUMBER(9);
+	v_BAL_CONG_RESID_CHARGE_ID  NUMBER(9);
+	v_OATT_SCHED1_CHARGE_ID     NUMBER(9);
+
+	v_RT_LSE_LOAD               NUMBER;
+
+	--TOTAL STLMNS
+	v_DAM_ENGY_RESID_STLM 		NUMBER;
+	v_DAM_LOSS_RESID_STLM 		NUMBER;
+	v_BAL_ENGY_RESID_STLM 		NUMBER;
+	v_BAL_LOSS_RESID_STLM 		NUMBER;
+	v_BAL_CONG_RESID_STLM 		NUMBER;
+
+	v_MESSAGE VARCHAR2(256);
+
+		PROCEDURE GET_TOTAL_SETTLEMENT(p_CHARGE_DATE         IN DATE,
+									   p_INV_VERS            IN NUMBER,
+									   p_DAM_ENGY_RESID_STLM OUT NUMBER,
+									   p_DAM_LOSS_RESID_STLM OUT NUMBER,
+									   p_BAL_ENGY_RESID_STLM OUT NUMBER,
+									   p_BAL_LOSS_RESID_STLM OUT NUMBER,
+									   p_BAL_CONG_RESID_STLM OUT NUMBER) AS
+			CURSOR c_STLMN IS
+				SELECT SUM(A.DAM_ENGY_RESID_STLM) "DAM_ENGY_RESID_STLM",
+					   SUM(A.DAM_LOSS_RESID_STLM) "DAM_LOSS_RESID_STLM",
+					   SUM(A.BAL_ENGY_RESID_STLM) "BAL_ENGY_RESID_STLM",
+					   SUM(A.BAL_LOSS_RESID_STLM) "BAL_LOSS_RESID_STLM",
+					   SUM(A.BAL_CONG_RESID_STLM) "BAL_CONG_RESID_STLM"
+				  FROM TABLE(CAST(p_RECORDS AS MEX_NY_RESIDUAL_TBL)) A
+				 WHERE TRUNC(A.CHARGE_DATE) = p_CHARGE_DATE
+				   AND A.INVOICE_VERSION = p_INV_VERS;
+
+		BEGIN
+
+			FOR v_STLMN IN c_STLMN LOOP
+				p_DAM_ENGY_RESID_STLM := v_STLMN.DAM_ENGY_RESID_STLM;
+				p_DAM_LOSS_RESID_STLM := v_STLMN.DAM_LOSS_RESID_STLM;
+				p_BAL_ENGY_RESID_STLM := v_STLMN.BAL_ENGY_RESID_STLM;
+				p_BAL_LOSS_RESID_STLM := v_STLMN.BAL_LOSS_RESID_STLM;
+				p_BAL_CONG_RESID_STLM := v_STLMN.BAL_CONG_RESID_STLM;
+			END LOOP;
+
+		END GET_TOTAL_SETTLEMENT;
+
+
+BEGIN
+
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+
+	--First get the market price ids
+	v_MKT_PR_ID_DAM_EN_CR := GET_ID_FOR_MARKET_PRICE('NY:Total DAM Energy Credit to PS', 'Market Result', 'NY_TotalCollected', 0, v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_DAM_EN_CH := GET_ID_FOR_MARKET_PRICE('NY:Total DAM Energy Charge to LSE', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_DAM_LMBP_EN := GET_ID_FOR_MARKET_PRICE('NY:Total DAM LMBP Energy Charge to TC', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+
+	v_MKT_PR_ID_DAM_LS_CR := GET_ID_FOR_MARKET_PRICE('NY:Total DAM Loss Credit to PS', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_DAM_LS_CH := GET_ID_FOR_MARKET_PRICE('NY:Total DAM Loss Charge to LSE', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_DAM_LMBP_LS := GET_ID_FOR_MARKET_PRICE('NY:Total DAM LMBP Loss Charge to TC', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_DAM_TUC_LS := GET_ID_FOR_MARKET_PRICE('NY:Total DAM TUC Loss Charge to TC', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+
+	v_MKT_PR_ID_BAL_EN_CR := GET_ID_FOR_MARKET_PRICE('NY:Total Bal Energy Credit to PS', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_BAL_EN_CH := GET_ID_FOR_MARKET_PRICE('NY:Total Bal Energy Charge to LSE', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_BAL_LMBP_EN := GET_ID_FOR_MARKET_PRICE('NY:Total Bal LMBP Energy Charge to TC', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+
+	v_MKT_PR_ID_BAL_LS_CR := GET_ID_FOR_MARKET_PRICE('NY:Total Bal Loss Credit to PS', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_BAL_LS_CH := GET_ID_FOR_MARKET_PRICE('NY:Total Bal Loss Charge to LSE', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_BAL_LMBP_LS := GET_ID_FOR_MARKET_PRICE('NY:Total Bal LMBP Loss Charge to TC', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_BAL_TUC_LS := GET_ID_FOR_MARKET_PRICE('NY:Total Bal TUC Loss Charge to TC', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+
+	v_MKT_PR_ID_BAL_CONG_CR:= GET_ID_FOR_MARKET_PRICE('NY:Total Bal Cong Credit to PS', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_BAL_CONG_CH := GET_ID_FOR_MARKET_PRICE('NY:Total Bal Cong Charge to LSE', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_BAL_LMBP_CONG := GET_ID_FOR_MARKET_PRICE('NY:Total Bal LMBP Cong Charge to TC', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_BAL_TUC_CONG := GET_ID_FOR_MARKET_PRICE('NY:Total Bal TUC Cong Charge to TC', 'Market Result', 'NY_TotalCollected',0,v_SC_ID,TRUE,v_MESSAGE);
+
+	v_PSE_ID := GET_PSE_ID(p_ISO_SOURCE);
+	v_PRODUCT_ID := GET_PRODUCT(g_ANC_SERV_PRODUCT);
+	v_IDX := p_RECORDS.FIRST;
+
+	--get component IDs
+	v_DAM_ENGY_RESID_COMP_ID := GET_COMPONENT('NYISO:DAMEngyResid');
+	v_DAM_LOSS_RESID_COMP_ID := GET_COMPONENT('NYISO:DAMLossResid');
+	v_BAL_ENGY_RESID_COMP_ID := GET_COMPONENT('NYISO:BalMktEngyResid');
+	v_BAL_LOSS_RESID_COMP_ID := GET_COMPONENT('NYISO:BalMktLossResid');
+	v_BAL_CONG_RESID_COMP_ID := GET_COMPONENT('NYISO:BalMktCongResid');
+
+    v_OATT1_COMPONENT_ID := GET_COMPONENT('NYISO:OATTSched1');--this is in order to get RTLSELoad
+
+	--billing statement initialization
+	v_BILLING_STATEMENT.ENTITY_ID := v_PSE_ID;
+	v_BILLING_STATEMENT.ENTITY_TYPE := 'PSE';
+	v_BILLING_STATEMENT.STATEMENT_STATE := GA.EXTERNAL_STATE;
+	v_BILLING_STATEMENT.PRODUCT_ID := v_PRODUCT_ID;
+	v_BILLING_STATEMENT.STATEMENT_DATE := TRUNC(p_RECORDS(v_IDX).CHARGE_DATE);
+	v_BILLING_STATEMENT.STATEMENT_END_DATE := TRUNC(p_RECORDS(v_IDX).CHARGE_DATE);
+	v_BILLING_STATEMENT.AS_OF_DATE := LOW_DATE;
+    v_BILLING_STATEMENT.CHARGE_VIEW_TYPE := g_CHARGE_VIEW_TYPE;
+
+    --Loop over records
+	FOR v_IDX IN p_RECORDS.FIRST .. p_RECORDS.LAST LOOP
+		v_REC_DATA := p_RECORDS(v_IDX);
+
+		--skip any records that have an invoice number greater than 3
+		--those are final bill closeouts which will go away after December 2006
+		IF v_REC_DATA.INVOICE_VERSION < 4 THEN
+
+    		IF v_LAST_DATE IS NULL OR (v_LAST_DATE <> TRUNC(v_REC_DATA.CHARGE_DATE)) OR
+              (v_LAST_DATE = TRUNC(v_REC_DATA.CHARGE_DATE) AND v_LAST_INV_VERSION <> v_REC_DATA.INVOICE_VERSION) THEN
+
+               --update totals for the charge_id just completed
+               IF v_LAST_STATEMENT_TYPE IS NOT NULL THEN
+    			   GET_TOTAL_SETTLEMENT(v_LAST_DATE, v_LAST_INV_VERSION, v_DAM_ENGY_RESID_STLM, v_DAM_LOSS_RESID_STLM, v_BAL_ENGY_RESID_STLM,v_BAL_LOSS_RESID_STLM, v_BAL_CONG_RESID_STLM);
+    			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_DAM_ENGY_RESID_CHARGE_ID, v_DAM_ENGY_RESID_COMP_ID, v_DAM_ENGY_RESID_STLM, 1, v_DAM_ENGY_RESID_STLM);
+    			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_DAM_LOSS_RESID_CHARGE_ID, v_DAM_LOSS_RESID_COMP_ID, v_DAM_LOSS_RESID_STLM, 1, v_DAM_LOSS_RESID_STLM);
+    			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_BAL_ENGY_RESID_CHARGE_ID, v_BAL_ENGY_RESID_COMP_ID, v_BAL_ENGY_RESID_STLM, 1, v_BAL_ENGY_RESID_STLM);
+    			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_BAL_LOSS_RESID_CHARGE_ID, v_BAL_LOSS_RESID_COMP_ID, v_BAL_LOSS_RESID_STLM, 1, v_BAL_LOSS_RESID_STLM);
+    			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_BAL_CONG_RESID_CHARGE_ID, v_BAL_CONG_RESID_COMP_ID, v_BAL_CONG_RESID_STLM, 1, v_BAL_CONG_RESID_STLM);
+    			   /*PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_DAM_ENGY_RESID_CHARGE_ID, v_DAM_ENGY_RESID_COMP_ID, v_DAM_ENGY_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE), 1, v_DAM_ENGY_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE));
+    			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_DAM_LOSS_RESID_CHARGE_ID, v_DAM_LOSS_RESID_COMP_ID, v_DAM_LOSS_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE), 1, v_DAM_LOSS_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE));
+    			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_BAL_ENGY_RESID_CHARGE_ID, v_BAL_ENGY_RESID_COMP_ID, v_BAL_ENGY_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE), 1, v_BAL_ENGY_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE));
+    			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_BAL_LOSS_RESID_CHARGE_ID, v_BAL_LOSS_RESID_COMP_ID, v_BAL_LOSS_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE), 1, v_BAL_LOSS_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE));
+    			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_BAL_CONG_RESID_CHARGE_ID, v_BAL_CONG_RESID_COMP_ID, v_BAL_CONG_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE), 1, v_BAL_CONG_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE));*/
+               END IF;
+
+                v_LAST_DATE := TRUNC(v_REC_DATA.CHARGE_DATE);
+    			v_LAST_INV_VERSION := v_REC_DATA.INVOICE_VERSION;
+                v_LAST_STATEMENT_TYPE := GET_STATEMENT_TYPE(v_REC_DATA.INVOICE_VERSION);
+    			v_DAM_ENGY_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) := 0;
+    			v_DAM_ENGY_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE) := 0;
+    			v_DAM_LOSS_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) := 0;
+    			v_DAM_LOSS_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE) := 0;
+    			v_BAL_ENGY_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) := 0;
+    			v_BAL_ENGY_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE) := 0;
+    			v_BAL_LOSS_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) := 0;
+    			v_BAL_LOSS_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE) := 0;
+    			v_BAL_CONG_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) := 0;
+    			v_BAL_CONG_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE) := 0;
+
+
+                -- clear out billing statement
+    			DELETE BILLING_STATEMENT
+    			 WHERE ENTITY_ID = v_PSE_ID
+    			   AND STATEMENT_TYPE = v_LAST_STATEMENT_TYPE
+    			   AND STATEMENT_STATE = GA.EXTERNAL_STATE
+    			   AND STATEMENT_DATE = v_LAST_DATE
+    			   AND AS_OF_DATE = LOW_DATE
+    			   AND PRODUCT_ID = v_PRODUCT_ID
+    			   AND (COMPONENT_ID = v_DAM_ENGY_RESID_COMP_ID OR
+    				    COMPONENT_ID = v_DAM_LOSS_RESID_COMP_ID OR
+    				    COMPONENT_ID = v_BAL_ENGY_RESID_COMP_ID OR
+    				    COMPONENT_ID = v_BAL_LOSS_RESID_COMP_ID OR
+    				    COMPONENT_ID = v_BAL_CONG_RESID_COMP_ID);
+
+
+                v_BILLING_STATEMENT.STATEMENT_TYPE := v_LAST_STATEMENT_TYPE;
+                v_BILLING_STATEMENT.STATEMENT_DATE := v_LAST_DATE;
+                v_BILLING_STATEMENT.STATEMENT_END_DATE := v_LAST_DATE;
+
+    			PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0, v_DAM_ENGY_RESID_COMP_ID, 0, 1, 0);
+    			PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0, v_DAM_LOSS_RESID_COMP_ID, 0, 1, 0);
+    			PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0, v_BAL_ENGY_RESID_COMP_ID, 0, 1, 0);
+    			PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0, v_BAL_LOSS_RESID_COMP_ID, 0, 1, 0);
+    			PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0, v_BAL_CONG_RESID_COMP_ID, 0, 1, 0);
+
+                v_DAM_ENGY_RESID_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_DAM_ENGY_RESID_COMP_ID,v_LAST_STATEMENT_TYPE, v_LAST_DATE, 'Formula');
+    			v_DAM_LOSS_RESID_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_DAM_LOSS_RESID_COMP_ID,v_LAST_STATEMENT_TYPE, v_LAST_DATE, 'Formula');
+    			v_BAL_ENGY_RESID_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_BAL_ENGY_RESID_COMP_ID,v_LAST_STATEMENT_TYPE, v_LAST_DATE, 'Formula');
+    			v_BAL_LOSS_RESID_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_BAL_LOSS_RESID_COMP_ID,v_LAST_STATEMENT_TYPE, v_LAST_DATE, 'Formula');
+    			v_BAL_CONG_RESID_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_BAL_CONG_RESID_COMP_ID,v_LAST_STATEMENT_TYPE, v_LAST_DATE, 'Formula');
+    			v_OATT_SCHED1_CHARGE_ID    := GET_CHARGE_ID(v_PSE_ID,v_OATT1_COMPONENT_ID,v_LAST_STATEMENT_TYPE, v_LAST_DATE, 'Formula');
+            END IF;
+
+    		-- put market prices
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_DAM_EN_CR,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_DAM_ENGY_CR_TO_PS,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_DAM_EN_CH,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_DAM_ENGY_CH_TO_LSE,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_DAM_LMBP_EN,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_DAM_LMBP_ENGY_CH_TC,0,p_STATUS,v_MESSAGE);
+
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_DAM_LS_CR,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_DAM_LOSS_CR_TO_PS,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_DAM_LS_CH,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_DAM_LOSS_CH_TO_LSE,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_DAM_LMBP_LS,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_DAM_LMBP_LOSS_CH_TC,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_DAM_TUC_LS,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_DAM_TUC_LOSS_CH_TC,0,p_STATUS,v_MESSAGE);
+
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_BAL_EN_CR,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_BAL_ENGY_CR_TO_PS,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_BAL_EN_CH,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_BAL_ENGY_CH_TO_LSE,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_BAL_LMBP_EN,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_BAL_LMBP_ENGY_CH_TC,0,p_STATUS,v_MESSAGE);
+
+    	    MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_BAL_LS_CR,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_BAL_LOSS_CR_PS,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_BAL_LS_CH,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_BAL_LOSS_CH_LSE,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_BAL_LMBP_LS,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_BAL_LMBP_LOSS_CH_TC,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_BAL_TUC_LS,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_BAL_TUC_LOSS_CH_TC,0,p_STATUS,v_MESSAGE);
+
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_BAL_CONG_CR,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_BAL_CONG_CR_TO_PC,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_BAL_CONG_CH,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_BAL_CONG_CH_TO_LSE,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_BAL_LMBP_CONG,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_BAL_LMBP_CONG_CH_TC,0,p_STATUS,v_MESSAGE);
+    		MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_BAL_TUC_CONG,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_BAL_TUC_CONG_CH_TC,0,p_STATUS,v_MESSAGE);
+
+    		--Create transactions for NY:RT LSE Load, NY:Total RT Exports, NY:Total RT WT
+    		UPDATE_SCHEDULE('NY:Total RT Load', 'Hr Total NYISO RT LSE Load', v_REC_DATA.CHARGE_DATE, v_REC_DATA.NY_RT_LSE_LOAD, v_REC_DATA.INVOICE_VERSION, p_STATUS);
+    		UPDATE_SCHEDULE('NY:Total RT Exports', 'Hr Total NYISO RT Exports Trans', v_REC_DATA.CHARGE_DATE, v_REC_DATA.NY_RT_EXPORT_TRANS, v_REC_DATA.INVOICE_VERSION, p_STATUS);
+    		UPDATE_SCHEDULE('NY:Total RT WT', 'Hr Total NYISO RT WT Trans', v_REC_DATA.CHARGE_DATE, v_REC_DATA.NY_RT_WT_TRANS, v_REC_DATA.INVOICE_VERSION, p_STATUS);
+
+    		--Calculate Load Ratio Share
+    		v_RT_LSE_LOAD := GET_FORMULA_CHARGE_VAR_VAL (v_OATT_SCHED1_CHARGE_ID,v_REC_DATA.CHARGE_DATE, 'RTLSELoad');
+    		IF (v_REC_DATA.NY_RT_LSE_LOAD + v_REC_DATA.NY_RT_EXPORT_TRANS + v_REC_DATA.NY_RT_WT_TRANS) > 0 THEN
+    			v_CHARGE_RATE := v_RT_LSE_LOAD / (v_REC_DATA.NY_RT_LSE_LOAD + v_REC_DATA.NY_RT_EXPORT_TRANS + v_REC_DATA.NY_RT_WT_TRANS);
+    		ELSE
+    			v_CHARGE_RATE := 0;
+    		END IF;
+
+    		--put data
+    		--DAM Energy Residual--
+			      --Put formula charges variables
+			PUT_FORMULA_CHARGE_VAR(v_DAM_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTLSELoad', v_REC_DATA.NY_RT_LSE_LOAD);
+			PUT_FORMULA_CHARGE_VAR(v_DAM_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTExports', v_REC_DATA.NY_RT_EXPORT_TRANS);
+			PUT_FORMULA_CHARGE_VAR(v_DAM_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTWheelThru', v_REC_DATA.NY_RT_WT_TRANS);
+			PUT_FORMULA_CHARGE_VAR(v_DAM_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'RTLSELoad', v_RT_LSE_LOAD);
+
+			PUT_FORMULA_CHARGE_VAR(v_DAM_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYDAMEngyCrToPS', v_REC_DATA.NY_DAM_ENGY_CR_TO_PS);
+			PUT_FORMULA_CHARGE_VAR(v_DAM_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYDAMEngyChToLSE', v_REC_DATA.NY_DAM_ENGY_CH_TO_LSE);
+			PUT_FORMULA_CHARGE_VAR(v_DAM_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYDAMLBMPEngyChToTC', v_REC_DATA.NY_DAM_LMBP_ENGY_CH_TC);
+
+			--v_CHARGE_QTY := v_REC_DATA.NY_DAM_ENGY_CR_TO_PS + v_REC_DATA.NY_DAM_ENGY_CH_TO_LSE + v_REC_DATA.NY_DAM_LMBP_ENGY_CH_TC;
+			IF 	v_CHARGE_RATE = 0 THEN
+				v_CHARGE_QTY := 0;
+			ELSE
+				v_CHARGE_QTY := v_REC_DATA.DAM_ENGY_RESID_STLM / v_CHARGE_RATE;
+			END IF;
+    		PUT_FORMULA_CHARGE(v_DAM_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, v_CHARGE_QTY, v_CHARGE_RATE);
+
+			/*v_DAM_ENGY_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) := v_DAM_ENGY_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) + v_CHARGE_QTY;
+			v_DAM_ENGY_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE) := v_DAM_ENGY_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE)
+			                                                     + (v_CHARGE_QTY * v_CHARGE_RATE);*/
+
+
+    		--DAM Loss Residual--
+				--Put formula charges variables
+			PUT_FORMULA_CHARGE_VAR(v_DAM_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTLSELoad', v_REC_DATA.NY_RT_LSE_LOAD);
+			PUT_FORMULA_CHARGE_VAR(v_DAM_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTExports', v_REC_DATA.NY_RT_EXPORT_TRANS);
+			PUT_FORMULA_CHARGE_VAR(v_DAM_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTWheelThru', v_REC_DATA.NY_RT_WT_TRANS);
+			PUT_FORMULA_CHARGE_VAR(v_DAM_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'RTLSELoad', v_RT_LSE_LOAD);
+
+			PUT_FORMULA_CHARGE_VAR(v_DAM_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYDAMLossCrToPS', v_REC_DATA.NY_DAM_LOSS_CR_TO_PS);
+			PUT_FORMULA_CHARGE_VAR(v_DAM_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYDAMLossChToLSE', v_REC_DATA.NY_DAM_LOSS_CH_TO_LSE);
+			PUT_FORMULA_CHARGE_VAR(v_DAM_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYDAMLBMPLossChToTC', v_REC_DATA.NY_DAM_LMBP_LOSS_CH_TC);
+			PUT_FORMULA_CHARGE_VAR(v_DAM_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYDAMTUCLossChToTC', v_REC_DATA.NY_DAM_TUC_LOSS_CH_TC);
+
+    		--v_CHARGE_QTY := v_REC_DATA.NY_DAM_LOSS_CR_TO_PS + v_REC_DATA.NY_DAM_LOSS_CH_TO_LSE + v_REC_DATA.NY_DAM_LMBP_LOSS_CH_TC + v_REC_DATA.NY_DAM_TUC_LOSS_CH_TC;
+       		IF 	v_CHARGE_RATE = 0 THEN
+				v_CHARGE_QTY := 0;
+			ELSE
+				v_CHARGE_QTY := v_REC_DATA.DAM_LOSS_RESID_STLM / v_CHARGE_RATE;
+			END IF;
+			PUT_FORMULA_CHARGE(v_DAM_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, v_CHARGE_QTY, v_CHARGE_RATE);
+
+    		/*v_DAM_LOSS_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) := v_DAM_LOSS_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) + v_CHARGE_QTY;
+			v_DAM_LOSS_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE) := v_DAM_LOSS_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE)
+			                                                     + (v_CHARGE_QTY * v_CHARGE_RATE);*/
+
+    		--Balancing Market Energy Residual--
+			PUT_FORMULA_CHARGE_VAR(v_BAL_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTLSELoad', v_REC_DATA.NY_RT_LSE_LOAD);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTExports', v_REC_DATA.NY_RT_EXPORT_TRANS);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTWheelThru', v_REC_DATA.NY_RT_WT_TRANS);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'RTLSELoad', v_RT_LSE_LOAD);
+
+			PUT_FORMULA_CHARGE_VAR(v_BAL_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYBalEngyCrToPS', v_REC_DATA.NY_BAL_ENGY_CR_TO_PS);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYBalEngyChToLSE', v_REC_DATA.NY_BAL_ENGY_CH_TO_LSE);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYBalLBMPEngyChToTC', v_REC_DATA.NY_BAL_LMBP_ENGY_CH_TC);
+
+    		--v_CHARGE_QTY := v_REC_DATA.NY_BAL_ENGY_CR_TO_PS + v_REC_DATA.NY_BAL_ENGY_CH_TO_LSE + v_REC_DATA.NY_BAL_LMBP_ENGY_CH_TC;
+    		IF 	v_CHARGE_RATE = 0 THEN
+				v_CHARGE_QTY := 0;
+			ELSE
+				v_CHARGE_QTY := v_REC_DATA.BAL_ENGY_RESID_STLM / v_CHARGE_RATE;
+			END IF;
+			PUT_FORMULA_CHARGE(v_BAL_ENGY_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, v_CHARGE_QTY, v_CHARGE_RATE);
+
+    		/*v_BAL_ENGY_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) := v_BAL_ENGY_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) + v_CHARGE_QTY;
+			v_BAL_ENGY_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE) := v_BAL_ENGY_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE)
+			                                                     + (v_CHARGE_QTY * v_CHARGE_RATE);*/
+
+    		--Balancing Market Loss Residual--
+			PUT_FORMULA_CHARGE_VAR(v_BAL_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTLSELoad', v_REC_DATA.NY_RT_LSE_LOAD);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTExports', v_REC_DATA.NY_RT_EXPORT_TRANS);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTWheelThru', v_REC_DATA.NY_RT_WT_TRANS);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'RTLSELoad', v_RT_LSE_LOAD);
+
+			PUT_FORMULA_CHARGE_VAR(v_BAL_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYBalLossCrToPS', v_REC_DATA.NY_BAL_LOSS_CR_PS);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYBalLossChToLSE', v_REC_DATA.NY_BAL_LOSS_CH_LSE);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYBalLBMPLossChToTC', v_REC_DATA.NY_BAL_LMBP_LOSS_CH_TC);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYBalTUCLossChToTC', v_REC_DATA.NY_BAL_TUC_LOSS_CH_TC);
+
+    		--v_CHARGE_QTY  := v_REC_DATA.NY_BAL_LOSS_CR_PS + v_REC_DATA.NY_BAL_LOSS_CH_LSE + v_REC_DATA.NY_DAM_LMBP_LOSS_CH_TC + v_REC_DATA.NY_BAL_TUC_LOSS_CH_TC;
+    		IF 	v_CHARGE_RATE = 0 THEN
+				v_CHARGE_QTY := 0;
+			ELSE
+				v_CHARGE_QTY := v_REC_DATA.BAL_LOSS_RESID_STLM / v_CHARGE_RATE;
+			END IF;
+			--PUT_FORMULA_CHARGE_VAR(v_BAL_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'DAMLossResidual', v_CHARGE_QTY);
+			PUT_FORMULA_CHARGE(v_BAL_LOSS_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, v_CHARGE_QTY , v_CHARGE_RATE);
+
+    		/*v_BAL_LOSS_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) := v_BAL_LOSS_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) + v_CHARGE_QTY;
+			v_BAL_LOSS_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE) := v_BAL_LOSS_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE)
+			                                                     + (v_CHARGE_QTY * v_CHARGE_RATE);*/
+
+    		--Balancing Market Congestion Residual--
+			PUT_FORMULA_CHARGE_VAR(v_BAL_CONG_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTLSELoad', v_REC_DATA.NY_RT_LSE_LOAD);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_CONG_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTExports', v_REC_DATA.NY_RT_EXPORT_TRANS);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_CONG_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYRTWheelThru', v_REC_DATA.NY_RT_WT_TRANS);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_CONG_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'RTLSELoad', v_RT_LSE_LOAD);
+
+    		PUT_FORMULA_CHARGE_VAR(v_BAL_CONG_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYBalCongCrToPS', v_REC_DATA.NY_BAL_CONG_CR_TO_PC);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_CONG_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYBalCongChToLSE', v_REC_DATA.NY_BAL_CONG_CH_TO_LSE);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_CONG_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYBalLBMPCongChToTC', v_REC_DATA.NY_BAL_LMBP_CONG_CH_TC);
+			PUT_FORMULA_CHARGE_VAR(v_BAL_CONG_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'TotalNYBalTUCCongChToTC', v_REC_DATA.NY_BAL_TUC_CONG_CH_TC);
+
+			--v_CHARGE_QTY := v_REC_DATA.NY_BAL_CONG_CR_TO_PC + v_REC_DATA.NY_BAL_CONG_CH_TO_LSE + v_REC_DATA.NY_BAL_LMBP_CONG_CH_TC + v_REC_DATA.NY_BAL_TUC_CONG_CH_TC;
+      		IF 	v_CHARGE_RATE = 0 THEN
+				v_CHARGE_QTY := 0;
+			ELSE
+				v_CHARGE_QTY := v_REC_DATA.BAL_CONG_RESID_STLM / v_CHARGE_RATE;
+			END IF;
+			PUT_FORMULA_CHARGE(v_BAL_CONG_RESID_CHARGE_ID, v_REC_DATA.CHARGE_DATE, v_CHARGE_QTY, v_CHARGE_RATE);
+
+    		/*v_BAL_CONG_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) := v_BAL_CONG_TTL_CHG_QTY_MAP(v_LAST_STATEMENT_TYPE) + v_CHARGE_QTY;
+			v_BAL_CONG_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE) := v_BAL_CONG_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE)
+			                                                     + (v_CHARGE_QTY * v_CHARGE_RATE);*/
+
+		END IF;
+	END LOOP;
+
+	--Update billing statement with totals for the day
+	GET_TOTAL_SETTLEMENT(v_LAST_DATE, v_LAST_INV_VERSION, v_DAM_ENGY_RESID_STLM, v_DAM_LOSS_RESID_STLM, v_BAL_ENGY_RESID_STLM,v_BAL_LOSS_RESID_STLM, v_BAL_CONG_RESID_STLM);
+    PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_DAM_ENGY_RESID_CHARGE_ID, v_DAM_ENGY_RESID_COMP_ID, v_DAM_ENGY_RESID_STLM, 1, v_DAM_ENGY_RESID_STLM);
+    PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_DAM_LOSS_RESID_CHARGE_ID, v_DAM_LOSS_RESID_COMP_ID, v_DAM_LOSS_RESID_STLM, 1, v_DAM_LOSS_RESID_STLM);
+    PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_BAL_ENGY_RESID_CHARGE_ID, v_BAL_ENGY_RESID_COMP_ID, v_BAL_ENGY_RESID_STLM, 1, v_BAL_ENGY_RESID_STLM);
+    PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_BAL_LOSS_RESID_CHARGE_ID, v_BAL_LOSS_RESID_COMP_ID, v_BAL_LOSS_RESID_STLM, 1, v_BAL_LOSS_RESID_STLM);
+    PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_BAL_CONG_RESID_CHARGE_ID, v_BAL_CONG_RESID_COMP_ID, v_BAL_CONG_RESID_STLM, 1, v_BAL_CONG_RESID_STLM);
+
+	/*PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_DAM_ENGY_RESID_CHARGE_ID, v_DAM_ENGY_RESID_COMP_ID, v_DAM_ENGY_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE), 1, -v_DAM_ENGY_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE));
+    PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_DAM_LOSS_RESID_CHARGE_ID, v_DAM_LOSS_RESID_COMP_ID, v_DAM_LOSS_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE), 1, v_DAM_LOSS_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE));
+    PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_BAL_ENGY_RESID_CHARGE_ID, v_BAL_ENGY_RESID_COMP_ID, v_BAL_ENGY_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE), 1, v_BAL_ENGY_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE));
+    PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_BAL_LOSS_RESID_CHARGE_ID, v_BAL_LOSS_RESID_COMP_ID, v_BAL_LOSS_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE), 1, v_BAL_LOSS_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE));
+    PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_BAL_CONG_RESID_CHARGE_ID, v_BAL_CONG_RESID_COMP_ID, v_BAL_CONG_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE), 1, v_BAL_CONG_TTL_CHG_AMT_MAP(v_LAST_STATEMENT_TYPE));
+    */
+
+
+	COMMIT;
+
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_NYISO_RESID: ' ||
+					 SQLERRM);
+
+END IMPORT_NYISO_RESID;
+--------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NYISO_RESID(p_CSV        IN CLOB,
+							 p_ISO_SOURCE IN VARCHAR2,
+							 p_LOG_TYPE    IN NUMBER,
+    						 p_TRACE_ON    IN NUMBER,
+							 p_STATUS     OUT NUMBER,
+							 p_MESSAGE    OUT VARCHAR2) AS
+
+	v_RECORDS MEX_NY_RESIDUAL_TBL;
+	v_LOGGER  MM_LOGGER_ADAPTER;
+BEGIN
+	--For testing
+    p_STATUS := GA.SUCCESS;
+	v_LOGGER := MM_UTIL.GET_LOGGER(EC.ES_NYISO_DSS,
+                                   NULL,
+                                   'Import NYISO-DSS Residuals file',
+                                   'Import NYISO-DSS Residuals file',
+                                   p_LOG_TYPE,
+                                   p_TRACE_ON);
+	MM_UTIL.START_EXCHANGE(TRUE, v_LOGGER);
+	MEX_NYISO_SETTLEMENT.PARSE_NYISO_RESIDUALS(p_CSV,
+											   v_RECORDS,
+											   p_STATUS,
+											   v_LOGGER);
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_NYISO_RESID(v_RECORDS, p_ISO_SOURCE, p_STATUS, v_LOGGER);
+	END IF;
+
+END IMPORT_NYISO_RESID;
+--------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NYISO_RESID(p_CRED IN MEX_CREDENTIALS,
+                             p_DATE        IN DATE,
+							 p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+							 p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+							 p_STATUS      OUT NUMBER,
+							 p_LOGGER      IN OUT NOCOPY MM_LOGGER_ADAPTER) IS
+
+	v_RECORDS         MEX_NY_RESIDUAL_TBL;
+
+BEGIN
+
+	MEX_NYISO_SETTLEMENT.FETCH_NYISO_RESIDUALS(p_DATE,
+											   p_DOC_LIST,
+											   p_CRED,
+											   p_REPORT_TYPE,
+											   v_RECORDS,
+											   p_STATUS,
+											   p_LOGGER);
+
+    IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+    ELSE
+        IMPORT_NYISO_RESID(v_RECORDS,
+                           p_CRED.EXTERNAL_ACCOUNT_NAME,
+                            p_STATUS,
+                            p_LOGGER);
+	END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_NYISO_RESID: ' ||
+					 SQLERRM);
+
+END IMPORT_NYISO_RESID;
+--------------------------------------------------------------------------------------------------
+/*PROCEDURE IMPORT_NYISO_RESID(p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+							 p_STATUS      OUT NUMBER,
+							 p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS       EXTERNAL_CREDENTIAL_TBL;
+	v_RECORDS         MEX_NY_RESIDUAL_TBL;
+    v_EXCHANGE_ID    NUMBER(9);
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+	MEX_NYISO_SETTLEMENT.GET_NYISO_RESIDUALS(p_REPORT_TYPE,
+											  v_RECORDS,
+											   p_STATUS,
+											   p_MESSAGE);
+
+    IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+    ELSE
+        IMPORT_NYISO_RESID(v_RECORDS,
+                            v_EXT_CREDS(v_EXT_CREDS.FIRST).ISO_ACCOUNT_NAME,
+                            p_STATUS,
+                            p_MESSAGE);
+        --LOG THE RESPONSE
+        MEX_UTIL.PUT_EXCHANGE_LOG('NYISO',
+							      'IN',
+							      'Sttl:Imp ' || SUBSTR(MEX_NYISO_SETTLEMENT.g_DSS_NYISO_RESID_REP_NAME || '_' || p_REPORT_TYPE,1,23),
+							      'Normal',
+							      p_MESSAGE,
+							      NULL,
+							      NULL,
+							      v_EXCHANGE_ID);
+	END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.IMPORT_NYISO_RESID: ' ||
+					 SQLERRM;
+
+END IMPORT_NYISO_RESID;*/
+--------------------------------------------------------------------------------------------------
+/*PROCEDURE FETCH_NYISO_RESID(p_DATE        IN DATE,
+							 p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+							 p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+							 p_STATUS      OUT NUMBER,
+							 p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS       EXTERNAL_CREDENTIAL_TBL;
+
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+	MEX_NYISO_SETTLEMENT.FETCH_NYISO_RESIDUALS(p_DATE,
+											   p_DOC_LIST,
+											   v_EXT_CREDS(v_EXT_CREDS.FIRST),
+											   p_REPORT_TYPE,
+											   p_STATUS,
+											   p_MESSAGE);
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.FETCH_NYISO_RESID: ' ||
+					 SQLERRM;
+
+END FETCH_NYISO_RESID;*/
+-------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NYISO_TOTALS(p_RECORDS IN MEX_NY_TOTAL_TBL,
+							  p_ISO_SOURCE IN VARCHAR2,
+							  p_STATUS  OUT NUMBER,
+							  p_LOGGER  IN OUT NOCOPY mm_logger_adapter) IS
+
+v_SC_ID 			NUMBER(9) := MM_NYISO_UTIL.g_NYISO_SC_ID;
+v_PSE_ID 			NUMBER(9);
+v_PRODUCT_ID 		NUMBER(9);
+
+v_IDX 				BINARY_INTEGER;
+
+v_LAST_STATEMENT_TYPE BINARY_INTEGER;
+v_LAST_DATE 		DATE;
+v_LAST_INV_VERSION  NUMBER(1);
+v_CHARGE_RATE       NUMBER;
+v_CHARGE_QTY        NUMBER;
+v_REG_STLM  		NUMBER := 0;
+v_OP_RES_STLM   	NUMBER := 0;
+v_BLACK_START_STLM 	NUMBER := 0;
+v_BILLING_STATEMENT BILLING_STATEMENT%ROWTYPE;
+v_REC_DATA 			MEX_NY_TOTAL;
+
+v_RT_LSE_LOAD 		NUMBER;
+v_RT_EXPORT_TRANS 	NUMBER;
+
+--COMPONENT IDs
+v_OATT3_COMPONENT_ID NUMBER(9);
+v_OATT5_COMPONENT_ID NUMBER(9);
+v_OATT6_COMPONENT_ID NUMBER(9);
+v_OATT1_COMPONENT_ID NUMBER(9);
+
+--CHARGE IDs
+v_OATT_SCHED3_CHARGE_ID NUMBER(9);
+v_OATT_SCHED5_CHARGE_ID NUMBER(9);
+v_OATT_SCHED6_CHARGE_ID NUMBER(9);
+v_OATT_SCHED1_CHARGE_ID NUMBER(9);
+
+--MARKET PRICE IDs
+v_MKT_PR_ID_REG_CH     NUMBER(9);
+v_MKT_PR_ID_REG_CR     NUMBER(9);
+v_MKT_PR_ID_OP_RES_CR  NUMBER(9);
+v_MKT_PR_ID_OP_RES_CH  NUMBER(9);
+v_MKT_PR_ID_BLACK_ST   NUMBER(9);
+v_MESSAGE VARCHAR2(256);
+	PROCEDURE GET_TOTAL_SETTLEMENT(p_CHARGE_DATE      IN DATE,
+								   p_INV_VERS       IN NUMBER,
+								   p_REG_STLM         OUT NUMBER,
+								   p_OP_RES_STLM      OUT NUMBER,
+								   p_BLACK_START_STLM OUT NUMBER) AS
+		CURSOR c_STLMN IS
+			SELECT SUM(A.REGULATION_STLM) "REGULATION_STLM",
+				   SUM(A.OP_RES_STLM) "OP_RES_STLM",
+				   SUM(A.BLACK_START_STLM) "BLACK_START_STLM"
+			  FROM TABLE(CAST(p_RECORDS AS MEX_NY_TOTAL_TBL)) A
+			 WHERE TRUNC(A.CHARGE_DATE) = p_CHARGE_DATE
+			   AND A.INVOICE_VERSION = p_INV_VERS;
+
+	BEGIN
+
+		FOR v_STLMN IN c_STLMN LOOP
+			p_REG_STLM         := v_STLMN.REGULATION_STLM;
+			p_OP_RES_STLM      := v_STLMN.OP_RES_STLM;
+			p_BLACK_START_STLM := v_STLMN.BLACK_START_STLM;
+		END LOOP;
+
+	END GET_TOTAL_SETTLEMENT;
+
+BEGIN
+
+	p_STATUS := GA.SUCCESS;
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+
+	--First get the market price ids
+	v_MKT_PR_ID_REG_CR := GET_ID_FOR_MARKET_PRICE('NY:Total Reg Cr to PS', 'Market Result', 'NY_TotalCollected', 0, v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_REG_CH := GET_ID_FOR_MARKET_PRICE('NY:Total Reg Chg to PS', 'Market Result', 'NY_TotalCollected', 0, v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_OP_RES_CR := GET_ID_FOR_MARKET_PRICE('NY:Total Op Res Cr to PS', 'Market Result', 'NY_TotalCollected', 0, v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_OP_RES_CH := GET_ID_FOR_MARKET_PRICE('NY:Total Op Res ShtChg to PS', 'Market Result', 'NY_TotalCollected', 0, v_SC_ID,TRUE,v_MESSAGE);
+	v_MKT_PR_ID_BLACK_ST := GET_ID_FOR_MARKET_PRICE('NY:Total Black Start Cost', 'Market Result', 'NY_TotalCollected', 0, v_SC_ID,TRUE,v_MESSAGE);
+
+	v_PSE_ID := GET_PSE_ID(p_ISO_SOURCE);
+	v_PRODUCT_ID := GET_PRODUCT(g_ANC_SERV_PRODUCT);
+	v_IDX := p_RECORDS.FIRST;
+
+	--get component IDs
+	v_OATT3_COMPONENT_ID := GET_COMPONENT('NYISO:OATTSched3');
+	v_OATT5_COMPONENT_ID := GET_COMPONENT('NYISO:OATTSched5');
+	v_OATT6_COMPONENT_ID := GET_COMPONENT('NYISO:OATTSched6');
+
+	v_OATT1_COMPONENT_ID := GET_COMPONENT('NYISO:OATTSched1');--this is in order to get RTLSELoad
+
+	--fill in with daily total at the end when we have the hourly amounts summed
+	v_BILLING_STATEMENT.ENTITY_ID := v_PSE_ID;
+	v_BILLING_STATEMENT.ENTITY_TYPE := 'PSE';
+	v_BILLING_STATEMENT.STATEMENT_STATE := GA.EXTERNAL_STATE;
+	v_BILLING_STATEMENT.PRODUCT_ID := v_PRODUCT_ID;
+	v_BILLING_STATEMENT.STATEMENT_DATE := TRUNC(p_RECORDS(v_IDX).CHARGE_DATE);
+	v_BILLING_STATEMENT.STATEMENT_END_DATE := TRUNC(p_RECORDS(v_IDX).CHARGE_DATE);
+	v_BILLING_STATEMENT.AS_OF_DATE := LOW_DATE;
+    v_BILLING_STATEMENT.CHARGE_VIEW_TYPE := g_CHARGE_VIEW_TYPE;
+
+	FOR v_IDX IN p_RECORDS.FIRST .. p_RECORDS.LAST LOOP
+		v_REC_DATA := p_RECORDS(v_IDX);
+
+		--skip any records that have an invoice number greater than 3
+		--those are final bill closeouts which will go away after December 2006
+		IF v_REC_DATA.INVOICE_VERSION < 4 THEN
+            IF v_LAST_DATE IS NULL OR (v_LAST_DATE <> TRUNC(v_REC_DATA.CHARGE_DATE)) OR
+              (v_LAST_DATE = TRUNC(v_REC_DATA.CHARGE_DATE) AND v_LAST_INV_VERSION <> v_REC_DATA.INVOICE_VERSION) THEN
+
+               --update totals for the charge_id just completed
+                IF v_LAST_STATEMENT_TYPE IS NOT NULL THEN
+    			   GET_TOTAL_SETTLEMENT(v_LAST_DATE, v_LAST_INV_VERSION, v_REG_STLM, v_OP_RES_STLM, v_BLACK_START_STLM);
+    			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_OATT_SCHED3_CHARGE_ID, v_OATT3_COMPONENT_ID, v_REG_STLM, 1, v_REG_STLM);
+    			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_OATT_SCHED5_CHARGE_ID, v_OATT5_COMPONENT_ID, v_OP_RES_STLM, 1, v_OP_RES_STLM);
+    			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_OATT_SCHED6_CHARGE_ID, v_OATT6_COMPONENT_ID, v_BLACK_START_STLM, 1, v_BLACK_START_STLM);
+               END IF;
+
+                v_LAST_DATE := TRUNC(v_REC_DATA.CHARGE_DATE);
+    			v_LAST_INV_VERSION := v_REC_DATA.INVOICE_VERSION;
+
+    			v_LAST_STATEMENT_TYPE := GET_STATEMENT_TYPE(v_REC_DATA.INVOICE_VERSION);
+
+                -- clear out billing statement
+            	 DELETE BILLING_STATEMENT
+            	  WHERE ENTITY_ID = v_PSE_ID
+            		AND STATEMENT_TYPE = v_LAST_STATEMENT_TYPE
+            		AND STATEMENT_STATE = GA.EXTERNAL_STATE
+            		AND STATEMENT_DATE = v_LAST_DATE
+            		AND AS_OF_DATE = LOW_DATE
+            		AND PRODUCT_ID = v_PRODUCT_ID
+            		AND (COMPONENT_ID = v_OATT3_COMPONENT_ID OR
+            			 COMPONENT_ID = v_OATT5_COMPONENT_ID OR
+    					 COMPONENT_ID = v_OATT6_COMPONENT_ID);
+
+                v_BILLING_STATEMENT.STATEMENT_TYPE := v_LAST_STATEMENT_TYPE;
+                v_BILLING_STATEMENT.STATEMENT_DATE := v_LAST_DATE;
+                v_BILLING_STATEMENT.STATEMENT_END_DATE := v_LAST_DATE;
+
+    			PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0, v_OATT3_COMPONENT_ID, 0, 1, 0);
+    			PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0, v_OATT5_COMPONENT_ID, 0, 1, 0);
+    			PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0, v_OATT6_COMPONENT_ID, 0, 1, 0);
+
+                v_OATT_SCHED3_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_OATT3_COMPONENT_ID,v_LAST_STATEMENT_TYPE, v_LAST_DATE, 'Formula');
+    			v_OATT_SCHED5_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_OATT5_COMPONENT_ID,v_LAST_STATEMENT_TYPE, v_LAST_DATE, 'Formula');
+    			v_OATT_SCHED6_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_OATT6_COMPONENT_ID,v_LAST_STATEMENT_TYPE, v_LAST_DATE, 'Formula');
+    			v_OATT_SCHED1_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_OATT1_COMPONENT_ID,v_LAST_STATEMENT_TYPE, v_LAST_DATE, 'Formula');
+
+            END IF;
+
+
+       		-- put market prices
+        	MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_REG_CH,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_REG_CHG_TO_PS,0,p_STATUS,v_MESSAGE);
+        	MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_REG_CR,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_REG_CR_TO_PS,0,p_STATUS,v_MESSAGE);
+        	MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_OP_RES_CR,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_OP_RES_CR_TO_PS,0,p_STATUS,v_MESSAGE);
+           	MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_OP_RES_CH,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_OP_RES_SHTCHG_TO_PS,0,p_STATUS,v_MESSAGE);
+        	MM_UTIL.PUT_MARKET_PRICE_VALUE(v_MKT_PR_ID_BLACK_ST,v_REC_DATA.CHARGE_DATE,'A',v_REC_DATA.NY_BLACK_START_COST,0,p_STATUS,v_MESSAGE);
+
+        	--Create transactions for NY:RT LSE Load, NY:Total RT Exports, NY:Total RT WT
+    		UPDATE_SCHEDULE('NY:Total RT Load', 'Hr Total NYISO RT LSE Load', v_REC_DATA.CHARGE_DATE, v_REC_DATA.NY_RT_LSE_LOAD, v_REC_DATA.INVOICE_VERSION, p_STATUS);
+    		UPDATE_SCHEDULE('NY:Total RT Exports', 'Hr Total NYISO RT Exports Trans', v_REC_DATA.CHARGE_DATE, v_REC_DATA.NY_RT_EXPORT_TRANS, v_REC_DATA.INVOICE_VERSION, p_STATUS);
+
+    		--Calculate Load Ratio Share
+    		v_RT_LSE_LOAD := GET_FORMULA_CHARGE_VAR_VAL(v_OATT_SCHED1_CHARGE_ID, v_REC_DATA.CHARGE_DATE, 'RTLSELoad');
+
+    		--put data
+    		--OATT3--
+         		--Put formula charges variables
+    	    PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED3_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'TotalNYRTLSELoad', v_REC_DATA.NY_RT_LSE_LOAD);
+    		PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED3_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'RegCrToPS', v_REC_DATA.NY_REG_CR_TO_PS);
+      		PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED3_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'RegChgToPS', v_REC_DATA.NY_REG_CHG_TO_PS);
+			PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED3_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'RTLSELoad', v_RT_LSE_LOAD);
+
+    		IF v_REC_DATA.NY_RT_LSE_LOAD  = 0 THEN
+                v_CHARGE_RATE := 0;
+            ELSE
+                v_CHARGE_RATE := v_RT_LSE_LOAD / v_REC_DATA.NY_RT_LSE_LOAD;
+            END IF;
+            --PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED3_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'LoadRatioShare',v_CHARGE_RATE);
+            v_CHARGE_QTY := v_REC_DATA.NY_REG_CR_TO_PS - ABS(v_REC_DATA.NY_REG_CHG_TO_PS);
+            --PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED3_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'NetRegCredit',v_CHARGE_QTY);
+            PUT_FORMULA_CHARGE(v_OATT_SCHED3_CHARGE_ID, v_REC_DATA.CHARGE_DATE,v_CHARGE_QTY,v_CHARGE_RATE);
+
+
+    		--OATT5--
+         		--Put formula charges variables
+    		PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED5_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'TotalNYRTLSELoad', v_REC_DATA.NY_RT_LSE_LOAD);
+    		PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED5_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'TotalNYRTExports', v_REC_DATA.NY_RT_EXPORT_TRANS);
+    		PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED5_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'OpResCrToPS', v_REC_DATA.NY_OP_RES_CR_TO_PS);
+    		PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED5_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'OpResShtChgToPS', v_REC_DATA.NY_OP_RES_SHTCHG_TO_PS);
+			PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED5_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'RTLSELoad', v_RT_LSE_LOAD);
+
+           	IF (v_REC_DATA.NY_RT_LSE_LOAD + v_RT_EXPORT_TRANS) = 0 THEN
+                v_CHARGE_RATE := 0;
+            ELSE
+                v_CHARGE_RATE := v_RT_LSE_LOAD /
+                                    (v_REC_DATA.NY_RT_LSE_LOAD + v_REC_DATA.NY_RT_EXPORT_TRANS);
+            END IF;
+            --PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED5_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'LoadRatioShare', v_CHARGE_RATE);
+            v_CHARGE_QTY := v_REC_DATA.NY_OP_RES_CR_TO_PS - ABS(v_REC_DATA.NY_OP_RES_SHTCHG_TO_PS);
+            --PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED5_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'NetOperCredit', v_CHARGE_QTY);
+            PUT_FORMULA_CHARGE(v_OATT_SCHED5_CHARGE_ID, v_REC_DATA.CHARGE_DATE,v_CHARGE_QTY,v_CHARGE_RATE);
+
+        	--OATT6--
+         		--Put formula charges variables
+           PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED6_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'TotalNYRTLSELoad', v_REC_DATA.NY_RT_LSE_LOAD);
+           PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED6_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'BlackStartCost', v_REC_DATA.NY_BLACK_START_COST);
+		   PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED6_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'RTLSELoad', v_RT_LSE_LOAD);
+
+
+           IF v_REC_DATA.NY_RT_LSE_LOAD = 0 THEN
+               v_CHARGE_QTY := 0;
+           ELSE
+               v_CHARGE_QTY := v_RT_LSE_LOAD / v_REC_DATA.NY_RT_LSE_LOAD;
+           END IF;
+           --PUT_FORMULA_CHARGE_VAR(v_OATT_SCHED6_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'LoadRatioShare', v_CHARGE_QTY);
+           PUT_FORMULA_CHARGE(v_OATT_SCHED6_CHARGE_ID, v_REC_DATA.CHARGE_DATE,v_CHARGE_QTY,v_REC_DATA.NY_BLACK_START_COST);
+
+		END IF;
+    END LOOP;
+
+	--update billing statement with FINAL charge_id
+	GET_TOTAL_SETTLEMENT(v_LAST_DATE, v_LAST_INV_VERSION, v_REG_STLM, v_OP_RES_STLM, v_BLACK_START_STLM);
+	PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_OATT_SCHED3_CHARGE_ID, v_OATT3_COMPONENT_ID, v_REG_STLM, 1, v_REG_STLM);
+	PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_OATT_SCHED5_CHARGE_ID, v_OATT5_COMPONENT_ID, v_OP_RES_STLM, 1, v_OP_RES_STLM);
+	PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_OATT_SCHED6_CHARGE_ID, v_OATT6_COMPONENT_ID, v_BLACK_START_STLM, 1, v_BLACK_START_STLM);
+    COMMIT;
+
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_NYISO_TOTALS: ' ||
+					 SQLERRM);
+
+END IMPORT_NYISO_TOTALS;
+-------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NYISO_TOTALS(p_CSV        IN CLOB,
+							  p_ISO_SOURCE IN VARCHAR2,
+							  p_LOG_TYPE    IN NUMBER,
+    						  p_TRACE_ON    IN NUMBER,
+							  p_STATUS     OUT NUMBER,
+							  p_MESSAGE    OUT VARCHAR2) AS
+
+	v_RECORDS MEX_NY_TOTAL_TBL;
+	v_LOGGER  mm_logger_adapter;
+BEGIN
+
+--For testing
+    p_STATUS := GA.SUCCESS;
+	--For testing
+    p_STATUS := GA.SUCCESS;
+	v_LOGGER := MM_UTIL.GET_LOGGER(EC.ES_NYISO_DSS,
+                                   NULL,
+                                   'Import NYISO-DSS Totals file',
+                                   'Import NYISO-DSS Totals file',
+                                   p_LOG_TYPE,
+                                   p_TRACE_ON);
+
+	MM_UTIL.START_EXCHANGE(TRUE, v_LOGGER);
+	MEX_NYISO_SETTLEMENT.PARSE_NYISO_TOTALS(p_CSV,
+											v_RECORDS,
+											p_STATUS,
+											v_LOGGER);
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_NYISO_TOTALS(v_RECORDS, p_ISO_SOURCE, p_STATUS, v_LOGGER);
+	END IF;
+
+END IMPORT_NYISO_TOTALS;
+-----------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NYISO_TOTALS(p_CRED IN MEX_CREDENTIALS,
+							  p_DATE        IN DATE,
+							  p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+							  p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+							  p_STATUS      OUT NUMBER,
+							  p_LOGGER      IN OUT NOCOPY MM_LOGGER_ADAPTER) IS
+
+	v_RECORDS      MEX_NY_TOTAL_TBL;
+
+BEGIN
+
+	MEX_NYISO_SETTLEMENT.FETCH_NYISO_TOTALS(p_DATE,
+											p_DOC_LIST,
+											p_CRED,
+											p_REPORT_TYPE,
+											v_RECORDS,
+											p_STATUS,
+											p_LOGGER);
+
+    IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+    ELSE
+      	IMPORT_NYISO_TOTALS(v_RECORDS,
+							p_CRED.EXTERNAL_ACCOUNT_NAME,
+							p_STATUS,
+							p_LOGGER);
+	END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_DAILY_NYISO_TOTALS: ' ||
+					 SQLERRM);
+
+END IMPORT_NYISO_TOTALS;
+-----------------------------------------------------------------------------------------------
+/*PROCEDURE IMPORT_NYISO_TOTALS(p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+							  p_STATUS      OUT NUMBER,
+							  p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS    EXTERNAL_CREDENTIAL_TBL;
+	v_RECORDS      MEX_NY_TOTAL_TBL;
+    v_EXCHANGE_ID    NUMBER(9);
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+	MEX_NYISO_SETTLEMENT.GET_NYISO_TOTALS(p_REPORT_TYPE,
+											v_RECORDS,
+											p_STATUS,
+											p_MESSAGE);
+
+    IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+    ELSE
+      	IMPORT_NYISO_TOTALS(v_RECORDS,
+							v_EXT_CREDS(v_EXT_CREDS.FIRST).ISO_ACCOUNT_NAME,
+							p_STATUS,
+							p_MESSAGE);
+        --LOG THE RESPONSE
+        MEX_UTIL.PUT_EXCHANGE_LOG('NYISO',
+							      'IN',
+							      'Sttl:Imp ' || SUBSTR(MEX_NYISO_SETTLEMENT.g_DSS_NYISO_TOTAL_REP_NAME || '_' || p_REPORT_TYPE,1,23),
+							      'Normal',
+							      p_MESSAGE,
+							      NULL,
+							      NULL,
+							      v_EXCHANGE_ID);
+	END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.IMPORT_DAILY_NYISO_TOTALS: ' ||
+					 SQLERRM;
+
+END IMPORT_NYISO_TOTALS;*/
+-----------------------------------------------------------------------------------------------
+/*PROCEDURE FETCH_NYISO_TOTALS(p_DATE        IN DATE,
+							  p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+							  p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+							  p_STATUS      OUT NUMBER,
+							  p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS    EXTERNAL_CREDENTIAL_TBL;
+
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+	MEX_NYISO_SETTLEMENT.FETCH_NYISO_TOTALS(p_DATE,
+											p_DOC_LIST,
+											v_EXT_CREDS(v_EXT_CREDS.FIRST),
+											p_REPORT_TYPE,
+											p_STATUS,
+											p_MESSAGE);
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.FETCH_NYISO_TOTALS: ' ||
+					 SQLERRM;
+
+END FETCH_NYISO_TOTALS;*/
+------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_BAL_MARKET_ENERGY(p_RECORDS IN MEX_NY_BAL_MKT_EN_TBL,
+								   p_ISO_SOURCE IN VARCHAR2,
+								   p_STATUS  OUT NUMBER,
+								   p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+TYPE ITERATOR_ID_MAP  IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP     ITERATOR_ID_MAP;
+v_SC_ID 				NUMBER(9) := MM_NYISO_UTIL.g_NYISO_SC_ID;
+v_PSE_ID 				NUMBER(9);
+v_BILLING_STATEMENT 	BILLING_STATEMENT%ROWTYPE;
+v_COMMODITY_ID 			IT_COMMODITY.COMMODITY_ID%TYPE;
+v_MARKET_PRICE_ID_ENERGY NUMBER(9);
+v_MARKET_PRICE_ID_LOSS 	NUMBER(9);
+v_MARKET_PRICE_ID_CONG 	NUMBER(9);
+v_PRODUCT_ID 			NUMBER(9);
+v_COMPONENT_ID 			NUMBER(9);
+v_CHARGE_ID 			NUMBER(9);
+v_SERVICE_PT_ID 		NUMBER(9);
+v_ITERATOR_ID 			NUMBER(3);
+v_ITERATOR_NAME 		FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR 				FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_REC_DATA 				MEX_NY_BAL_MKT_EN;
+v_SERVICE_POINT_NAME	VARCHAR2(32);
+v_TOTAL_BAL_STLM 		NUMBER;
+v_LAST_INV_VERSION 		    NUMBER(1);
+v_LAST_STATEMENT_TYPE   BINARY_INTEGER;
+v_LAST_DATE 			DATE;
+v_LAST_SERV_PT_IDENT    VARCHAR2(32);
+v_CHARGE_DATE 			DATE;
+v_RT_EN_PRICE           NUMBER;
+v_RT_LOSS_PRICE         NUMBER;
+v_RT_CONG_PRICE         NUMBER;
+v_MESSAGE VARCHAR2(256);
+
+	CURSOR c_ORDERED_RECORDSET IS
+		SELECT INVOICE_VERSION, CHARGE_DATE, SERVICE_POINT_ID, BAL_MKT_ENRG_STLM, BAL_MKT_LOSS_STLM, BAL_MKT_CONG_STLM, TOTAL_BAL_MKT_STLM, BAL_MKT_LOAD, DAM_SCHED_LOAD, RT_ACTUAL_LOAD
+          FROM TABLE(CAST(p_RECORDS AS MEX_NY_BAL_MKT_EN_TBL))
+		  WHERE INVOICE_VERSION < 4
+		  ORDER BY INVOICE_VERSION,CHARGE_DATE,SERVICE_POINT_ID;
+
+	PROCEDURE GET_TOTAL_DAY_BAL_STLMN(p_CHARGE_DATE    IN DATE,
+	                                  p_INV_VERS       IN NUMBER,
+									  p_TOTAL_BAL_STLM OUT NUMBER) AS
+
+		CURSOR c_BAL_ENERG IS
+
+			SELECT SUM(A.TOTAL_BAL_MKT_STLM) "TOTAL_BAL_MKT_STLM"
+			  FROM TABLE(CAST(p_RECORDS AS MEX_NY_BAL_MKT_EN_TBL)) A
+			 WHERE TRUNC(A.CHARGE_DATE) = p_CHARGE_DATE
+			   AND A.INVOICE_VERSION = p_INV_VERS;
+
+	BEGIN
+
+		FOR v_BAL_ENERG IN c_BAL_ENERG LOOP
+			p_TOTAL_BAL_STLM := v_BAL_ENERG.TOTAL_BAL_MKT_STLM;
+		END LOOP;
+
+	END GET_TOTAL_DAY_BAL_STLMN;
+
+
+BEGIN
+
+	--UT.DEBUG_TRACE('Import Balancing Market Energy');
+	p_STATUS := GA.SUCCESS;
+    IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+	v_COMMODITY_ID := MM_NYISO_UTIL.GET_COMMODITY_ID(MM_NYISO_UTIL.g_REALTIME, FALSE);
+
+    v_PSE_ID := GET_PSE_ID(p_ISO_SOURCE);
+	v_PRODUCT_ID := GET_PRODUCT(g_DAM_ENERG_PRODUCT);
+    v_COMPONENT_ID := GET_COMPONENT('NYISO:BalMktEnrg');
+    v_ITERATOR.ITERATOR_ID := 0;
+
+	--billing statement initialization
+    v_BILLING_STATEMENT.ENTITY_ID := v_PSE_ID;
+	v_BILLING_STATEMENT.ENTITY_TYPE := 'PSE';
+    v_BILLING_STATEMENT.STATEMENT_STATE := GA.EXTERNAL_STATE;
+    v_BILLING_STATEMENT.AS_OF_DATE := LOW_DATE;
+    v_BILLING_STATEMENT.PRODUCT_ID := v_PRODUCT_ID;
+    v_BILLING_STATEMENT.COMPONENT_ID := v_COMPONENT_ID;
+    v_BILLING_STATEMENT.CHARGE_VIEW_TYPE := g_CHARGE_VIEW_TYPE;
+    v_BILLING_STATEMENT.CHARGE_QUANTITY := 0;
+	v_BILLING_STATEMENT.CHARGE_RATE := 1;
+	v_BILLING_STATEMENT.CHARGE_AMOUNT := 0;
+	v_BILLING_STATEMENT.BILL_QUANTITY := v_BILLING_STATEMENT.CHARGE_QUANTITY;
+	v_BILLING_STATEMENT.BILL_AMOUNT := v_BILLING_STATEMENT.CHARGE_AMOUNT;
+
+    FOR v_REC_DATA IN c_ORDERED_RECORDSET LOOP
+
+        IF v_LAST_DATE IS NULL OR (v_LAST_DATE <> TRUNC(v_REC_DATA.CHARGE_DATE)) OR
+          (v_LAST_DATE = TRUNC(v_REC_DATA.CHARGE_DATE) AND v_LAST_INV_VERSION <> v_REC_DATA.INVOICE_VERSION) THEN
+
+			--update totals for the charge_id just completed
+           	IF v_LAST_STATEMENT_TYPE IS NOT NULL THEN
+			   GET_TOTAL_DAY_BAL_STLMN(v_LAST_DATE, v_LAST_INV_VERSION, v_TOTAL_BAL_STLM);
+			   v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE,'Formula');
+			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_CHARGE_ID, v_COMPONENT_ID,v_TOTAL_BAL_STLM,1,v_TOTAL_BAL_STLM);
+           	END IF;
+
+		   	v_LAST_DATE := TRUNC(v_REC_DATA.CHARGE_DATE);
+           	v_LAST_INV_VERSION := v_REC_DATA.INVOICE_VERSION;
+            v_LAST_STATEMENT_TYPE := GET_STATEMENT_TYPE(v_REC_DATA.INVOICE_VERSION);
+
+            --clear out billing statement
+			DELETE_BILLING_STATEMENT(v_PSE_ID, v_PRODUCT_ID, v_COMPONENT_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE);
+
+			v_BILLING_STATEMENT.STATEMENT_TYPE := v_LAST_STATEMENT_TYPE;
+            v_BILLING_STATEMENT.STATEMENT_DATE := v_LAST_DATE;
+            v_BILLING_STATEMENT.STATEMENT_END_DATE := v_LAST_DATE;
+            PUT_BILLING_STATEMENT(v_BILLING_STATEMENT, 0,v_COMPONENT_ID, 0, 1, 0);
+
+            v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID, v_LAST_STATEMENT_TYPE,v_LAST_DATE,'Formula');
+
+			v_ITERATOR_NAME.CHARGE_ID := v_CHARGE_ID;
+			v_ITERATOR_NAME.ITERATOR_NAME1 := 'ServPoint';
+			v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+			PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        	v_ITERATOR.CHARGE_ID := v_CHARGE_ID;
+        END IF;
+
+
+       	--GET SERVICE POINT ID BASED ON EXTERNAL IDENT
+        IF v_LAST_SERV_PT_IDENT IS NULL OR v_LAST_SERV_PT_IDENT <> v_REC_DATA.SERVICE_POINT_ID THEN
+    		v_LAST_SERV_PT_IDENT := v_REC_DATA.SERVICE_POINT_ID;
+    		GET_SERVICE_POINT(v_LAST_SERV_PT_IDENT,TRUE, v_SERVICE_POINT_NAME, v_SERVICE_PT_ID);
+
+    			--Get market price IDs
+    		v_MARKET_PRICE_ID_ENERGY := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (RT LMP)', --Market Price Name
+                                                                MM_NYISO_UTIL.g_REALTIMEINTEGRATED,  --Market Type
+    													        'Locational Marginal Price',         --Market Price Type
+    													        v_COMMODITY_ID,
+    													        v_SC_ID,
+    													        TRUE,
+    													        V_MESSAGE,
+    													        v_SERVICE_PT_ID);
+
+    		v_MARKET_PRICE_ID_LOSS := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (RT MLC)', --Market Price Name
+    		            									  MM_NYISO_UTIL.g_REALTIMEINTEGRATED,  --Market Type
+    		                        						  'Marginal Loss Component',            --Market Price Type
+    		                        						  v_COMMODITY_ID,
+    		                        						  v_SC_ID,
+    		                        					      TRUE,
+    		                                                  V_MESSAGE,
+    								                          v_SERVICE_PT_ID);
+
+    		v_MARKET_PRICE_ID_CONG := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (RT MCC)', --Market Price Name
+    						            					  MM_NYISO_UTIL.g_REALTIMEINTEGRATED,  --Market Type
+    						            					  'Marginal Congestion Component',      --Market Price Type
+    						            					  v_COMMODITY_ID,
+    						            					  v_SC_ID,
+    						            					  TRUE,
+    						            					  V_MESSAGE,
+    														  v_SERVICE_PT_ID);
+
+			IF v_ITERATOR_ID_MAP.EXISTS(v_SERVICE_POINT_NAME) THEN
+				v_ITERATOR_ID := v_ITERATOR_ID_MAP(v_SERVICE_POINT_NAME);
+            	v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID;
+			ELSE
+				v_ITERATOR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID + 1;
+            	v_ITERATOR_ID_MAP(v_SERVICE_POINT_NAME) := v_ITERATOR.ITERATOR_ID;
+            	v_ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        	END IF;
+			v_ITERATOR.ITERATOR1 := v_SERVICE_POINT_NAME;
+			v_ITERATOR.ITERATOR2 := NULL;
+			v_ITERATOR.ITERATOR3 := NULL;
+			v_ITERATOR.ITERATOR4 := NULL;
+			v_ITERATOR.ITERATOR5 := NULL;
+        	PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+    	END IF;
+
+	    --If necessary round up the time to the next 5 min interval
+        --v_CHARGE_DATE := ADJUST_TO_5_MIN(v_REC_DATA.CHARGE_DATE);
+		v_CHARGE_DATE := v_REC_DATA.CHARGE_DATE;
+
+		IF v_REC_DATA.BAL_MKT_LOAD <> 0 THEN
+			v_RT_EN_PRICE := v_REC_DATA.BAL_MKT_ENRG_STLM / v_REC_DATA.BAL_MKT_LOAD;
+			v_RT_LOSS_PRICE := v_REC_DATA.BAL_MKT_LOSS_STLM / v_REC_DATA.BAL_MKT_LOAD;
+			v_RT_CONG_PRICE := v_REC_DATA.BAL_MKT_CONG_STLM / v_REC_DATA.BAL_MKT_LOAD;
+
+			v_TOTAL_BAL_STLM := v_REC_DATA.TOTAL_BAL_MKT_STLM / v_REC_DATA.BAL_MKT_LOAD;
+		ELSE
+			v_RT_EN_PRICE := 0;
+			v_RT_LOSS_PRICE := 0;
+			v_RT_CONG_PRICE := 0;
+
+			v_TOTAL_BAL_STLM := 0;
+		END IF;
+
+	    PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'SCDRTEnergyPrice',v_RT_EN_PRICE,v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'SCDRTLossPrice', v_RT_LOSS_PRICE, v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'SCDRTCongPrice', v_RT_CONG_PRICE, v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'DAMSchedLoad', v_REC_DATA.DAM_SCHED_LOAD,v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'SCDRTActualLoad', v_REC_DATA.RT_ACTUAL_LOAD,v_ITERATOR_ID);
+
+		--PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'SCDBalMktLoad', v_REC_DATA.BAL_MKT_LOAD,v_ITERATOR_ID);
+
+        PUT_FORMULA_CHARGE(v_CHARGE_ID,
+		                   v_CHARGE_DATE,
+						   v_REC_DATA.BAL_MKT_LOAD, --charge_quantity
+                           v_TOTAL_BAL_STLM, --charge_rate
+                           1, --charge_factor
+                           v_ITERATOR_ID);
+
+        --populate market prices
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_ENERGY,
+									   p_PRICE_DATE      => v_CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_RT_EN_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_LOSS,
+									   p_PRICE_DATE      => v_CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_RT_LOSS_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_CONG,
+									   p_PRICE_DATE      => v_CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_RT_CONG_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+
+    END LOOP;
+
+    --update billing statement with FINAL charge_id
+	GET_TOTAL_DAY_BAL_STLMN(v_LAST_DATE, v_LAST_INV_VERSION, v_TOTAL_BAL_STLM);
+	PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0,v_COMPONENT_ID,v_TOTAL_BAL_STLM,1,v_TOTAL_BAL_STLM);
+
+    COMMIT;
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_BAL_MARKET_ENERGY: ' ||
+					 SQLERRM);
+
+		/*UT.DEBUG_TRACE(' ERROR: IMPORT_BAL_MARKET_ENERGY:' || SQLERRM);
+		UT.DEBUG_TRACE(' LAST SERVICE POINT NAME=' || v_SERVICE_POINT_NAME);
+		UT.DEBUG_TRACE(' LAST CHARGE DATE=' || v_CHARGE_DATE);
+		UT.DEBUG_TRACE(' LAST SERVICE POINTID=' || TO_CHAR(v_SERVICE_PT_ID));
+		UT.DEBUG_TRACE(' LAST LMP_MKT_PR_ID=' || TO_CHAR(v_MARKET_PRICE_ID_ENERGY));
+		UT.DEBUG_TRACE(' LAST MLC_MKT_PR_ID=' || TO_CHAR(v_MARKET_PRICE_ID_LOSS));
+		UT.DEBUG_TRACE(' LAST MCC_MKT_PR_ID=' || TO_CHAR(v_MARKET_PRICE_ID_CONG));*/
+
+END IMPORT_BAL_MARKET_ENERGY;
+-----------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_BAL_MARKET_ENERGY(p_CSV     IN CLOB,
+						           p_ISO_SOURCE IN VARCHAR2,
+								   p_LOG_TYPE    IN NUMBER,
+    							   p_TRACE_ON    IN NUMBER,
+								   p_STATUS  OUT NUMBER,
+								   p_MESSAGE OUT VARCHAR2) AS
+
+	v_RECORDS MEX_NY_BAL_MKT_EN_TBL;
+	v_LOGGER mm_logger_adapter;
+
+BEGIN
+	v_LOGGER := MM_UTIL.GET_LOGGER(EC.ES_NYISO_DSS,
+                                   NULL,
+                                   'Import NYISO-DSS Bal Mkt Energy file',
+                                   'Import NYISO-DSS Bal Mkt Energy file',
+                                   p_LOG_TYPE,
+                                   p_TRACE_ON);
+	MM_UTIL.START_EXCHANGE(TRUE, v_LOGGER);
+
+	MEX_NYISO_SETTLEMENT.PARSE_BAL_MARKET_ENERGY(p_CSV,
+												 v_RECORDS,
+												 p_STATUS,
+												 v_LOGGER);
+
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_BAL_MARKET_ENERGY(v_RECORDS, p_ISO_SOURCE, p_STATUS, v_LOGGER);
+
+	END IF;
+
+END IMPORT_BAL_MARKET_ENERGY;
+-----------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_BAL_MARKET_ENERGY(p_CRED        IN MEX_CREDENTIALS,
+								   p_DATE        IN DATE,
+								   p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+								   p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+								   p_STATUS      OUT NUMBER,
+								   p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_RECORDS     MEX_NY_BAL_MKT_EN_TBL;
+
+BEGIN
+
+	   	MEX_NYISO_SETTLEMENT.FETCH_BAL_MARKET_ENERGY(p_DATE,
+    											     p_DOC_LIST,
+    												 p_CRED,
+    												 p_REPORT_TYPE,
+    												 v_RECORDS,
+    												 p_STATUS,
+    												 p_LOGGER);
+
+    	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        	g_PROCESS_REMAINING_REPORTS := FALSE;
+		ELSE
+            IMPORT_BAL_MARKET_ENERGY(v_RECORDS,
+			                         p_CRED.EXTERNAL_ACCOUNT_NAME,
+									 p_STATUS,
+									 p_LOGGER);
+    	END IF;
+
+
+END IMPORT_BAL_MARKET_ENERGY;
+-------------------------------------------------------------------------------------------------------------------
+/*PROCEDURE IMPORT_BAL_MARKET_ENERGY(p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+								   p_STATUS      OUT NUMBER,
+								   p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS     EXTERNAL_CREDENTIAL_TBL;
+	v_RECORDS       MEX_NY_BAL_MKT_EN_TBL;
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+
+	MEX_NYISO_SETTLEMENT.GET_BAL_MARKET_ENERGY(p_REPORT_TYPE,
+											   v_RECORDS,
+											   p_STATUS,
+											   p_MESSAGE);
+
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_BAL_MARKET_ENERGY(v_RECORDS,
+								 v_EXT_CREDS(v_EXT_CREDS.FIRST).ISO_ACCOUNT_NAME,
+								 p_STATUS,
+								 p_MESSAGE);
+	END IF;
+
+END IMPORT_BAL_MARKET_ENERGY;*/
+--------------------------------------------------------------------------------------------------------
+/*PROCEDURE FETCH_BAL_MARKET_ENERGY(p_DATE        IN DATE,
+								  p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+								  p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+								  p_STATUS      OUT NUMBER,
+								  p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS EXTERNAL_CREDENTIAL_TBL;
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+
+	MEX_NYISO_SETTLEMENT.FETCH_BAL_MARKET_ENERGY(p_DATE,
+												 p_DOC_LIST,
+												 v_EXT_CREDS(v_EXT_CREDS.FIRST),
+												 p_REPORT_TYPE,
+												 p_STATUS,
+												 p_MESSAGE);
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.FETCH_BAL_MARKET_ENERGY: ' ||
+					 SQLERRM;
+
+END FETCH_BAL_MARKET_ENERGY;*/
+----------------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_BAL_MARKET_VIRT_SUPPLY(p_RECORDS    IN MEX_NY_BAL_VS_TBL,
+								        p_ISO_SOURCE IN VARCHAR2,
+								        p_STATUS     OUT NUMBER,
+								        p_LOGGER     IN OUT NOCOPY mm_logger_adapter) IS
+
+TYPE ITERATOR_ID_MAP  IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP     ITERATOR_ID_MAP;
+v_SC_ID 				NUMBER(9) := MM_NYISO_UTIL.g_NYISO_SC_ID;
+v_PSE_ID 				NUMBER(9);
+v_BILLING_STATEMENT 	BILLING_STATEMENT%ROWTYPE;
+v_COMMODITY_ID 			IT_COMMODITY.COMMODITY_ID%TYPE;
+v_MARKET_PRICE_ID_ENERGY NUMBER(9);
+v_MARKET_PRICE_ID_LOSS 	NUMBER(9);
+v_MARKET_PRICE_ID_CONG 	NUMBER(9);
+v_PRODUCT_ID 			NUMBER(9);
+v_COMPONENT_ID 			NUMBER(9);
+--v_DAM_VS_COMPONENT_ID   NUMBER(9);
+v_CHARGE_ID 			NUMBER(9);
+v_SERVICE_PT_ID 		NUMBER(9);
+v_ITERATOR_ID 			NUMBER(3);
+v_ITERATOR_NAME 		FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR 				FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_REC_DATA 				MEX_NY_BAL_VS;
+v_SERVICE_POINT_NAME    VARCHAR2(32);
+v_TOTAL_BAL_STLM 		NUMBER;
+v_LAST_INV_VERSION 		NUMBER(1);
+v_LAST_STATEMENT_TYPE 	BINARY_INTEGER;
+v_LAST_DATE 			DATE;
+v_LAST_SERV_PT 			VARCHAR2(32);
+v_CHARGE_DATE 			DATE;  --CHARGE DATE AT 5 MIN INTERVAL
+--v_CHARGE_DATE_H         DATE;  --CHARGE DATE AT HOUR INTERVAL
+v_VS_DAM_SCHED_LOAD     NUMBER;
+v_CHARGE_RATE           NUMBER;
+v_CHARGE_QUANT          NUMBER;
+v_RT_VS_EN_PRICE        NUMBER;
+v_RT_VS_LOSS_PRICE      NUMBER;
+v_RT_VS_CONG_PRICE      NUMBER;
+v_MESSAGE VARCHAR2(256);
+
+	CURSOR c_ORDERED_RECORDSET IS
+		SELECT INVOICE_VERSION, CHARGE_DATE, VS_BUS_IDENT,BAL_VS_ENRG_STLM, BAL_VS_LOSS_STLM, BAL_VS_CONG_STLM, TOTAL_VS_BAL_STLM, VS_DAM_SUPPLY_ENGY
+          FROM TABLE(CAST(p_RECORDS AS MEX_NY_BAL_VS_TBL))
+		  WHERE INVOICE_VERSION < 4
+		  ORDER BY INVOICE_VERSION,CHARGE_DATE,VS_BUS_IDENT;
+
+	PROCEDURE GET_TOTAL_DAY_BAL_STLMN(p_CHARGE_DATE    IN DATE,
+	                                  p_INV_VERS       IN NUMBER,
+									  p_TOTAL_BAL_STLM OUT NUMBER) AS
+
+		CURSOR c_BAL_ENERG IS
+
+			SELECT SUM(A.TOTAL_VS_BAL_STLM) "TOTAL_VS_BAL_STLM"
+			  FROM TABLE(CAST(p_RECORDS AS MEX_NY_BAL_VS_TBL)) A
+			 WHERE TRUNC(A.CHARGE_DATE) = p_CHARGE_DATE
+			   AND A.INVOICE_VERSION = p_INV_VERS;
+
+	BEGIN
+
+		FOR v_BAL_ENERG IN c_BAL_ENERG LOOP
+			p_TOTAL_BAL_STLM := v_BAL_ENERG.TOTAL_VS_BAL_STLM;
+		END LOOP;
+
+	END GET_TOTAL_DAY_BAL_STLMN;
+
+
+BEGIN
+
+	p_STATUS := GA.SUCCESS;
+    IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+	ID.ID_FOR_COMMODITY('Virtual Energy',TRUE, v_COMMODITY_ID);
+
+    v_PSE_ID := GET_PSE_ID(p_ISO_SOURCE);
+	v_PRODUCT_ID := GET_PRODUCT(g_VIRT_MKT_CUST);
+    v_COMPONENT_ID := GET_COMPONENT('NYISO:BalMktVS');
+	--v_DAM_VS_COMPONENT_ID := GET_COMPONENT('NYISO:DAMVirtSupply');--this is in order to get VSDAMSchedLoad
+    v_ITERATOR.ITERATOR_ID := 0;
+
+	--billing statement initialization
+    v_BILLING_STATEMENT.ENTITY_ID := v_PSE_ID;
+	v_BILLING_STATEMENT.ENTITY_TYPE := 'PSE';
+    v_BILLING_STATEMENT.STATEMENT_STATE := GA.EXTERNAL_STATE;
+    v_BILLING_STATEMENT.AS_OF_DATE := LOW_DATE;
+    v_BILLING_STATEMENT.PRODUCT_ID := v_PRODUCT_ID;
+    v_BILLING_STATEMENT.COMPONENT_ID := v_COMPONENT_ID;
+    v_BILLING_STATEMENT.CHARGE_VIEW_TYPE := g_CHARGE_VIEW_TYPE;
+    v_BILLING_STATEMENT.CHARGE_QUANTITY := 0;
+	v_BILLING_STATEMENT.CHARGE_RATE := 1;
+	v_BILLING_STATEMENT.CHARGE_AMOUNT := 0;
+	v_BILLING_STATEMENT.BILL_QUANTITY := v_BILLING_STATEMENT.CHARGE_QUANTITY;
+	v_BILLING_STATEMENT.BILL_AMOUNT := v_BILLING_STATEMENT.CHARGE_AMOUNT;
+
+
+    FOR v_REC_DATA IN c_ORDERED_RECORDSET LOOP
+
+        IF v_LAST_DATE IS NULL OR (v_LAST_DATE <> TRUNC(v_REC_DATA.CHARGE_DATE)) OR
+          (v_LAST_DATE = TRUNC(v_REC_DATA.CHARGE_DATE) AND v_LAST_INV_VERSION <> v_REC_DATA.INVOICE_VERSION) THEN
+
+			--update totals for the charge_id just completed
+           	IF v_LAST_STATEMENT_TYPE IS NOT NULL THEN
+			   GET_TOTAL_DAY_BAL_STLMN(v_LAST_DATE, v_LAST_INV_VERSION, v_TOTAL_BAL_STLM);
+			   v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE,'Formula');
+			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_CHARGE_ID, v_COMPONENT_ID,v_TOTAL_BAL_STLM,1,v_TOTAL_BAL_STLM);
+           	END IF;
+
+			v_LAST_DATE := TRUNC(v_REC_DATA.CHARGE_DATE);
+           	v_LAST_INV_VERSION := v_REC_DATA.INVOICE_VERSION;
+            v_LAST_STATEMENT_TYPE := GET_STATEMENT_TYPE(v_REC_DATA.INVOICE_VERSION);
+
+            --clear out billing statement
+			DELETE_BILLING_STATEMENT(v_PSE_ID, v_PRODUCT_ID, v_COMPONENT_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE);
+
+			v_BILLING_STATEMENT.STATEMENT_TYPE := v_LAST_STATEMENT_TYPE;
+            v_BILLING_STATEMENT.STATEMENT_DATE := v_LAST_DATE;
+            v_BILLING_STATEMENT.STATEMENT_END_DATE := v_LAST_DATE;
+            PUT_BILLING_STATEMENT(v_BILLING_STATEMENT, 0,v_COMPONENT_ID, 0, 1, 0);
+
+            v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID, v_LAST_STATEMENT_TYPE,v_LAST_DATE,'Formula');
+
+			v_ITERATOR_NAME.CHARGE_ID := v_CHARGE_ID;
+			v_ITERATOR_NAME.ITERATOR_NAME1 := 'ServPoint';
+			v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+			PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        	v_ITERATOR.CHARGE_ID := v_CHARGE_ID;
+		END IF;
+
+   		--GET SERVICE POINT ID BASED ON EXTERNAL IDENT
+        IF v_LAST_SERV_PT IS NULL OR v_LAST_SERV_PT <> v_REC_DATA.VS_BUS_IDENT THEN
+			v_LAST_SERV_PT := v_REC_DATA.VS_BUS_IDENT;
+			GET_SERVICE_POINT(v_LAST_SERV_PT,TRUE, v_SERVICE_POINT_NAME, v_SERVICE_PT_ID);
+
+			--GET MARKET PRICE IDs
+			v_MARKET_PRICE_ID_ENERGY := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (RT LMP)', --Market Price Name
+						                                    MM_NYISO_UTIL.g_REALTIMEINTEGRATED, --Market Type
+						                                    'Locational Marginal Price', --Market Price Type
+						            						v_COMMODITY_ID, --Commodity ID
+						            						v_SC_ID,
+						            						TRUE,
+						            						v_MESSAGE,
+															v_SERVICE_PT_ID);
+
+			v_MARKET_PRICE_ID_LOSS := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (RT MLC)', --Market Price Name
+		            									  MM_NYISO_UTIL.g_REALTIMEINTEGRATED, --Market Type
+		                        						  'Marginal Loss Component', --Market Price Type
+		                        						  v_COMMODITY_ID, --Commodity ID
+		                        						  v_SC_ID,
+		                        					      TRUE,
+		                                                  v_MESSAGE,
+								                          v_SERVICE_PT_ID);
+
+			 v_MARKET_PRICE_ID_CONG := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (RT MCC)', --Market Price Name
+						            					  MM_NYISO_UTIL.g_REALTIMEINTEGRATED, --Market Type
+						            					  'Marginal Congestion Component', --Market Price Type
+						            					  v_COMMODITY_ID, --Commodity ID
+						            					  v_SC_ID,
+						            					  TRUE,
+						            					  v_MESSAGE,
+														  v_SERVICE_PT_ID);
+
+			IF v_ITERATOR_ID_MAP.EXISTS(v_SERVICE_POINT_NAME) THEN
+				v_ITERATOR_ID := v_ITERATOR_ID_MAP(v_SERVICE_POINT_NAME);
+            	v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID;
+			ELSE
+				v_ITERATOR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID + 1;
+            	v_ITERATOR_ID_MAP(v_SERVICE_POINT_NAME) := v_ITERATOR.ITERATOR_ID;
+            	v_ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        	END IF;
+			v_ITERATOR.ITERATOR1 := v_SERVICE_POINT_NAME;
+			v_ITERATOR.ITERATOR2 := NULL;
+			v_ITERATOR.ITERATOR3 := NULL;
+			v_ITERATOR.ITERATOR4 := NULL;
+			v_ITERATOR.ITERATOR5 := NULL;
+        	PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+        END IF;
+
+		--If necessary round up the time to the next 5 min interval
+        --v_CHARGE_DATE := ADJUST_TO_5_MIN(v_REC_DATA.CHARGE_DATE);
+		v_CHARGE_DATE := v_REC_DATA.CHARGE_DATE;
+		v_VS_DAM_SCHED_LOAD := v_REC_DATA.VS_DAM_SUPPLY_ENGY;
+
+		IF v_VS_DAM_SCHED_LOAD <> 0 THEN
+			v_RT_VS_EN_PRICE := v_REC_DATA.BAL_VS_ENRG_STLM / v_REC_DATA.VS_DAM_SUPPLY_ENGY;
+			v_RT_VS_LOSS_PRICE := v_REC_DATA.BAL_VS_LOSS_STLM / v_REC_DATA.VS_DAM_SUPPLY_ENGY;
+			v_RT_VS_CONG_PRICE := v_REC_DATA.BAL_VS_CONG_STLM / v_REC_DATA.VS_DAM_SUPPLY_ENGY;
+
+			v_CHARGE_RATE := v_REC_DATA.TOTAL_VS_BAL_STLM / v_VS_DAM_SCHED_LOAD;
+			v_CHARGE_QUANT := v_VS_DAM_SCHED_LOAD;
+		ELSE
+			v_RT_VS_EN_PRICE := 0;
+			v_RT_VS_LOSS_PRICE := 0;
+			v_RT_VS_CONG_PRICE := 0;
+
+			v_CHARGE_RATE := 0;
+			v_CHARGE_QUANT := 0;
+		END IF;
+
+
+	    PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'SCDRTEnergyPriceVS',v_RT_VS_EN_PRICE,v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'SCDRTLossPriceVS', v_RT_VS_LOSS_PRICE, v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'SCDRTCongPriceVS', v_RT_VS_CONG_PRICE, v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'VSDAMSchedLoad', v_REC_DATA.VS_DAM_SUPPLY_ENGY,v_ITERATOR_ID);
+		--get VSDAMSchedLoad value
+		--the VSDAMSchedLoad has an hourly value so the charge date
+		--has to be changed from a 5 min interval to hourly interval
+		/*v_CHARGE_DATE_H := TRUNC(v_CHARGE_DATE,'HH24');
+		v_VS_DAM_SCHED_LOAD := GET_FORMULA_CHARGE_VAR_VAL(v_DAM_VS_CHARGE_ID, v_CHARGE_DATE_H,'VSDAMSchedLoad', v_ITERATOR_ID);*/
+
+
+		PUT_FORMULA_CHARGE(v_CHARGE_ID,
+		                   v_CHARGE_DATE,
+						   v_CHARGE_QUANT , --charge_quantity
+                           v_CHARGE_RATE, --charge_rate
+                           1,                --charge_factor
+                           v_ITERATOR_ID);
+
+        /*PUT_FORMULA_CHARGE(v_CHARGE_ID,
+		                   v_CHARGE_DATE,
+						   v_VS_DAM_SCHED_LOAD , --charge_quantity
+                           v_TOTAL_SCD_STLM, --charge_rate
+                           1,                --charge_factor
+                           v_ITERATOR_ID);
+*/
+        --populate market prices
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_ENERGY,
+									   p_PRICE_DATE      => v_CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_RT_VS_EN_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_LOSS,
+									   p_PRICE_DATE      => v_CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_RT_VS_LOSS_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_CONG,
+									   p_PRICE_DATE      => v_CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_RT_VS_CONG_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+    END LOOP;
+
+    --update billing statement with FINAL charge_id
+	GET_TOTAL_DAY_BAL_STLMN(v_LAST_DATE, v_LAST_INV_VERSION, v_TOTAL_BAL_STLM);
+	PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0,v_COMPONENT_ID,v_TOTAL_BAL_STLM,1,v_TOTAL_BAL_STLM);
+
+    COMMIT;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_BAL_MARKET_VIRT_SUPPLY: ' || SQLERRM);
+
+		/*UT.DEBUG_TRACE(' ERROR: IMPORT_BAL_VIRTUAL_SUPPLY:' || SQLERRM);
+		UT.DEBUG_TRACE(' LAST SERVICE POINT NAME=' || v_SERVICE_POINT_NAME);
+		UT.DEBUG_TRACE(' LAST SERVICE POINTID=' || TO_CHAR(v_SERVICE_PT_ID));
+		UT.DEBUG_TRACE(' LAST LMP_MKT_PR_ID=' || TO_CHAR(v_MARKET_PRICE_ID_ENERGY));
+		UT.DEBUG_TRACE(' LAST MLC_MKT_PR_ID=' || TO_CHAR(v_MARKET_PRICE_ID_LOSS));
+		UT.DEBUG_TRACE(' LAST MCC_MKT_PR_ID=' || TO_CHAR(v_MARKET_PRICE_ID_CONG));
+*/
+END IMPORT_BAL_MARKET_VIRT_SUPPLY;
+-----------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_BAL_MARKET_VIRT_SUPPLY(p_CSV        IN CLOB,
+										p_ISO_SOURCE IN VARCHAR2,
+										p_LOG_TYPE    IN NUMBER,
+    									p_TRACE_ON    IN NUMBER,
+										p_STATUS     OUT NUMBER,
+										p_MESSAGE    OUT VARCHAR2) AS
+
+	v_RECORDS MEX_NY_BAL_VS_TBL;
+	v_LOGGER mm_logger_adapter;
+BEGIN
+	v_LOGGER := MM_UTIL.GET_LOGGER(EC.ES_NYISO_DSS,
+                                   NULL,
+                                   'Import NYISO-DSS Bal Mkt Virt Supply file',
+                                   'Import NYISO-DSS Bal Mkt Virt Supply file',
+                                   p_LOG_TYPE,
+                                   p_TRACE_ON);
+	MM_UTIL.START_EXCHANGE(TRUE, v_LOGGER);
+
+	MEX_NYISO_SETTLEMENT.PARSE_BAL_MKT_VIRT_SUPPLY(p_CSV,
+												   v_RECORDS,
+												   p_STATUS,
+												   v_LOGGER);
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_BAL_MARKET_VIRT_SUPPLY(v_RECORDS,
+									  p_ISO_SOURCE,
+									  p_STATUS,
+									  v_LOGGER);
+	END IF;
+
+END IMPORT_BAL_MARKET_VIRT_SUPPLY;
+-----------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_BAL_MARKET_VIRT_SUPPLY(p_CRED        IN MEX_CREDENTIALS,
+										p_DATE        IN DATE,
+										p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+										p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+										p_STATUS      OUT NUMBER,
+										p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_RECORDS   MEX_NY_BAL_VS_TBL;
+
+BEGIN
+
+	MEX_NYISO_SETTLEMENT.FETCH_BAL_MKT_VIRT_SUPPLY(p_DATE,
+												   p_DOC_LIST,
+												   p_CRED,
+												   p_REPORT_TYPE,
+												   v_RECORDS,
+												   p_STATUS,
+												   p_LOGGER);
+
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_BAL_MARKET_VIRT_SUPPLY(v_RECORDS,
+									  p_CRED.EXTERNAL_ACCOUNT_NAME,
+									  p_STATUS,
+									  p_LOGGER);
+	END IF;
+
+END IMPORT_BAL_MARKET_VIRT_SUPPLY;
+-------------------------------------------------------------------------------------------------------------------
+/*PROCEDURE IMPORT_BAL_MARKET_VIRT_SUPPLY(p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+										p_STATUS      OUT NUMBER,
+										p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS   EXTERNAL_CREDENTIAL_TBL;
+	v_RECORDS     MEX_NY_BAL_VS_TBL;
+	v_EXCHANGE_ID NUMBER(9);
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+	MEX_NYISO_SETTLEMENT.GET_BAL_MKT_VIRT_SUPPLY(p_REPORT_TYPE,
+												 v_RECORDS,
+												 p_STATUS,
+												 p_MESSAGE);
+
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_BAL_MARKET_VIRT_SUPPLY(v_RECORDS,
+									  v_EXT_CREDS(v_EXT_CREDS.FIRST).ISO_ACCOUNT_NAME,
+									  p_STATUS,
+									  p_MESSAGE);
+	END IF;
+
+END IMPORT_BAL_MARKET_VIRT_SUPPLY;*/
+--------------------------------------------------------------------------------------------------
+/*PROCEDURE FETCH_BAL_MARKET_VIRT_SUPPLY(p_DATE        IN DATE,
+									   p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+									   p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+									   p_STATUS      OUT NUMBER,
+									   p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS EXTERNAL_CREDENTIAL_TBL;
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+	MEX_NYISO_SETTLEMENT.FETCH_BAL_MKT_VIRT_SUPPLY(p_DATE,
+												   p_DOC_LIST,
+												   v_EXT_CREDS(v_EXT_CREDS.FIRST),
+												   p_REPORT_TYPE,
+												   p_STATUS,
+												   p_MESSAGE);
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.FETCH_BAL_MARKET_VIRT_SUPPLY: ' ||
+					 SQLERRM;
+
+END FETCH_BAL_MARKET_VIRT_SUPPLY;*/
+-----------------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_BAL_MARKET_VIRT_LOAD(p_RECORDS    IN MEX_NY_BAL_VL_TBL,
+								      p_ISO_SOURCE IN VARCHAR2,
+								      p_STATUS     OUT NUMBER,
+								      p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+TYPE ITERATOR_ID_MAP  IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP     ITERATOR_ID_MAP;
+v_SC_ID 				NUMBER(9) := MM_NYISO_UTIL.g_NYISO_SC_ID;
+v_PSE_ID 				NUMBER(9);
+v_BILLING_STATEMENT 	BILLING_STATEMENT%ROWTYPE;
+v_COMMODITY_ID 			IT_COMMODITY.COMMODITY_ID%TYPE;
+v_MARKET_PRICE_ID_ENERGY NUMBER(9);
+v_MARKET_PRICE_ID_LOSS 	NUMBER(9);
+v_MARKET_PRICE_ID_CONG 	NUMBER(9);
+v_PRODUCT_ID 			NUMBER(9);
+v_COMPONENT_ID 			NUMBER(9);
+v_DAM_VL_COMPONENT_ID   NUMBER(9);
+v_CHARGE_ID 			NUMBER(9);
+v_DAM_VL_CHARGE_ID      NUMBER(9);
+v_SERVICE_PT_ID 		NUMBER(9);
+v_ITERATOR_ID 			NUMBER(3);
+v_ITERATOR_NAME 		FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR 				FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_REC_DATA 				MEX_NY_BAL_VL;
+v_SERVICE_POINT_NAME    VARCHAR2(32);
+v_TOTAL_BAL_STLM 		NUMBER;
+v_LAST_INV_VERSION 		NUMBER(1);
+v_LAST_STATEMENT_TYPE 	BINARY_INTEGER;
+v_LAST_DATE 			DATE;
+v_LAST_SERV_PT 			VARCHAR2(32);
+v_CHARGE_DATE 			DATE;  --CHARGE DATE AT 5 MIN INTERVAL
+v_CHARGE_DATE_H         DATE;  --CHARGE DATE AT HOUR INTERVAL
+v_DAM_VL_ENERGY         NUMBER;
+v_CHARGE_RATE           NUMBER;
+v_CHARGE_QUANT          NUMBER;
+v_RT_VL_EN_PRICE        NUMBER;
+v_RT_VL_LOSS_PRICE      NUMBER;
+v_RT_VL_CONG_PRICE      NUMBER;
+v_MESSAGE VARCHAR2(256);
+
+	CURSOR c_ORDERED_RECORDSET IS
+		SELECT INVOICE_VERSION, CHARGE_DATE, VL_BUS_IDENT,BAL_VL_ENRG_STLM, BAL_VL_LOSS_STLM, BAL_VL_CONG_STLM, TOTAL_VL_BAL_STLM, VL_DAM_LOAD_ENGY
+          FROM TABLE(CAST(p_RECORDS AS MEX_NY_BAL_VL_TBL))
+		  WHERE INVOICE_VERSION < 4
+		  ORDER BY INVOICE_VERSION,CHARGE_DATE, VL_BUS_IDENT;
+
+	PROCEDURE GET_TOTAL_DAY_BAL_STLMN(p_CHARGE_DATE    IN DATE,
+	                                  p_INV_VERS       IN NUMBER,
+									  p_TOTAL_BAL_STLM OUT NUMBER) AS
+
+		CURSOR c_BAL_ENERG IS
+
+			SELECT SUM(A.TOTAL_VL_BAL_STLM) "TOTAL_VL_BAL_STLM"
+			  FROM TABLE(CAST(p_RECORDS AS MEX_NY_BAL_VL_TBL)) A
+			 WHERE TRUNC(A.CHARGE_DATE) = p_CHARGE_DATE
+			   AND A.INVOICE_VERSION = p_INV_VERS;
+
+	BEGIN
+
+		FOR v_BAL_ENERG IN c_BAL_ENERG LOOP
+			p_TOTAL_BAL_STLM := v_BAL_ENERG.TOTAL_VL_BAL_STLM;
+		END LOOP;
+
+	END GET_TOTAL_DAY_BAL_STLMN;
+
+
+BEGIN
+
+	p_STATUS := GA.SUCCESS;
+    IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+	ID.ID_FOR_COMMODITY('Virtual Energy',TRUE, v_COMMODITY_ID);
+
+    v_PSE_ID := GET_PSE_ID(p_ISO_SOURCE);
+	v_PRODUCT_ID := GET_PRODUCT(g_VIRT_MKT_CUST);
+    v_COMPONENT_ID := GET_COMPONENT('NYISO:BalMktVL');
+	--v_DAM_VL_COMPONENT_ID := GET_COMPONENT('NYISO:DAMVirtLoad');--this is in order to get DAMVLEnergy
+    v_ITERATOR.ITERATOR_ID := 0;
+
+	--billing statement initialization
+    v_BILLING_STATEMENT.ENTITY_ID := v_PSE_ID;
+	v_BILLING_STATEMENT.ENTITY_TYPE := 'PSE';
+    v_BILLING_STATEMENT.STATEMENT_STATE := GA.EXTERNAL_STATE;
+    v_BILLING_STATEMENT.AS_OF_DATE := LOW_DATE;
+    v_BILLING_STATEMENT.PRODUCT_ID := v_PRODUCT_ID;
+    v_BILLING_STATEMENT.COMPONENT_ID := v_COMPONENT_ID;
+    v_BILLING_STATEMENT.CHARGE_VIEW_TYPE := g_CHARGE_VIEW_TYPE;
+    v_BILLING_STATEMENT.CHARGE_QUANTITY := 0;
+	v_BILLING_STATEMENT.CHARGE_RATE := 1;
+	v_BILLING_STATEMENT.CHARGE_AMOUNT := 0;
+	v_BILLING_STATEMENT.BILL_QUANTITY := v_BILLING_STATEMENT.CHARGE_QUANTITY;
+	v_BILLING_STATEMENT.BILL_AMOUNT := v_BILLING_STATEMENT.CHARGE_AMOUNT;
+
+
+	FOR v_REC_DATA IN c_ORDERED_RECORDSET LOOP
+
+        IF v_LAST_DATE IS NULL OR (v_LAST_DATE <> TRUNC(v_REC_DATA.CHARGE_DATE)) OR
+          (v_LAST_DATE = TRUNC(v_REC_DATA.CHARGE_DATE) AND v_LAST_INV_VERSION <> v_REC_DATA.INVOICE_VERSION) THEN
+
+			--update totals for the charge_id just completed
+           	IF v_LAST_STATEMENT_TYPE IS NOT NULL THEN
+			   GET_TOTAL_DAY_BAL_STLMN(v_LAST_DATE, v_LAST_INV_VERSION, v_TOTAL_BAL_STLM);
+			   v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE,'Formula');
+			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_CHARGE_ID, v_COMPONENT_ID,v_TOTAL_BAL_STLM,1,v_TOTAL_BAL_STLM);
+           	END IF;
+
+			v_LAST_DATE := TRUNC(v_REC_DATA.CHARGE_DATE);
+           	v_LAST_INV_VERSION := v_REC_DATA.INVOICE_VERSION;
+            v_LAST_STATEMENT_TYPE := GET_STATEMENT_TYPE(v_REC_DATA.INVOICE_VERSION);
+
+            --clear out billing statement
+			DELETE_BILLING_STATEMENT(v_PSE_ID, v_PRODUCT_ID, v_COMPONENT_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE);
+
+			v_BILLING_STATEMENT.STATEMENT_TYPE := v_LAST_STATEMENT_TYPE;
+            v_BILLING_STATEMENT.STATEMENT_DATE := v_LAST_DATE;
+            v_BILLING_STATEMENT.STATEMENT_END_DATE := v_LAST_DATE;
+            PUT_BILLING_STATEMENT(v_BILLING_STATEMENT, 0,v_COMPONENT_ID, 0, 1, 0);
+
+            v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID, v_LAST_STATEMENT_TYPE,v_LAST_DATE,'Formula');
+
+			v_ITERATOR_NAME.CHARGE_ID := v_CHARGE_ID;
+			v_ITERATOR_NAME.ITERATOR_NAME1 := 'ServPoint';
+			v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+			PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        	v_ITERATOR.CHARGE_ID := v_CHARGE_ID;
+		END IF;
+
+   		--GET SERVICE POINT ID BASED ON EXTERNAL IDENT
+        IF v_LAST_SERV_PT IS NULL OR v_LAST_SERV_PT <> v_REC_DATA.VL_BUS_IDENT THEN
+			v_LAST_SERV_PT := v_REC_DATA.VL_BUS_IDENT;
+			GET_SERVICE_POINT(v_LAST_SERV_PT,TRUE, v_SERVICE_POINT_NAME, v_SERVICE_PT_ID);
+
+			--GET MARKET PRICE IDs
+			v_MARKET_PRICE_ID_ENERGY := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (RT LMP)', --Market Price Name
+    						                                    MM_NYISO_UTIL.g_REALTIMEINTEGRATED, --Market Type
+    						                                    'Locational Marginal Price', --Market Price Type
+    						            						v_COMMODITY_ID, --Commodity ID
+    						            						v_SC_ID,
+    						            						TRUE,
+    						            						v_MESSAGE,
+    															v_SERVICE_PT_ID);
+
+			v_MARKET_PRICE_ID_LOSS := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (RT MLC)', --Market Price Name
+    		            									  MM_NYISO_UTIL.g_REALTIMEINTEGRATED, --Market Type
+    		                        						  'Marginal Loss Component', --Market Price Type
+    		                        						  v_COMMODITY_ID, --Commodity ID
+    		                        						  v_SC_ID,
+    		                        					      TRUE,
+    		                                                  v_MESSAGE,
+    								                          v_SERVICE_PT_ID);
+
+			v_MARKET_PRICE_ID_CONG := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (RT MCC)', --Market Price Name
+    						            					  MM_NYISO_UTIL.g_REALTIMEINTEGRATED, --Market Type
+    						            					  'Marginal Congestion Component', --Market Price Type
+    						            					  v_COMMODITY_ID, --Commodity ID
+    						            					  v_SC_ID,
+    						            					  TRUE,
+    						            					  v_MESSAGE,
+    														  v_SERVICE_PT_ID);
+
+			IF v_ITERATOR_ID_MAP.EXISTS(v_SERVICE_POINT_NAME) THEN
+				v_ITERATOR_ID := v_ITERATOR_ID_MAP(v_SERVICE_POINT_NAME);
+            	v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID;
+			ELSE
+				v_ITERATOR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID + 1;
+            	v_ITERATOR_ID_MAP(v_SERVICE_POINT_NAME) := v_ITERATOR.ITERATOR_ID;
+            	v_ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        	END IF;
+			v_ITERATOR.ITERATOR1 := v_SERVICE_POINT_NAME;
+			v_ITERATOR.ITERATOR2 := NULL;
+			v_ITERATOR.ITERATOR3 := NULL;
+			v_ITERATOR.ITERATOR4 := NULL;
+			v_ITERATOR.ITERATOR5 := NULL;
+        	PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+        END IF;
+
+		--If necessary round up the time to the next 5 min interval
+        --v_CHARGE_DATE := ADJUST_TO_5_MIN(v_REC_DATA.CHARGE_DATE);
+		v_CHARGE_DATE := v_REC_DATA.CHARGE_DATE;
+		v_DAM_VL_ENERGY := v_REC_DATA.VL_DAM_LOAD_ENGY;
+
+		IF v_DAM_VL_ENERGY <> 0 THEN
+			v_RT_VL_EN_PRICE := v_REC_DATA.BAL_VL_ENRG_STLM / v_REC_DATA.VL_DAM_LOAD_ENGY;
+			v_RT_VL_LOSS_PRICE := v_REC_DATA.BAL_VL_LOSS_STLM / v_REC_DATA.VL_DAM_LOAD_ENGY;
+			v_RT_VL_CONG_PRICE := v_REC_DATA.BAL_VL_CONG_STLM / v_REC_DATA.VL_DAM_LOAD_ENGY;
+
+			v_CHARGE_RATE := v_REC_DATA.TOTAL_VL_BAL_STLM / v_DAM_VL_ENERGY;
+			v_CHARGE_QUANT := v_DAM_VL_ENERGY;
+		ELSE
+			v_RT_VL_EN_PRICE := 0;
+			v_RT_VL_LOSS_PRICE := 0;
+			v_RT_VL_CONG_PRICE := 0;
+
+			v_CHARGE_RATE := 0;
+			v_CHARGE_QUANT := 0;
+
+		END IF;
+
+	    PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'SCDRTEnergyPriceVL',v_RT_VL_EN_PRICE,v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'SCDRTLossPriceVL', v_RT_VL_LOSS_PRICE, v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'SCDRTCongPriceVL', v_RT_VL_CONG_PRICE, v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_CHARGE_DATE,'DAMVLEnergy', v_REC_DATA.VL_DAM_LOAD_ENGY,v_ITERATOR_ID);
+		--get DAMVLEnergy value
+		--the DAMVLEnergy has an hourly value so the charge date has to be changed from a 5 min interval to hourly interval
+		/*v_CHARGE_DATE_H := TRUNC(v_CHARGE_DATE,'HH24');
+		v_DAM_VL_ENERGY := GET_FORMULA_CHARGE_VAR_VAL(v_DAM_VL_CHARGE_ID, v_CHARGE_DATE_H, 'DAMVLEnergy', v_ITERATOR_ID);*/
+
+		PUT_FORMULA_CHARGE(v_CHARGE_ID,
+		                   v_CHARGE_DATE,
+						   v_CHARGE_QUANT ,
+                           v_CHARGE_RATE,
+                           1,                --charge_factor
+                           v_ITERATOR_ID);
+
+            /*PUT_FORMULA_CHARGE(v_CHARGE_ID,
+    		                   v_CHARGE_DATE,
+    						   v_DAM_VL_ENERGY , --charge_quantity
+                               v_TOTAL_SCD_STLM, --charge_rate
+                               1,                --charge_factor
+                               v_ITERATOR_ID);*/
+
+        --populate market prices
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_ENERGY,
+									   p_PRICE_DATE      => v_CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_RT_VL_EN_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_LOSS,
+									   p_PRICE_DATE      => v_CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_RT_VL_LOSS_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_CONG,
+									   p_PRICE_DATE      => v_CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_RT_VL_CONG_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+    END LOOP;
+
+    --update billing statement with FINAL charge_id
+	GET_TOTAL_DAY_BAL_STLMN(v_LAST_DATE, v_LAST_INV_VERSION, v_TOTAL_BAL_STLM);
+	PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0,v_COMPONENT_ID,v_TOTAL_BAL_STLM,1,v_TOTAL_BAL_STLM);
+
+    COMMIT;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_BAL_MARKET_VIRT_LOAD: ' ||
+					 SQLERRM);
+
+		/*UT.DEBUG_TRACE(v_LAST_SERV_PT || ',' || v_CHARGE_DATE_H || ',' || v_CHARGE_ID || ',' || v_DAM_VL_CHARGE_ID);*/
+END IMPORT_BAL_MARKET_VIRT_LOAD;
+-----------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_BAL_MARKET_VIRT_LOAD(p_CSV        IN CLOB,
+									  p_ISO_SOURCE IN VARCHAR2,
+									  p_LOG_TYPE    IN NUMBER,
+    								  p_TRACE_ON    IN NUMBER,
+									  p_STATUS     OUT NUMBER,
+									  p_MESSAGE    OUT VARCHAR2) AS
+
+	v_RECORDS MEX_NY_BAL_VL_TBL;
+	v_LOGGER mm_logger_adapter;
+
+BEGIN
+	v_LOGGER := MM_UTIL.GET_LOGGER(EC.ES_NYISO_DSS,
+                                   NULL,
+                                   'Import NYISO-DSS Bal Mkt Virt Load file',
+                                   'Import NYISO-DSS Bal Mkt Virt Load file',
+                                   p_LOG_TYPE,
+                                   p_TRACE_ON);
+	MM_UTIL.START_EXCHANGE(TRUE, v_LOGGER);
+
+	MEX_NYISO_SETTLEMENT.PARSE_BAL_MKT_VIRT_LOAD(p_CSV,
+												 v_RECORDS,
+												 p_STATUS,
+												 v_LOGGER);
+	IF p_STATUS = GA.SUCCESS AND v_RECORDS IS NOT NULL THEN
+		IMPORT_BAL_MARKET_VIRT_LOAD(v_RECORDS,
+									p_ISO_SOURCE,
+									p_STATUS,
+									v_LOGGER);
+	END IF;
+
+END IMPORT_BAL_MARKET_VIRT_LOAD;
+-----------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_BAL_MARKET_VIRT_LOAD(p_CRED        IN MEX_CREDENTIALS,
+									  p_DATE        IN DATE,
+									  p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+									  p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+									  p_STATUS      OUT NUMBER,
+									  p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_RECORDS   MEX_NY_BAL_VL_TBL;
+
+BEGIN
+
+	MEX_NYISO_SETTLEMENT.FETCH_BAL_MKT_VIRT_LOAD(p_DATE,
+												 p_DOC_LIST,
+												 p_CRED,
+												 p_REPORT_TYPE,
+												 v_RECORDS,
+												 p_STATUS,
+												 p_LOGGER);
+
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_BAL_MARKET_VIRT_LOAD(v_RECORDS,
+									p_CRED.EXTERNAL_ACCOUNT_NAME,
+									p_STATUS,
+									p_LOGGER);
+	END IF;
+
+END IMPORT_BAL_MARKET_VIRT_LOAD;
+-------------------------------------------------------------------------------------------------
+/*PROCEDURE IMPORT_BAL_MARKET_VIRT_LOAD(p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+									  p_STATUS      OUT NUMBER,
+									  p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS   EXTERNAL_CREDENTIAL_TBL;
+	v_RECORDS     MEX_NY_BAL_VL_TBL;
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+
+	MEX_NYISO_SETTLEMENT.GET_BAL_MKT_VIRT_LOAD(p_REPORT_TYPE,
+											   v_RECORDS,
+											   p_STATUS,
+											   p_MESSAGE);
+
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_BAL_MARKET_VIRT_LOAD(v_RECORDS,
+									v_EXT_CREDS(v_EXT_CREDS.FIRST).ISO_ACCOUNT_NAME,
+									p_STATUS,
+									p_MESSAGE);
+	END IF;
+
+END IMPORT_BAL_MARKET_VIRT_LOAD;*/
+-------------------------------------------------------------------------------------------------
+/*PROCEDURE FETCH_BAL_MARKET_VIRT_LOAD(p_DATE        IN DATE,
+									 p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+									 p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+									 p_STATUS      OUT NUMBER,
+									 p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS EXTERNAL_CREDENTIAL_TBL;
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+
+	MEX_NYISO_SETTLEMENT.FETCH_BAL_MKT_VIRT_LOAD(p_DATE,
+												 p_DOC_LIST,
+												 v_EXT_CREDS(v_EXT_CREDS.FIRST),
+												 p_REPORT_TYPE,
+												 p_STATUS,
+												 p_MESSAGE);
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.FETCH_BAL_MARKET_VIRT_LOAD: ' ||
+					 SQLERRM;
+
+END FETCH_BAL_MARKET_VIRT_LOAD;*/
+-------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DAM_VIRTUAL_LOAD(p_RECORDS     IN MEX_NY_DAM_VIR_LOAD_TBL,
+						          p_ISO_SOURCE  IN VARCHAR2,
+							      p_STATUS      OUT NUMBER,
+							      p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+
+v_SC_ID NUMBER(9) := MM_NYISO_UTIL.g_NYISO_SC_ID;
+v_PSE_ID NUMBER(9);
+v_BILLING_STATEMENT BILLING_STATEMENT%ROWTYPE;
+v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+v_MARKET_PRICE_ID_ENERGY NUMBER(9);
+v_MARKET_PRICE_ID_LOSS NUMBER(9);
+v_MARKET_PRICE_ID_CONG NUMBER(9);
+v_PRODUCT_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_CHARGE_ID NUMBER(9);
+v_SERVICE_PT_ID NUMBER(9);
+v_ITERATOR_ID NUMBER(3);
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_SERVICE_POINT_NAME VARCHAR2(32);
+v_VL_TOTAL_DAM_STLM NUMBER;
+v_LAST_INV_VERSION NUMBER(1);
+v_LAST_STATEMENT_TYPE BINARY_INTEGER;
+v_LAST_DATE DATE;
+v_LAST_SERV_PT VARCHAR2(32);
+v_REC_DATA MEX_NY_DAM_VIR_LOAD;
+v_MESSAGE VARCHAR2(256);
+
+	--Order the recordeset and skip any records that have an invoice number greater than 3
+	--those are final bill closeouts which will go away after December 2006
+	CURSOR c_ORDERED_RECORDSET IS
+		SELECT INVOICE_VERSION,CHARGE_DATE,VL_BUS_IDENT,VL_DAM_ENGY_PRICE,VL_DAM_LOSS_PRICE,VL_DAM_CONG_PRICE,VL_DAM_LOAD_ENGY,VL_TOTAL_DAM_STLM
+          FROM TABLE(CAST(p_RECORDS AS MEX_NY_DAM_VIR_LOAD_TBL))
+		  WHERE INVOICE_VERSION < 4
+		  ORDER BY INVOICE_VERSION,CHARGE_DATE, VL_BUS_IDENT;
+
+	PROCEDURE GET_TOTAL_DAY_STLMN(p_CHARGE_DATE       IN DATE,
+								  p_INV_VERS          IN NUMBER,
+								  p_VL_TOTAL_DAM_STLM OUT NUMBER) AS
+
+		CURSOR c_DAM_ENERG IS
+
+			SELECT SUM(A.VL_TOTAL_DAM_STLM) "VL_TOTAL_DAM_STLM"
+			  FROM TABLE(CAST(p_RECORDS AS MEX_NY_DAM_VIR_LOAD_TBL)) A
+			 WHERE TRUNC(A.CHARGE_DATE) = p_CHARGE_DATE
+			   AND A.INVOICE_VERSION = p_INV_VERS;
+
+	BEGIN
+
+		FOR v_DAM_ENERG IN c_DAM_ENERG LOOP
+			p_VL_TOTAL_DAM_STLM := v_DAM_ENERG.VL_TOTAL_DAM_STLM;
+		END LOOP;
+
+	END GET_TOTAL_DAY_STLMN;
+
+
+BEGIN
+
+    p_STATUS := GA.SUCCESS;
+    IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+	v_COMMODITY_ID := MM_NYISO_UTIL.GET_COMMODITY_ID(MM_NYISO_UTIL.g_DAYAHEAD, TRUE);
+
+	--UT.DEBUG_TRACE('Import Virtual Load');
+    v_PSE_ID := GET_PSE_ID(p_ISO_SOURCE);
+	v_PRODUCT_ID := GET_PRODUCT(g_VIRT_MKT_CUST);
+    v_COMPONENT_ID := GET_COMPONENT('NYISO:DAMVirtLoad');
+    v_ITERATOR.ITERATOR_ID := 0;
+
+	--billing statement initialization
+    v_BILLING_STATEMENT.ENTITY_ID := v_PSE_ID;
+	v_BILLING_STATEMENT.ENTITY_TYPE := 'PSE';
+    v_BILLING_STATEMENT.STATEMENT_STATE := GA.EXTERNAL_STATE;
+    v_BILLING_STATEMENT.AS_OF_DATE := LOW_DATE;
+    v_BILLING_STATEMENT.PRODUCT_ID := v_PRODUCT_ID;
+    v_BILLING_STATEMENT.COMPONENT_ID := v_COMPONENT_ID;
+    v_BILLING_STATEMENT.CHARGE_VIEW_TYPE := g_CHARGE_VIEW_TYPE;
+    v_BILLING_STATEMENT.CHARGE_QUANTITY := 0;
+	v_BILLING_STATEMENT.CHARGE_RATE := 1;
+	v_BILLING_STATEMENT.CHARGE_AMOUNT := 0;
+	v_BILLING_STATEMENT.BILL_QUANTITY := v_BILLING_STATEMENT.CHARGE_QUANTITY;
+	v_BILLING_STATEMENT.BILL_AMOUNT := v_BILLING_STATEMENT.CHARGE_AMOUNT;
+
+	FOR v_REC_DATA IN c_ORDERED_RECORDSET LOOP
+
+        IF v_LAST_DATE IS NULL OR (v_LAST_DATE <> TRUNC(v_REC_DATA.CHARGE_DATE)) OR
+          (v_LAST_DATE = TRUNC(v_REC_DATA.CHARGE_DATE) AND v_LAST_INV_VERSION <> v_REC_DATA.INVOICE_VERSION) THEN
+
+           --update totals for the charge_id just completed
+            IF v_LAST_STATEMENT_TYPE IS NOT NULL THEN
+			   GET_TOTAL_DAY_STLMN(v_LAST_DATE, v_LAST_INV_VERSION, v_VL_TOTAL_DAM_STLM);
+			   v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE,'Formula');
+			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_CHARGE_ID, v_COMPONENT_ID,v_VL_TOTAL_DAM_STLM,1,v_VL_TOTAL_DAM_STLM);
+           END IF;
+
+            v_LAST_DATE := TRUNC(v_REC_DATA.CHARGE_DATE);
+			v_LAST_INV_VERSION := v_REC_DATA.INVOICE_VERSION;
+            v_LAST_STATEMENT_TYPE := GET_STATEMENT_TYPE(v_REC_DATA.INVOICE_VERSION);
+
+            -- clear out billing statement
+			DELETE_BILLING_STATEMENT(v_PSE_ID, v_PRODUCT_ID, v_COMPONENT_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE);
+
+            v_BILLING_STATEMENT.STATEMENT_TYPE := v_LAST_STATEMENT_TYPE;
+            v_BILLING_STATEMENT.STATEMENT_DATE := v_LAST_DATE;
+            v_BILLING_STATEMENT.STATEMENT_END_DATE := v_LAST_DATE;
+
+            PUT_BILLING_STATEMENT(v_BILLING_STATEMENT, 0,v_COMPONENT_ID, 0, 1, 0);
+
+            v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,
+			                             v_COMPONENT_ID,
+										 v_LAST_STATEMENT_TYPE,
+                                         TRUNC(v_REC_DATA.CHARGE_DATE),
+										 'Formula');
+
+			v_ITERATOR_NAME.CHARGE_ID := v_CHARGE_ID;
+			v_ITERATOR_NAME.ITERATOR_NAME1 := 'ServPoint';
+			v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+			PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        	v_ITERATOR.CHARGE_ID := v_CHARGE_ID;
+
+        END IF;
+
+		--GET SERVICE POINT ID BASED ON EXTERNAL IDENT
+        IF v_LAST_SERV_PT IS NULL OR v_LAST_SERV_PT <> v_REC_DATA.VL_BUS_IDENT THEN
+			v_LAST_SERV_PT := v_REC_DATA.VL_BUS_IDENT;
+			GET_SERVICE_POINT(v_LAST_SERV_PT,TRUE, v_SERVICE_POINT_NAME, v_SERVICE_PT_ID);
+
+			--GET MARKET PRICE IDs
+			v_MARKET_PRICE_ID_ENERGY := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (DA LMP)', --Market Price Name
+    						                                    MM_NYISO_UTIL.g_DAYAHEAD, --Market Type
+    						                                    'Locational Marginal Price', --Market Price Type
+    						            						v_COMMODITY_ID, --Commodity ID
+    						            						v_SC_ID,
+    						            						TRUE,
+    						            						v_MESSAGE,
+    															v_SERVICE_PT_ID);
+
+			v_MARKET_PRICE_ID_LOSS := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (DA MLC)', --Market Price Name
+    		            									  MM_NYISO_UTIL.g_DAYAHEAD, --Market Type
+    		                        						  'Marginal Loss Component', --Market Price Type
+    		                        						  v_COMMODITY_ID, --Commodity ID
+    		                        						  v_SC_ID,
+    		                        					      TRUE,
+    		                                                  v_MESSAGE,
+    								                          v_SERVICE_PT_ID);
+
+
+			v_MARKET_PRICE_ID_CONG := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (DA MCC)', --Market Price Name
+    						            					  MM_NYISO_UTIL.g_DAYAHEAD, --Market Type
+    						            					  'Marginal Congestion Component', --Market Price Type
+    						            					  v_COMMODITY_ID, --Commodity ID
+    						            					  v_SC_ID,
+    						            					  TRUE,
+    						            					  v_MESSAGE,
+    														  v_SERVICE_PT_ID);
+
+			IF v_ITERATOR_ID_MAP.EXISTS(v_SERVICE_POINT_NAME) THEN
+				v_ITERATOR_ID := v_ITERATOR_ID_MAP(v_SERVICE_POINT_NAME);
+            	v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID;
+			ELSE
+				v_ITERATOR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID + 1;
+            	v_ITERATOR_ID_MAP(v_SERVICE_POINT_NAME) := v_ITERATOR.ITERATOR_ID;
+            	v_ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        	END IF;
+			v_ITERATOR.ITERATOR1 := v_SERVICE_POINT_NAME;
+			v_ITERATOR.ITERATOR2 := NULL;
+			v_ITERATOR.ITERATOR3 := NULL;
+			v_ITERATOR.ITERATOR4 := NULL;
+			v_ITERATOR.ITERATOR5 := NULL;
+        	PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+        END IF;
+
+
+	    PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,
+                                'DAMVLEnergyPrice', --variable_name
+                                v_REC_DATA.VL_DAM_ENGY_PRICE, --variable_val
+                                v_ITERATOR_ID);
+
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,
+                                'DAMVLLossPrice', --variable_name
+                                v_REC_DATA.VL_DAM_LOSS_PRICE, --variable_val
+                                v_ITERATOR_ID);
+
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,
+                                'DAMVLCongPrice', --variable_name
+                                v_REC_DATA.VL_DAM_CONG_PRICE, --variable_val
+                                v_ITERATOR_ID);
+
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,
+                                'DAMVLEnergy', --variable_name
+                                v_REC_DATA.VL_DAM_LOAD_ENGY, --variable_val
+                                v_ITERATOR_ID);
+
+		IF 	v_REC_DATA.VL_DAM_LOAD_ENGY = 0 THEN
+			v_VL_TOTAL_DAM_STLM := 0;
+		ELSE
+			v_VL_TOTAL_DAM_STLM := v_REC_DATA.VL_TOTAL_DAM_STLM / v_REC_DATA.VL_DAM_LOAD_ENGY;
+		END IF;
+        PUT_FORMULA_CHARGE(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,
+                            v_REC_DATA.VL_DAM_LOAD_ENGY, --charge_quantity
+                            v_VL_TOTAL_DAM_STLM, --charge_rate
+                            1, --charge_factor
+                            v_ITERATOR_ID);
+
+        --populate market prices
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_ENERGY,
+									   p_PRICE_DATE      => v_REC_DATA.CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_REC_DATA.VL_DAM_ENGY_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_LOSS,
+									   p_PRICE_DATE      => v_REC_DATA.CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_REC_DATA.VL_DAM_LOSS_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_CONG,
+									   p_PRICE_DATE      => v_REC_DATA.CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_REC_DATA.VL_DAM_CONG_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+
+    END LOOP;
+
+    --update billing statement with FINAL charge_id
+	GET_TOTAL_DAY_STLMN(v_LAST_DATE, v_LAST_INV_VERSION, v_VL_TOTAL_DAM_STLM);
+	PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0,v_COMPONENT_ID,v_VL_TOTAL_DAM_STLM,1,v_VL_TOTAL_DAM_STLM);
+    COMMIT;
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_DAM_VIRTUAL_LOAD: ' ||
+					 SQLERRM);
+
+END IMPORT_DAM_VIRTUAL_LOAD;
+-------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DAM_VIRTUAL_LOAD(p_CRED IN mex_credentials,
+								  p_DATE        IN DATE,
+								  p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+								  p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+								  p_STATUS      OUT NUMBER,
+								  p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_RECORDS        MEX_NY_DAM_VIR_LOAD_TBL;
+
+BEGIN
+
+	MEX_NYISO_SETTLEMENT.FETCH_DAM_VIRTUAL_LOAD(p_DATE,
+												p_DOC_LIST,
+												p_CRED,
+												p_REPORT_TYPE,
+												v_RECORDS,
+												p_STATUS,
+												p_LOGGER);
+
+    IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+        IMPORT_DAM_VIRTUAL_LOAD(v_RECORDS,
+								p_CRED.EXTERNAL_ACCOUNT_NAME,
+								p_STATUS,
+								p_LOGGER);
+	END IF;
+
+END IMPORT_DAM_VIRTUAL_LOAD;
+-------------------------------------------------------------------------------------------
+/*PROCEDURE IMPORT_DAM_VIRTUAL_LOAD(p_CRED IM MEX_CREDENTIALS,
+                                   p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+								  p_STATUS      OUT NUMBER,
+								  p_LOGGER     IN OUT NOCOPY MM_LOGGER_ADAPTER) IS
+
+	v_RECORDS        MEX_NY_DAM_VIR_LOAD_TBL;
+
+BEGIN
+
+
+	MEX_NYISO_SETTLEMENT.GET_DAM_VIRTUAL_LOAD(p_REPORT_TYPE,
+												v_RECORDS,
+												p_STATUS,
+												p_LOGGER);
+
+    IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+        IMPORT_DAM_VIRTUAL_LOAD(v_RECORDS,
+								p_CRED.EXTERNAL_ACCOUNT_NAME,
+								p_STATUS,
+								p_LOGGER);
+
+	END IF;
+
+END IMPORT_DAM_VIRTUAL_LOAD;*/
+--------------------------------------------------------------------------------------------
+/*PROCEDURE FETCH_DAM_VIRTUAL_LOAD(p_DATE        IN DATE,
+								  p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+								  p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+								  p_STATUS      OUT NUMBER,
+								  p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS      EXTERNAL_CREDENTIAL_TBL;
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+	MEX_NYISO_SETTLEMENT.FETCH_DAM_VIRTUAL_LOAD(p_DATE,
+												p_DOC_LIST,
+												v_EXT_CREDS(v_EXT_CREDS.FIRST),
+												p_REPORT_TYPE,
+												p_STATUS,
+												p_MESSAGE);
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.IMPORT_DAM_VIRTUAL_LOAD: ' ||
+					 SQLERRM;
+
+END FETCH_DAM_VIRTUAL_LOAD;*/
+----------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DAM_VIRTUAL_LOAD(p_CSV        IN CLOB,
+								  p_ISO_SOURCE IN VARCHAR2,
+								  p_LOG_TYPE    IN NUMBER,
+   						   		  p_TRACE_ON    IN NUMBER,
+								  p_STATUS     OUT NUMBER,
+								  p_MESSAGE    OUT VARCHAR2) AS
+
+	v_RECORDS MEX_NY_DAM_VIR_LOAD_TBL;
+	v_LOGGER mm_logger_adapter;
+BEGIN
+	--For testing
+    p_STATUS := GA.SUCCESS;
+	v_LOGGER := MM_UTIL.GET_LOGGER(EC.ES_NYISO_DSS,
+                                   NULL,
+                                   'Import NYISO-DSS Virtual Supply file',
+                                   'Import NYISO-DSS Virtual Supply file',
+                                   p_LOG_TYPE,
+                                   p_TRACE_ON);
+	MM_UTIL.START_EXCHANGE(TRUE, v_LOGGER);
+	MEX_NYISO_SETTLEMENT.PARSE_DAM_VIRTUAL_LOAD(p_CSV,
+												v_RECORDS,
+												p_STATUS,
+												v_LOGGER);
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_DAM_VIRTUAL_LOAD(v_RECORDS,
+								p_ISO_SOURCE,
+								p_STATUS,
+								v_LOGGER);
+	END IF;
+
+END IMPORT_DAM_VIRTUAL_LOAD;
+-------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DAM_VIRTUAL_SUPPLY(p_RECORDS     IN  MEX_NY_DAM_VIR_SUP_TBL,
+						            p_ISO_SOURCE  IN VARCHAR2,
+							        p_STATUS      OUT NUMBER,
+							        p_LOGGER      IN OUT NOCOPY mm_logger_adapter) IS
+
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+
+
+
+v_SC_ID NUMBER(9) := MM_NYISO_UTIL.g_NYISO_SC_ID;
+v_PSE_ID NUMBER(9);
+v_BILLING_STATEMENT BILLING_STATEMENT%ROWTYPE;
+v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+v_MARKET_PRICE_ID_ENERGY NUMBER(9);
+v_MARKET_PRICE_ID_LOSS NUMBER(9);
+v_MARKET_PRICE_ID_CONG NUMBER(9);
+v_PRODUCT_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_CHARGE_ID NUMBER(9);
+v_SERVICE_PT_ID NUMBER(9);
+v_ITERATOR_ID NUMBER(3);
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_SERVICE_POINT_NAME VARCHAR2(32);
+v_TOTAL_VS_DAM_STLM NUMBER;
+v_LAST_INV_VERSION NUMBER(1);
+v_LAST_STATEMENT_TYPE BINARY_INTEGER;
+v_LAST_DATE DATE;
+v_LAST_SERV_PT VARCHAR2(32);
+v_REC_DATA  MEX_NY_DAM_VIR_SUP;
+v_MESSAGE VARCHAR2(256);
+
+	--Order the recordeset and skip any records that have an invoice number greater than 3
+	--those are final bill closeouts which will go away after December 2006
+	CURSOR c_ORDERED_RECORDSET IS
+		SELECT INVOICE_VERSION,CHARGE_DATE,VS_BUS_IDENT,VS_DAM_ENGY_PRICE,VS_DAM_LOSS_PRICE,VS_DAM_CONG_PRICE,VS_DAM_SUPPLY_ENGY,VS_TOTAL_DAM_STLM
+          FROM TABLE(CAST(p_RECORDS AS MEX_NY_DAM_VIR_SUP_TBL))
+		  WHERE INVOICE_VERSION < 4
+		  ORDER BY INVOICE_VERSION,CHARGE_DATE,VS_BUS_IDENT;
+
+
+	PROCEDURE GET_TOTAL_DAY_STLMN(p_CHARGE_DATE       IN DATE,
+								  p_INV_VERS          IN NUMBER,
+								  p_VS_TOTAL_DAM_STLM OUT NUMBER) AS
+
+		CURSOR c_DAM_ENERG IS
+
+			SELECT SUM(A.VS_TOTAL_DAM_STLM) "VS_TOTAL_DAM_STLM"
+			  FROM TABLE(CAST(p_RECORDS AS MEX_NY_DAM_VIR_SUP_TBL)) A
+			 WHERE TRUNC(A.CHARGE_DATE) = p_CHARGE_DATE
+			   AND A.INVOICE_VERSION = p_INV_VERS;
+
+	BEGIN
+
+		FOR v_DAM_ENERG IN c_DAM_ENERG LOOP
+			p_VS_TOTAL_DAM_STLM := v_DAM_ENERG.VS_TOTAL_DAM_STLM;
+		END LOOP;
+
+	END GET_TOTAL_DAY_STLMN;
+
+
+
+BEGIN
+
+    p_STATUS := GA.SUCCESS;
+    IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+    v_COMMODITY_ID := MM_NYISO_UTIL.GET_COMMODITY_ID(MM_NYISO_UTIL.g_DAYAHEAD, TRUE);
+
+    v_PSE_ID := GET_PSE_ID(p_ISO_SOURCE);
+	v_PRODUCT_ID := GET_PRODUCT(g_VIRT_MKT_CUST);
+    v_COMPONENT_ID := GET_COMPONENT('NYISO:DAMVirtSupply');
+    v_ITERATOR.ITERATOR_ID := 0;
+
+	--billing statement initialization
+    v_BILLING_STATEMENT.ENTITY_ID := v_PSE_ID;
+	v_BILLING_STATEMENT.ENTITY_TYPE := 'PSE';
+    v_BILLING_STATEMENT.STATEMENT_STATE := GA.EXTERNAL_STATE;
+    v_BILLING_STATEMENT.AS_OF_DATE := LOW_DATE;
+    v_BILLING_STATEMENT.PRODUCT_ID := v_PRODUCT_ID;
+    v_BILLING_STATEMENT.COMPONENT_ID := v_COMPONENT_ID;
+    v_BILLING_STATEMENT.CHARGE_VIEW_TYPE := g_CHARGE_VIEW_TYPE;
+    v_BILLING_STATEMENT.CHARGE_QUANTITY := 0;
+	v_BILLING_STATEMENT.CHARGE_RATE := 1;
+	v_BILLING_STATEMENT.CHARGE_AMOUNT := 0;
+	v_BILLING_STATEMENT.BILL_QUANTITY := v_BILLING_STATEMENT.CHARGE_QUANTITY;
+	v_BILLING_STATEMENT.BILL_AMOUNT := v_BILLING_STATEMENT.CHARGE_AMOUNT;
+
+   	FOR v_REC_DATA IN c_ORDERED_RECORDSET LOOP
+
+        IF v_LAST_DATE IS NULL OR (v_LAST_DATE <> TRUNC(v_REC_DATA.CHARGE_DATE)) OR
+          (v_LAST_DATE = TRUNC(v_REC_DATA.CHARGE_DATE) AND v_LAST_INV_VERSION <> v_REC_DATA.INVOICE_VERSION) THEN
+
+           --update totals for the charge_id just completed
+           IF v_LAST_STATEMENT_TYPE IS NOT NULL THEN
+			   GET_TOTAL_DAY_STLMN(v_LAST_DATE, v_LAST_INV_VERSION, v_TOTAL_VS_DAM_STLM);
+			   v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE,'Formula');
+			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_CHARGE_ID, v_COMPONENT_ID,v_TOTAL_VS_DAM_STLM,1,v_TOTAL_VS_DAM_STLM);
+           END IF;
+
+            v_LAST_DATE := TRUNC(v_REC_DATA.CHARGE_DATE);
+			v_LAST_INV_VERSION := v_REC_DATA.INVOICE_VERSION;
+            v_LAST_STATEMENT_TYPE := GET_STATEMENT_TYPE(v_REC_DATA.INVOICE_VERSION);
+
+            -- clear out billing statement
+			DELETE_BILLING_STATEMENT(v_PSE_ID, v_PRODUCT_ID, v_COMPONENT_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE);
+
+
+            v_BILLING_STATEMENT.STATEMENT_TYPE := v_LAST_STATEMENT_TYPE;
+            v_BILLING_STATEMENT.STATEMENT_DATE := v_LAST_DATE;
+            v_BILLING_STATEMENT.STATEMENT_END_DATE := v_LAST_DATE;
+
+            PUT_BILLING_STATEMENT(v_BILLING_STATEMENT, 0,v_COMPONENT_ID, 0, 1, 0);
+
+            v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,
+			                             v_COMPONENT_ID,
+										 v_LAST_STATEMENT_TYPE,
+                                         TRUNC(v_REC_DATA.CHARGE_DATE),
+										 'Formula');
+
+			v_ITERATOR_NAME.CHARGE_ID := v_CHARGE_ID;
+			v_ITERATOR_NAME.ITERATOR_NAME1 := 'ServPoint';
+			v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+			PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        	v_ITERATOR.CHARGE_ID := v_CHARGE_ID;
+
+        END IF;
+
+   		--GET SERVICE POINT ID BASED ON EXTERNAL IDENT
+        IF v_LAST_SERV_PT IS NULL OR v_LAST_SERV_PT <> v_REC_DATA.VS_BUS_IDENT THEN
+			v_LAST_SERV_PT := v_REC_DATA.VS_BUS_IDENT;
+			GET_SERVICE_POINT(v_LAST_SERV_PT,TRUE, v_SERVICE_POINT_NAME, v_SERVICE_PT_ID);
+
+			---GET MARKET PRICE IDs
+			v_MARKET_PRICE_ID_ENERGY := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (DA LMP)', --Market Price Name
+    						                                    MM_NYISO_UTIL.g_DAYAHEAD, --Market Type
+    						                                    'Locational Marginal Price', --Market Price Type
+    						            						v_COMMODITY_ID, --Commodity ID
+    						            						v_SC_ID,
+    						            						TRUE,
+    						            						v_MESSAGE,
+    															v_SERVICE_PT_ID);
+
+			 v_MARKET_PRICE_ID_LOSS := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (DA MLC)', --Market Price Name
+    		            									  MM_NYISO_UTIL.g_DAYAHEAD, --Market Type
+    		                        						  'Marginal Loss Component', --Market Price Type
+    		                        						  v_COMMODITY_ID, --Commodity ID
+    		                        						  v_SC_ID,
+    		                        					      TRUE,
+    		                                                  v_MESSAGE,
+    								                          v_SERVICE_PT_ID);
+
+			v_MARKET_PRICE_ID_CONG := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (DA MCC)', --Market Price Name
+    						            					  MM_NYISO_UTIL.g_DAYAHEAD, --Market Type
+    						            					  'Marginal Congestion Component', --Market Price Type
+    						            					  v_COMMODITY_ID, --Commodity ID
+    						            					  v_SC_ID,
+    						            					  TRUE,
+    						            					  v_MESSAGE,
+    														  v_SERVICE_PT_ID);
+
+			IF v_ITERATOR_ID_MAP.EXISTS(v_SERVICE_POINT_NAME) THEN
+				v_ITERATOR_ID := v_ITERATOR_ID_MAP(v_SERVICE_POINT_NAME);
+            	v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID;
+			ELSE
+				v_ITERATOR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID + 1;
+            	v_ITERATOR_ID_MAP(v_SERVICE_POINT_NAME) := v_ITERATOR.ITERATOR_ID;
+            	v_ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        	END IF;
+			v_ITERATOR.ITERATOR1 := v_SERVICE_POINT_NAME;
+			v_ITERATOR.ITERATOR2 := NULL;
+			v_ITERATOR.ITERATOR3 := NULL;
+			v_ITERATOR.ITERATOR4 := NULL;
+			v_ITERATOR.ITERATOR5 := NULL;
+        	PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+        END IF;
+
+	    PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'VSDAMEnergyPrice',v_REC_DATA.VS_DAM_ENGY_PRICE, v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'VSDAMLossPrice', v_REC_DATA.VS_DAM_LOSS_PRICE, v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'VSDAMCongPrice', v_REC_DATA.VS_DAM_CONG_PRICE, v_ITERATOR_ID);
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,'VSDAMSchedLoad', v_REC_DATA.VS_DAM_SUPPLY_ENGY, v_ITERATOR_ID);
+
+		IF 	v_REC_DATA.VS_DAM_SUPPLY_ENGY = 0 THEN
+			v_TOTAL_VS_DAM_STLM := 0;
+		ELSE
+			v_TOTAL_VS_DAM_STLM := v_REC_DATA.VS_TOTAL_DAM_STLM /  v_REC_DATA.VS_DAM_SUPPLY_ENGY;
+		END IF;
+        PUT_FORMULA_CHARGE(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE, v_REC_DATA.VS_DAM_SUPPLY_ENGY, v_TOTAL_VS_DAM_STLM, 1, v_ITERATOR_ID);
+
+        --populate market prices
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_ENERGY,
+									   p_PRICE_DATE      => v_REC_DATA.CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_REC_DATA.VS_DAM_ENGY_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_LOSS,
+									   p_PRICE_DATE      => v_REC_DATA.CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_REC_DATA.VS_DAM_LOSS_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_CONG,
+									   p_PRICE_DATE      => v_REC_DATA.CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_REC_DATA.VS_DAM_CONG_PRICE,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+    END LOOP;
+
+    --update billing statement with FINAL charge_id
+	GET_TOTAL_DAY_STLMN(v_LAST_DATE, v_LAST_INV_VERSION, v_TOTAL_VS_DAM_STLM);
+	PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0,v_COMPONENT_ID,v_TOTAL_VS_DAM_STLM,1,v_TOTAL_VS_DAM_STLM);
+    COMMIT;
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_DAM_VIRTUAL_SUPPLY: ' ||
+					 SQLERRM);
+
+END IMPORT_DAM_VIRTUAL_SUPPLY;
+------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DAM_VIRTUAL_SUPPLY(p_CSV        IN CLOB,
+									p_ISO_SOURCE IN VARCHAR2,
+									p_LOG_TYPE    IN NUMBER,
+    								p_TRACE_ON    IN NUMBER,
+									p_STATUS     OUT NUMBER,
+									p_MESSAGE    OUT VARCHAR2) AS
+
+	v_RECORDS MEX_NY_DAM_VIR_SUP_TBL;
+	v_LOGGER  MM_LOGGER_ADAPTER;
+
+BEGIN
+	--For testing
+    p_STATUS := GA.SUCCESS;
+	v_LOGGER := MM_UTIL.GET_LOGGER(EC.ES_NYISO_DSS,
+                                   NULL,
+                                   'Import NYISO-DSS Virtual Supply file',
+                                   'Import NYISO-DSS Virtual Supply file',
+                                   p_LOG_TYPE,
+                                   p_TRACE_ON);
+	MM_UTIL.START_EXCHANGE(TRUE, v_LOGGER);
+
+	MEX_NYISO_SETTLEMENT.PARSE_DAM_VIRTUAL_SUPPLY(p_CSV,
+												  v_RECORDS,
+												  p_STATUS,
+												  v_LOGGER);
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_DAM_VIRTUAL_SUPPLY(v_RECORDS,
+								  p_ISO_SOURCE,
+								  p_STATUS,
+								  v_LOGGER);
+	END IF;
+
+END IMPORT_DAM_VIRTUAL_SUPPLY;
+--------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DAM_VIRTUAL_SUPPLY(p_CRED        IN MEX_CREDENTIALS,
+									p_DATE        IN DATE,
+								    p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+								    p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+								    p_STATUS      OUT NUMBER,
+								    p_LOGGER      IN OUT NOCOPY mm_logger_adapter) IS
+
+
+	v_RECORDS   MEX_NY_DAM_VIR_SUP_TBL;
+
+BEGIN
+
+	MEX_NYISO_SETTLEMENT.FETCH_DAM_VIRTUAL_SUPPLY(p_DATE,
+												  p_DOC_LIST,
+												  p_CRED,
+												  p_REPORT_TYPE,
+												  v_RECORDS,
+												  p_STATUS,
+												  p_LOGGER);
+
+    IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+        IMPORT_DAM_VIRTUAL_SUPPLY(v_RECORDS,
+							   p_CRED.EXTERNAL_ACCOUNT_NAME,
+							   p_STATUS,
+							   p_LOGGER);
+	END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_DAM_VIRTUAL_SUPPLY: ' ||
+					 SQLERRM);
+
+END IMPORT_DAM_VIRTUAL_SUPPLY;
+-------------------------------------------------------------------------------------------------
+/*PROCEDURE IMPORT_DAM_VIRTUAL_SUPPLY(p_CRED        IN MEX_CREDENTIALS,
+                                    p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+								    p_STATUS      OUT NUMBER,
+								    p_LOGGER      IN OUT NOCOPY MM_LOGGER_ADAPTER) IS
+
+	v_RECORDS   MEX_NY_DAM_VIR_SUP_TBL;
+
+BEGIN
+
+	MEX_NYISO_SETTLEMENT.GET_DAM_VIRTUAL_SUPPLY(p_REPORT_TYPE,
+												  v_RECORDS,
+												  p_STATUS,
+												   p_LOGGER);
+
+    IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+        IMPORT_DAM_VIRTUAL_SUPPLY(v_RECORDS,
+							   p_CRED.EXTERNAL_ACCOUNT_NAME,
+							   p_STATUS,
+							   p_LOGGER);
+	END IF;
+
+END IMPORT_DAM_VIRTUAL_SUPPLY;*/
+--------------------------------------------------------------------------------------------------
+/*PROCEDURE FETCH_DAM_VIRTUAL_SUPPLY(p_DATE        IN DATE,
+								 p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+								 p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+								 p_STATUS      OUT NUMBER,
+								 p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS EXTERNAL_CREDENTIAL_TBL;
+
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+	MEX_NYISO_SETTLEMENT.FETCH_DAM_VIRTUAL_SUPPLY(p_DATE,
+												  p_DOC_LIST,
+												  v_EXT_CREDS(v_EXT_CREDS.FIRST),
+												  p_REPORT_TYPE,
+												  p_STATUS,
+												  p_MESSAGE);
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.IMPORT_DAM_VIRTUAL_SUPPLY: ' ||
+					 SQLERRM;
+
+END FETCH_DAM_VIRTUAL_SUPPLY;*/
+-------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DAM_ENERGY(p_RECORDS     IN MEX_NY_DAM_ENERGY_TBL,
+						    p_ISO_SOURCE  IN VARCHAR2,
+							p_STATUS      OUT NUMBER,
+							p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+
+v_SC_ID NUMBER(9) := MM_NYISO_UTIL.g_NYISO_SC_ID;
+v_PSE_ID NUMBER(9);
+v_BILLING_STATEMENT BILLING_STATEMENT%ROWTYPE;
+v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+v_MARKET_PRICE_ID_ENERGY NUMBER(9);
+v_MARKET_PRICE_ID_LOSS NUMBER(9);
+v_MARKET_PRICE_ID_CONG NUMBER(9);
+v_PRODUCT_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_CHARGE_ID NUMBER(9);
+v_SERVICE_PT_ID NUMBER(9);
+v_ITERATOR_ID NUMBER(3);
+
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_SERVICE_POINT_NAME VARCHAR2(32);
+
+v_TOTAL_DAM_STLM NUMBER;
+v_LAST_INV_VERSION NUMBER(1);
+v_LAST_STATEMENT_TYPE BINARY_INTEGER;
+v_LAST_DATE DATE;
+v_LAST_SERV_PT VARCHAR2(32);
+v_REC_DATA MEX_NY_DAM_ENERGY;
+v_MESSAGE VARCHAR2(256);
+
+	--Order the recordeset and skip any records that have an invoice number greater than 3
+	--those are final bill closeouts which will go away after December 2006
+	CURSOR c_ORDERED_RECORDSET IS
+		SELECT INVOICE_VERSION,CHARGE_DATE,SERVICE_POINT_ID,LMBP_DAM_ENERGY, LMBP_DAM_LOSS, LMBP_DAM_CONG, DAM_SCH_LOAD,TOTAL_DAM_STLM
+          FROM TABLE(CAST(p_RECORDS AS MEX_NY_DAM_ENERGY_TBL))
+		  WHERE INVOICE_VERSION < 4
+		  ORDER BY INVOICE_VERSION,CHARGE_DATE,SERVICE_POINT_ID;
+
+	PROCEDURE GET_TOTAL_DAY_DAM_STLMN(p_CHARGE_DATE    IN DATE,
+									  p_INV_VERS       IN NUMBER,
+									  p_TOTAL_DAM_STLM OUT NUMBER) AS
+
+		CURSOR c_DAM_ENERG IS
+
+			SELECT SUM(A.TOTAL_DAM_STLM) "TOTAL_DAM_STLM"
+			  FROM TABLE(CAST(p_RECORDS AS MEX_NY_DAM_ENERGY_TBL)) A
+			 WHERE TRUNC(A.CHARGE_DATE) = p_CHARGE_DATE
+			   AND A.INVOICE_VERSION = p_INV_VERS;
+
+	BEGIN
+
+		FOR v_DAM_ENERG IN c_DAM_ENERG LOOP
+			p_TOTAL_DAM_STLM := v_DAM_ENERG.TOTAL_DAM_STLM;
+		END LOOP;
+
+	END GET_TOTAL_DAY_DAM_STLMN;
+
+
+BEGIN
+
+    p_STATUS := GA.SUCCESS;
+    IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+    ID.ID_FOR_COMMODITY('DayAhead Energy',FALSE, v_COMMODITY_ID);
+
+    v_PSE_ID := GET_PSE_ID(p_ISO_SOURCE);
+	v_PRODUCT_ID := GET_PRODUCT(g_DAM_ENERG_PRODUCT);
+    v_COMPONENT_ID := GET_COMPONENT('NYISO:DAMMktEnrg');
+    v_ITERATOR.ITERATOR_ID := 0;
+
+	--billing statement initialization
+    v_BILLING_STATEMENT.ENTITY_ID := v_PSE_ID;
+	v_BILLING_STATEMENT.ENTITY_TYPE := 'PSE';
+    v_BILLING_STATEMENT.STATEMENT_STATE := GA.EXTERNAL_STATE;
+    v_BILLING_STATEMENT.AS_OF_DATE := LOW_DATE;
+    v_BILLING_STATEMENT.PRODUCT_ID := v_PRODUCT_ID;
+    v_BILLING_STATEMENT.COMPONENT_ID := v_COMPONENT_ID;
+    v_BILLING_STATEMENT.CHARGE_VIEW_TYPE := g_CHARGE_VIEW_TYPE;
+    v_BILLING_STATEMENT.CHARGE_QUANTITY := 0;
+	v_BILLING_STATEMENT.CHARGE_RATE := 1;
+	v_BILLING_STATEMENT.CHARGE_AMOUNT := 0;
+	v_BILLING_STATEMENT.BILL_QUANTITY := v_BILLING_STATEMENT.CHARGE_QUANTITY;
+	v_BILLING_STATEMENT.BILL_AMOUNT := v_BILLING_STATEMENT.CHARGE_AMOUNT;
+
+
+    FOR v_REC_DATA IN c_ORDERED_RECORDSET LOOP
+
+        IF v_LAST_DATE IS NULL OR (v_LAST_DATE <> TRUNC(v_REC_DATA.CHARGE_DATE)) OR
+          (v_LAST_DATE = TRUNC(v_REC_DATA.CHARGE_DATE) AND v_LAST_INV_VERSION <> v_REC_DATA.INVOICE_VERSION) THEN
+
+           --update totals for the charge_id just completed
+           IF v_LAST_STATEMENT_TYPE IS NOT NULL THEN
+			   GET_TOTAL_DAY_DAM_STLMN(v_LAST_DATE, v_LAST_INV_VERSION, v_TOTAL_DAM_STLM);
+			   v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE,'Formula');
+			   PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,v_CHARGE_ID, v_COMPONENT_ID,v_TOTAL_DAM_STLM,1,v_TOTAL_DAM_STLM);
+           END IF;
+
+            v_LAST_DATE := TRUNC(v_REC_DATA.CHARGE_DATE);
+			v_LAST_INV_VERSION := v_REC_DATA.INVOICE_VERSION;
+            v_LAST_STATEMENT_TYPE := GET_STATEMENT_TYPE(v_REC_DATA.INVOICE_VERSION);
+
+            -- clear out billing statement
+			DELETE_BILLING_STATEMENT(v_PSE_ID, v_PRODUCT_ID, v_COMPONENT_ID, v_LAST_STATEMENT_TYPE, v_LAST_DATE);
+
+			v_BILLING_STATEMENT.STATEMENT_TYPE := v_LAST_STATEMENT_TYPE;
+            v_BILLING_STATEMENT.STATEMENT_DATE := v_LAST_DATE;
+            v_BILLING_STATEMENT.STATEMENT_END_DATE := v_LAST_DATE;
+
+            PUT_BILLING_STATEMENT(v_BILLING_STATEMENT, 0,v_COMPONENT_ID, 0, 1, 0);
+
+            v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,
+			                             v_COMPONENT_ID,
+										 v_LAST_STATEMENT_TYPE,
+                                         TRUNC(v_REC_DATA.CHARGE_DATE),
+										 'Formula');
+
+			v_ITERATOR_NAME.CHARGE_ID := v_CHARGE_ID;
+			v_ITERATOR_NAME.ITERATOR_NAME1 := 'ServPoint';
+			v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+			v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+			PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+			v_ITERATOR.CHARGE_ID := v_CHARGE_ID;
+        END IF;
+
+   		--GET SERVICE POINT ID BASED ON EXTERNAL IDENT
+        IF v_LAST_SERV_PT IS NULL OR v_LAST_SERV_PT <> v_REC_DATA.SERVICE_POINT_ID THEN
+			v_LAST_SERV_PT := v_REC_DATA.SERVICE_POINT_ID;
+			GET_SERVICE_POINT(v_LAST_SERV_PT,TRUE, v_SERVICE_POINT_NAME, v_SERVICE_PT_ID);
+
+			--GET MARKET PRICE IDs
+			v_MARKET_PRICE_ID_ENERGY := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (DA LMP)', --Market Price Name
+						                                    MM_NYISO_UTIL.g_DAYAHEAD, --Market Type
+						                                    'Locational Marginal Price', --Market Price Type
+						            						v_COMMODITY_ID, --Commodity ID
+						            						v_SC_ID,
+						            						TRUE,
+						            						v_MESSAGE,
+															v_SERVICE_PT_ID);
+
+			v_MARKET_PRICE_ID_LOSS := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (DA MLC)', --Market Price Name
+		            									  MM_NYISO_UTIL.g_DAYAHEAD, --Market Type
+		                        						  'Marginal Loss Component', --Market Price Type
+		                        						  v_COMMODITY_ID, --Commodity ID
+		                        						  v_SC_ID,
+		                        					      TRUE,
+		                                                  v_MESSAGE,
+								                          v_SERVICE_PT_ID);
+
+  			v_MARKET_PRICE_ID_CONG := GET_ID_FOR_MARKET_PRICE(v_SERVICE_POINT_NAME || ' (DA MCC)', --Market Price Name
+						            					  MM_NYISO_UTIL.g_DAYAHEAD, --Market Type
+						            					  'Marginal Congestion Component', --Market Price Type
+						            					  v_COMMODITY_ID, --Commodity ID
+						            					  v_SC_ID,
+						            					  TRUE,
+						            					  v_MESSAGE,
+														  v_SERVICE_PT_ID);
+
+			IF v_ITERATOR_ID_MAP.EXISTS(v_SERVICE_POINT_NAME) THEN
+				v_ITERATOR_ID := v_ITERATOR_ID_MAP(v_SERVICE_POINT_NAME);
+        		v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID;
+			ELSE
+				v_ITERATOR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID + 1;
+        		v_ITERATOR_ID_MAP(v_SERVICE_POINT_NAME) := v_ITERATOR.ITERATOR_ID;
+        		v_ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+    		END IF;
+            v_ITERATOR.ITERATOR1 := v_SERVICE_POINT_NAME;
+            v_ITERATOR.ITERATOR2 := NULL;
+            v_ITERATOR.ITERATOR3 := NULL;
+            v_ITERATOR.ITERATOR4 := NULL;
+            v_ITERATOR.ITERATOR5 := NULL;
+    		PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+        END IF;
+
+
+	    PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,
+                                'DAMEnergyPrice', --variable_name
+                                v_REC_DATA.LMBP_DAM_ENERGY, --variable_val
+                                v_ITERATOR_ID);
+
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,
+                                'DAMLossPrice', --variable_name
+                                v_REC_DATA.LMBP_DAM_LOSS, --variable_val
+                                v_ITERATOR_ID);
+
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,
+                                'DAMCongPrice', --variable_name
+                                v_REC_DATA.LMBP_DAM_CONG, --variable_val
+                                v_ITERATOR_ID);
+
+		PUT_FORMULA_CHARGE_VAR(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,
+                                'DAMSchedLoad', --variable_name
+                                v_REC_DATA.DAM_SCH_LOAD, --variable_val
+                                v_ITERATOR_ID);
+
+		IF 	v_REC_DATA.DAM_SCH_LOAD = 0 THEN
+			v_TOTAL_DAM_STLM := 0;
+		ELSE
+			v_TOTAL_DAM_STLM := v_REC_DATA.TOTAL_DAM_STLM /  v_REC_DATA.DAM_SCH_LOAD;
+		END IF;
+        PUT_FORMULA_CHARGE(v_CHARGE_ID, v_REC_DATA.CHARGE_DATE,
+                            v_REC_DATA.DAM_SCH_LOAD, --charge_quantity
+                            v_TOTAL_DAM_STLM, --charge_rate
+                            1, --charge_factor
+                            v_ITERATOR_ID);
+
+        --populate market prices
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_ENERGY,
+									   p_PRICE_DATE      => v_REC_DATA.CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_REC_DATA.LMBP_DAM_ENERGY,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_LOSS,
+									   p_PRICE_DATE      => v_REC_DATA.CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_REC_DATA.LMBP_DAM_LOSS,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+        MM_UTIL.PUT_MARKET_PRICE_VALUE(p_MARKET_PRICE_ID => v_MARKET_PRICE_ID_CONG,
+									   p_PRICE_DATE      => v_REC_DATA.CHARGE_DATE,
+									   p_PRICE_CODE      => 'A',
+									   p_PRICE           => v_REC_DATA.LMBP_DAM_CONG,
+									   p_PRICE_BASIS     => 0,
+									   p_STATUS          => p_STATUS,
+									   p_ERROR_MESSAGE   => v_MESSAGE);
+
+
+    END LOOP;
+
+    --update billing statement with FINAL charge_id
+	GET_TOTAL_DAY_DAM_STLMN(v_LAST_DATE, v_LAST_INV_VERSION, v_TOTAL_DAM_STLM);
+	PUT_BILLING_STATEMENT(v_BILLING_STATEMENT,0,v_COMPONENT_ID,v_TOTAL_DAM_STLM,1,v_TOTAL_DAM_STLM);
+    COMMIT;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_DAM_ENERGY: ' ||
+					 SQLERRM);
+
+END IMPORT_DAM_ENERGY;
+------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DAM_ENERGY(p_CSV        IN CLOB,
+							p_ISO_SOURCE IN VARCHAR2,
+							p_LOG_TYPE    IN NUMBER,
+   						    p_TRACE_ON    IN NUMBER,
+							p_STATUS     OUT NUMBER,
+							p_MESSAGE    OUT VARCHAR2) AS
+
+	v_RECORDS MEX_NY_DAM_ENERGY_TBL;
+	v_LOGGER mm_logger_adapter;
+
+BEGIN
+	v_LOGGER := MM_UTIL.GET_LOGGER(EC.ES_NYISO_DSS,
+                                   NULL,
+                                   'Import NYISO-DSS DAM Energy file',
+                                   'Import NYISO-DSS DAM Energy ile',
+                                   p_LOG_TYPE,
+                                   p_TRACE_ON);
+	MM_UTIL.START_EXCHANGE(TRUE, v_LOGGER);
+
+	MEX_NYISO_SETTLEMENT.PARSE_DAM_ENERGY(p_CSV,
+										  v_RECORDS,
+										  p_STATUS,
+										  v_LOGGER);
+	IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+		IMPORT_DAM_ENERGY(v_RECORDS, p_ISO_SOURCE, p_STATUS, v_LOGGER);
+	END IF;
+
+END IMPORT_DAM_ENERGY;
+--------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DAM_ENERGY(p_CRED IN MEX_CREDENTIALS,
+							p_DATE        IN DATE,
+							p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+							p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+							p_STATUS      OUT NUMBER,
+							p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_RECORDS MEX_NY_DAM_ENERGY_TBL;
+
+BEGIN
+
+	MEX_NYISO_SETTLEMENT.FETCH_DAM_ENERGY(p_DATE,
+										  p_DOC_LIST,
+										  p_CRED,
+										  p_REPORT_TYPE,
+										  v_RECORDS,
+										  p_STATUS,
+										  p_LOGGER);
+
+    IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+        IMPORT_DAM_ENERGY(v_RECORDS, p_CRED.EXTERNAL_ACCOUNT_NAME, p_STATUS, p_LOGGER);
+	END IF;
+
+END IMPORT_DAM_ENERGY;
+-------------------------------------------------------------------------------------------
+/*PROCEDURE IMPORT_DAM_ENERGY(p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+							p_STATUS      OUT NUMBER,
+							p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS      EXTERNAL_CREDENTIAL_TBL;
+	v_RECORDS        MEX_NY_DAM_ENERGY_TBL;
+    v_EXCHANGE_ID    NUMBER(9);
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+	MEX_NYISO_SETTLEMENT.GET_DAM_ENERGY(p_REPORT_TYPE,
+										  v_RECORDS,
+										  p_STATUS,
+										  p_LOGGER);
+
+    IF v_RECORDS IS NULL OR p_STATUS <> GA.SUCCESS THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	ELSE
+        IMPORT_DAM_ENERGY(v_RECORDS, v_EXT_CREDS(v_EXT_CREDS.FIRST).ISO_ACCOUNT_NAME,p_STATUS, p_MESSAGE);
+	END IF;
+
+END IMPORT_DAM_ENERGY;*/
+-------------------------------------------------------------------------------------------
+/*PROCEDURE FETCH_DAM_ENERGY(p_DATE        IN DATE,
+							p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+							p_REPORT_TYPE IN VARCHAR2, --'Prelim', or 'Hist'
+							p_STATUS      OUT NUMBER,
+							p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+	v_EXT_CREDS      EXTERNAL_CREDENTIAL_TBL;
+
+
+BEGIN
+
+	v_EXT_CREDS := MM_UTIL.GET_CREDENTIALS('NYISO-DSS');
+	MEX_NYISO_SETTLEMENT.FETCH_DAM_ENERGY(p_DATE,
+										  p_DOC_LIST,
+										  v_EXT_CREDS(v_EXT_CREDS.FIRST),
+										  p_REPORT_TYPE,
+										  p_STATUS,
+										  p_MESSAGE);
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.FETCH_DAM_ENERGY: ' ||
+					 SQLERRM;
+
+END FETCH_DAM_ENERGY;*/
+----------------------------------------------------------------------------------------------
+/*PROCEDURE FETCH_DSS_REPORTS(p_DATE        IN DATE,
+							 p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+                             p_REPORT_TYPE IN VARCHAR2,  --'Prelim', or 'Hist'
+							 p_STATUS      OUT NUMBER,
+							 p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+BEGIN
+
+    --IMPORT ALL DAILY VERSIONS OF THE REPORTS (ONE CHARGE ID PER COMPONENT) OR
+    --IMPORT THE INVOICED VERISON OF THE REPORTS (A REPORT MIGHT HAVE UP TO THREE BILLING MONTHS)
+
+	--Get NYISO rates
+   	FETCH_NYISO_RATES (p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_MESSAGE);
+
+    IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN FETCH_DAM_ENERGY(p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_MESSAGE); END IF;
+    IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN FETCH_NYISO_TOTALS(p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_MESSAGE); END IF;
+    IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN FETCH_NYISO_RESID(p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_MESSAGE); END IF;
+
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN FETCH_DAM_VIRTUAL_LOAD(p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_MESSAGE); END IF;
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN FETCH_DAM_VIRTUAL_SUPPLY(p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_MESSAGE); END IF;
+
+	--Balancing for DAM Market
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		FETCH_BAL_MARKET_ENERGY(p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_MESSAGE);
+	END IF;
+
+	--Balancing for market virtual load
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		FETCH_BAL_MARKET_VIRT_LOAD(p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_MESSAGE);
+	END IF;
+
+	--Balancing for market virtual supply
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		FETCH_BAL_MARKET_VIRT_SUPPLY(p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_MESSAGE);
+	END IF;
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.FETCH_DSS_REPORTS: ' ||
+					 SQLERRM;
+
+END FETCH_DSS_REPORTS;*/
+---------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DSS_REPORTS(p_CRED        IN mex_credentials,
+							 p_DATE        IN DATE,
+							 p_DOC_LIST    IN MEX_NY_DOC_IDENT_TBL,
+                             p_REPORT_TYPE IN VARCHAR2,  --'Prelim', or 'Hist'
+							 p_STATUS      OUT NUMBER,
+							 p_LOGGER     IN OUT NOCOPY mm_logger_adapter) IS
+
+BEGIN
+
+    --IMPORT ALL DAILY VERSIONS OF THE REPORTS (ONE CHARGE ID PER COMPONENT) OR
+    --IMPORT THE INVOICED VERISON OF THE REPORTS (A REPORT MIGHT HAVE UP TO THREE BILLING MONTHS)
+
+	--Get NYISO rates
+   	IMPORT_NYISO_RATES (p_CRED, p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_LOGGER);
+
+    IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN IMPORT_DAM_ENERGY(p_CRED, p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_LOGGER); END IF;
+    IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN IMPORT_NYISO_TOTALS(p_CRED, p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_LOGGER); END IF;
+    IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN IMPORT_NYISO_RESID(p_CRED, p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_LOGGER); END IF;
+
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN IMPORT_DAM_VIRTUAL_LOAD(p_CRED, p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_LOGGER); END IF;
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN IMPORT_DAM_VIRTUAL_SUPPLY(p_CRED, p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_LOGGER); END IF;
+
+	--Balancing for DAM Market
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		IMPORT_BAL_MARKET_ENERGY(p_CRED, p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_LOGGER);
+	END IF;
+
+	--Balancing for market virtual load
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		IMPORT_BAL_MARKET_VIRT_LOAD(p_CRED, p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_LOGGER);
+	END IF;
+
+	--Balancing for market virtual supply
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		IMPORT_BAL_MARKET_VIRT_SUPPLY(p_CRED, p_DATE, p_DOC_LIST, p_REPORT_TYPE, p_STATUS, p_LOGGER);
+	END IF;
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_DSS_REPORTS: ' ||
+					 SQLERRM);
+
+END IMPORT_DSS_REPORTS;
+-------------------------------------------------------------------------------------------
+/*PROCEDURE IMPORT_DSS_REPORTS(p_REPORT_TYPE IN VARCHAR2,  --'Prelim', or 'Hist'
+							 p_STATUS      OUT NUMBER,
+							 p_LOGGER IN OUT NOCOPY mm_logger_adapter) IS
+
+BEGIN
+
+    --IMPORT ALL DAILY VERSIONS OF THE REPORTS (ONE CHARGE ID PER COMPONENT) OR
+    --IMPORT THE INVOICED VERISON OF THE REPORTS (A REPORT MIGHT HAVE UP TO THREE BILLING MONTHS)
+
+	--Get NYISO rates
+   	IMPORT_NYISO_RATES (p_REPORT_TYPE, p_STATUS, p_MESSAGE);
+
+    \*IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN IMPORT_DAM_ENERGY(p_REPORT_TYPE, p_STATUS, p_MESSAGE); END IF;
+    IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN IMPORT_NYISO_TOTALS(p_REPORT_TYPE, p_STATUS, p_MESSAGE); END IF;
+    IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN IMPORT_NYISO_RESID(p_REPORT_TYPE, p_STATUS, p_MESSAGE); END IF;
+
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN IMPORT_DAM_VIRTUAL_LOAD(p_REPORT_TYPE, p_STATUS, p_MESSAGE);
+	END IF;
+
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN IMPORT_DAM_VIRTUAL_SUPPLY(p_REPORT_TYPE, p_STATUS, p_MESSAGE); END IF;
+
+	--Balancing for DAM Market
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		IMPORT_BAL_MARKET_ENERGY(p_REPORT_TYPE, p_STATUS, p_MESSAGE);
+	END IF;
+
+	--Balancing for market virtual load
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		IMPORT_BAL_MARKET_VIRT_LOAD(p_REPORT_TYPE, p_STATUS, p_MESSAGE);
+	END IF;
+
+	--Balancing for market virtual supply
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		IMPORT_BAL_MARKET_VIRT_SUPPLY(p_REPORT_TYPE, p_STATUS, p_MESSAGE);
+	END IF;*\
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_MESSAGE := 'Error in MM_NYISO_SETTLEMENT.IMPORT_DSS_REPORTS: ' ||
+					 SQLERRM;
+
+END IMPORT_DSS_REPORTS;*/
+-------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_INBOX_LIST(p_CRED IN mex_credentials,
+							p_DOC_IDENT OUT MEX_NY_DOC_IDENT_TBL,
+                            p_STATUS    OUT NUMBER,
+							p_LOGGER    IN OUT NOCOPY mm_logger_adapter) IS
+BEGIN
+
+	MEX_NYISO_SETTLEMENT.FETCH_INBOX_LIST(p_CRED,
+										  p_DOC_IDENT,
+										  p_STATUS,
+										  p_LOGGER);
+
+    IF p_DOC_IDENT IS NULL THEN
+        g_PROCESS_REMAINING_REPORTS := FALSE;
+	END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_INBOX_LIST: ' ||
+					 SQLERRM);
+
+END IMPORT_INBOX_LIST;
+-------------------------------------------------------------------------------------------
+PROCEDURE DELETE_DSS_REPORTS(p_CRED IN mex_credentials,
+							 p_DOC_LIST IN MEX_NY_DOC_IDENT_TBL,
+							p_DATE      IN DATE,
+							p_STATUS    OUT NUMBER,
+							p_LOGGER   IN OUT NOCOPY mm_logger_adapter) IS
+
+
+BEGIN
+
+	MEX_NYISO_SETTLEMENT.DELETE_DSS_REPORTS(p_CRED,
+											p_DATE,
+											p_DOC_LIST,
+											p_STATUS,
+											p_LOGGER);
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.DELETE_DSS_REPORTS: ' ||
+					 SQLERRM);
+
+END DELETE_DSS_REPORTS;
+-------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SETTLEMENT_STATEMENT(p_DATE    IN DATE,
+									  p_CRED    IN mex_credentials,
+									  p_STATUS  OUT NUMBER,
+									  p_LOGGER  IN OUT NOCOPY mm_logger_adapter) IS
+
+
+
+v_INVOICE_POSTED 	     BOOLEAN := FALSE;
+v_DOC_IDENT     		 MEX_NY_DOC_IDENT_TBL;
+v_DSS_ERROR_MESSAGE_TYPE NUMBER(1) := 0;
+
+
+BEGIN
+
+	--Get the list of existing reports in DSS Inbox
+	IMPORT_INBOX_LIST(p_CRED, v_DOC_IDENT, p_STATUS, p_LOGGER);
+
+--------------NEW WAY---------------------------------------
+/*	--Always first import the uninvoiced settlement data
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		FETCH_DSS_REPORTS(p_DATE, v_DOC_IDENT, g_PRELIM,p_STATUS,p_LOGGER);
+	END IF;
+
+	--Import the Invoice report and check if there has been posted a new invoice
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		IMPORT_INVOICE_SUMMARY(p_DATE, v_DOC_IDENT, v_INVOICE_POSTED, v_DSS_ERROR_MESSAGE_TYPE, p_STATUS, p_LOGGER);
+		--If invoice posted then get invoiced settlement data from NYISO
+		IF v_INVOICE_POSTED THEN FETCH_DSS_REPORTS(p_DATE, v_DOC_IDENT, g_HIST,  p_STATUS, p_LOGGER);	END IF;
+	END IF;
+
+	-- Delete all reports from DSS inbox and logout
+    IF v_DSS_ERROR_MESSAGE_TYPE = MEX_NYISO_SETTLEMENT.g_DSS_ERR_ZERO_ROWS OR (g_PROCESS_REMAINING_REPORTS = TRUE AND g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS) THEN
+		DELETE_DSS_REPORTS (v_DOC_IDENT, p_DATE, p_STATUS, p_LOGGER);
+	END IF;
+
+	IMPORT_DSS_REPORTS(g_PRELIM,p_STATUS,p_LOGGER);
+	IF v_INVOICE_POSTED THEN
+		IMPORT_DSS_REPORTS(g_HIST,  p_STATUS, p_LOGGER);
+	END IF;*/
+
+-----------------OLD WAY ------------------------------------------------
+	--Always first import the uninvoiced settlement data
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		IMPORT_DSS_REPORTS(p_CRED, p_DATE, v_DOC_IDENT, g_PRELIM,p_STATUS,p_LOGGER);
+	END IF;
+
+	--Import the Invoice report and check if there has been posted a new invoice
+	IF g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS THEN
+		IMPORT_INVOICE_SUMMARY(p_CRED, p_DATE, v_DOC_IDENT, v_INVOICE_POSTED, v_DSS_ERROR_MESSAGE_TYPE, p_STATUS, p_LOGGER);
+		--If invoice posted then get invoiced settlement data from NYISO
+		IF v_INVOICE_POSTED THEN IMPORT_DSS_REPORTS(p_CRED, p_DATE, v_DOC_IDENT, g_HIST, p_STATUS, p_LOGGER);	END IF;
+	END IF;
+
+	 -- Delete all reports from DSS inbox and logout
+    --IF v_DSS_ERROR_MESSAGE_TYPE = MEX_NYISO_SETTLEMENT.g_DSS_ERR_ZERO_ROWS OR (g_PROCESS_REMAINING_REPORTS = TRUE AND g_PROCESS_REMAINING_REPORTS = TRUE AND p_STATUS = GA.SUCCESS) THEN
+		DELETE_DSS_REPORTS (p_CRED, v_DOC_IDENT, p_DATE, p_STATUS, p_LOGGER);
+	--END IF;
+
+
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS  := SQLCODE;
+		p_LOGGER.LOG_ERROR('Error in MM_NYISO_SETTLEMENT.IMPORT_SETTLEMENT_STATEMENT: ' ||
+					 SQLERRM);
+END IMPORT_SETTLEMENT_STATEMENT;
+-------------------------------------------------------------------------------------------
+PROCEDURE MARKET_EXCHANGE
+	(
+	p_BEGIN_DATE    IN DATE,
+	p_END_DATE      IN DATE,
+	p_EXCHANGE_TYPE IN VARCHAR2,
+	p_LOG_TYPE 		IN NUMBER,
+	p_TRACE_ON 		IN NUMBER,
+	p_STATUS        OUT NUMBER,
+	p_MESSAGE       OUT VARCHAR2) IS
+
+	v_DATE 		DATE;
+	v_CREDS     MM_CREDENTIALS_SET;
+	v_CRED		MEX_CREDENTIALS;
+	v_LOGGER    MM_LOGGER_ADAPTER;
+	v_DUMMY     VARCHAR2(512);
+BEGIN
+	BEGIN
+		MM_UTIL.INIT_MEX(p_EXTERNAL_SYSTEM_ID    => EC.ES_NYISO_DSS,
+						 p_PROCESS_NAME          => 'NYISO:SETTLEMENT',
+						 p_EXCHANGE_NAME         => p_EXCHANGE_TYPE,
+						 p_LOG_TYPE              => p_LOG_TYPE,
+						 p_TRACE_ON              => p_TRACE_ON,
+						 p_CREDENTIALS           => v_CREDS,
+						 p_LOGGER                => v_LOGGER);
+
+     EXCEPTION
+       WHEN NO_DATA_FOUND THEN
+            v_LOGGER  := MM_UTIL.GET_LOGGER(EC.ES_NYISO_DSS,
+                                            '%',
+                                            p_EXCHANGE_TYPE,
+                                            p_EXCHANGE_TYPE,
+                                            NULL,
+                                            NULL);
+            p_MESSAGE := 'No external credentials available: ' ;
+            v_LOGGER.LOG_ERROR(p_MESSAGE);
+            p_STATUS := SQLCODE;
+            v_CREDS := NULL;
+	END;
+
+    MM_UTIL.START_EXCHANGE(FALSE, v_LOGGER);
+
+	-- no credentials? we can proceed w/out if we are in test mode - otherwise, fail
+	IF NOT v_CREDS.HAS_NEXT THEN
+		p_STATUS := GA.GENERAL_EXCEPTION;
+		p_MESSAGE := 'No credentials found for NYISO-DSS. Nothing can be downloaded';
+		v_LOGGER.LOG_WARN(p_MESSAGE);
+
+		IF NOT MM_NYISO_UTIL.g_TEST THEN
+			MM_UTIL.STOP_EXCHANGE(v_LOGGER, p_STATUS, p_MESSAGE, v_DUMMY);
+			RETURN;
+		END IF;
+	END IF;
+
+	IF p_EXCHANGE_TYPE = g_ET_QUERY_SETTL_STATEMENTS THEN
+		IF v_CREDS IS NOT NULL THEN
+			WHILE v_CREDS.HAS_NEXT LOOP
+				v_CRED := v_CREDS.GET_NEXT;
+				-- must have an iso_account_name to find the contract
+				IF v_CREDS.LOGGER.EXTERNAL_ACCOUNT_NAME IS NOT NULL THEN
+					v_DATE := p_BEGIN_DATE;
+					IMPORT_SETTLEMENT_STATEMENT(p_BEGIN_DATE, v_CRED, p_STATUS, v_LOGGER);
+				END IF;
+			END LOOP;
+		END IF;
+	ELSE
+		p_STATUS  := GA.GENERAL_EXCEPTION;
+        p_MESSAGE := 'Exchange Type ' || p_EXCHANGE_TYPE || ' not found.';
+        v_LOGGER.LOG_ERROR(p_MESSAGE);
+	END IF;
+
+	p_MESSAGE := v_LOGGER.GET_END_MESSAGE();
+    MM_UTIL.STOP_EXCHANGE(v_LOGGER, p_STATUS, p_MESSAGE, p_MESSAGE);
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_MESSAGE := SQLERRM;
+        p_STATUS  := SQLCODE;
+        MM_UTIL.STOP_EXCHANGE(v_LOGGER, p_STATUS, p_MESSAGE, p_MESSAGE);
+
+END MARKET_EXCHANGE;
+---------------------------------------------------------------------------------------------------
+
+END MM_NYISO_SETTLEMENT;
+/

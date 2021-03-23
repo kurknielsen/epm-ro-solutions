@@ -1,0 +1,115 @@
+CREATE OR REPLACE TRIGGER SEASON_UPDATE
+	AFTER UPDATE OR INSERT ON SEASON
+	FOR EACH ROW
+
+--Insert specific SEASON_DATES FOR A SYSTEM_DICTIONARY SPECIFIED WINDOW AROUND
+-- THE CURRENT DATE
+
+DECLARE
+
+	v_BEGIN_DATE DATE;
+	v_END_DATE DATE;
+	v_CUT_BEGIN_DATE DATE;
+	v_CUT_END_DATE DATE;
+	v_SEASON_ID NUMBER;
+
+	v_BEGIN_WINDOW NUMBER(2);
+	v_END_WINDOW NUMBER(2);
+
+	v_CURRENT_YEAR NUMBER(4) := TO_NUMBER(TO_CHAR(SYSDATE, 'YYYY'));
+
+BEGIN
+	BEGIN
+		v_BEGIN_WINDOW := TO_NUMBER( GET_DICTIONARY_VALUE('Past Window',
+															CONSTANTS.GLOBAL_MODEL,
+															'Entity Manager',
+															'Season',
+															'Fill Season Dates') );
+	EXCEPTION
+		WHEN VALUE_ERROR THEN
+			v_BEGIN_WINDOW := NULL;
+	END;
+
+	BEGIN
+		v_END_WINDOW := TO_NUMBER( GET_DICTIONARY_VALUE('Future Window',
+															CONSTANTS.GLOBAL_MODEL,
+															'Entity Manager',
+															'Season',
+															'Fill Season Dates') );
+	EXCEPTION
+		WHEN VALUE_ERROR THEN
+			v_END_WINDOW := NULL;
+	END;
+	
+	-- if unspecified or invalid entries for these, fall back to defaults
+	IF v_BEGIN_WINDOW IS NULL THEN
+		v_BEGIN_WINDOW := 5;
+	END IF;
+	IF v_END_WINDOW IS NULL THEN
+		v_END_WINDOW := 20;
+	END IF;
+	
+
+	-- BEGIN_DATE FOR THIS SEASON IN THE YEAR AT THE START OF THE WINDOW
+	v_BEGIN_DATE := DATE_UTIL.SET_DATE_YEAR(:NEW.BEGIN_DATE, v_CURRENT_YEAR-v_BEGIN_WINDOW);
+	v_END_DATE := DATE_UTIL.SET_DATE_YEAR(:NEW.END_DATE, v_CURRENT_YEAR-v_BEGIN_WINDOW);
+
+	v_SEASON_ID := :new.SEASON_ID;
+
+    --Remove old SEASON_DATES
+    DELETE SEASON_DATES
+	WHERE SEASON_ID = v_SEASON_ID;
+
+	--Determine whether this season is "infinite".  If so, just insert one record for all time.
+	IF TO_CHAR(v_END_DATE+1,'MMDD') = TO_CHAR(v_BEGIN_DATE,'MMDD') THEN
+		INSERT INTO SEASON_DATES(
+			BEGIN_DATE,
+			END_DATE,
+			CUT_BEGIN_DATE,
+			CUT_END_DATE,
+			SEASON_ID,
+			ENTRY_DATE)
+		VALUES(
+			CONSTANTS.LOW_DATE,
+			CONSTANTS.HIGH_DATE-1,
+			CONSTANTS.LOW_DATE,
+			CONSTANTS.HIGH_DATE-1,
+			v_SEASON_ID,
+			SYSDATE);
+
+	--Not Infinite Season.  Insert 40 years worth of rows.
+	ELSE
+		--Adjust for winter season
+		IF v_END_DATE < v_BEGIN_DATE THEN
+			v_END_DATE   :=  ADD_MONTHS(v_END_DATE, 12);
+		END IF;
+
+		-- FILL FOR WINDOW LENGTH
+	    FOR I IN 1..(v_BEGIN_WINDOW+v_END_WINDOW+1) LOOP
+			v_CUT_BEGIN_DATE := TO_CUT(v_BEGIN_DATE, STD_TIME_ZONE(LOCAL_TIME_ZONE));
+	    	v_CUT_END_DATE := TO_CUT(v_END_DATE, STD_TIME_ZONE(LOCAL_TIME_ZONE));
+
+	        INSERT INTO SEASON_DATES(
+	            BEGIN_DATE,
+	            END_DATE,
+	            CUT_BEGIN_DATE,
+	            CUT_END_DATE,
+	            SEASON_ID,
+	            ENTRY_DATE)
+	        VALUES(
+	            v_BEGIN_DATE,
+	            v_END_DATE,
+	            v_CUT_BEGIN_DATE,
+	            v_CUT_END_DATE,
+	            v_SEASON_ID,
+	            SYSDATE);
+
+	        v_BEGIN_DATE :=  ADD_MONTHS(v_BEGIN_DATE,12);  --Next year
+	        v_END_DATE := ADD_MONTHS(v_END_DATE,12);
+
+	    END LOOP;
+
+	END IF;
+
+END SEASON_UPDATE;
+/

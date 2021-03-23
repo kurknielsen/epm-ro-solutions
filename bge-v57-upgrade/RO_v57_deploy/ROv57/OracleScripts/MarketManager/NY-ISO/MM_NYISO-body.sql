@@ -1,0 +1,265 @@
+CREATE OR REPLACE PACKAGE BODY MM_NYISO AS
+-------------------------------------------------------------------------------------------------------------
+FUNCTION WHAT_VERSION RETURN VARCHAR2 IS
+BEGIN
+    RETURN '$Revision: 1.1 $';
+END WHAT_VERSION;
+---------------------------------------------------------------------------------------------------
+PROCEDURE BID_OFFER_TRANSACTION_LIST
+	(
+	p_MKT_APP IN VARCHAR2,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_ACTION IN VARCHAR2,
+	p_SOMETHING_DONE OUT BOOLEAN,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT REF_CURSOR
+	) AS
+BEGIN
+	p_SOMETHING_DONE := TRUE;
+
+  IF UPPER(p_ACTION)='SUBMIT GENERATOR BID' THEN
+  	OPEN p_CURSOR FOR
+  		  SELECT TRANSACTION_NAME, A.TRANSACTION_ID
+  		  FROM INTERCHANGE_TRANSACTION A, IT_COMMODITY B, SCHEDULE_COORDINATOR C
+  		  WHERE IS_BID_OFFER = 1
+  		  	AND A.COMMODITY_ID = B.COMMODITY_ID
+            AND A.TRANSACTION_TYPE='Gen'
+			AND A.TRAIT_CATEGORY='NYISO: Load'
+            AND A.SC_ID = C.SC_ID
+	    	AND C.SC_NAME='NYISO'
+  		  ORDER BY B.COMMODITY_NAME, A.TRANSACTION_NAME;
+  ELSIF UPPER(p_ACTION)='SUBMIT VIRTUAL SUPPLY BID' THEN
+  	OPEN p_CURSOR FOR
+  		  SELECT TRANSACTION_NAME, A.TRANSACTION_ID
+  		  FROM INTERCHANGE_TRANSACTION A, IT_COMMODITY B, SCHEDULE_COORDINATOR C
+  		  WHERE IS_BID_OFFER = 1
+  		  	AND A.COMMODITY_ID = B.COMMODITY_ID
+            AND A.TRANSACTION_TYPE='Gen'
+			AND A.TRAIT_CATEGORY='NYISO: Virtual'
+            AND A.SC_ID = C.SC_ID
+	    	AND C.SC_NAME='NYISO'
+  		  ORDER BY B.COMMODITY_NAME, A.TRANSACTION_NAME;
+  ELSIF UPPER(p_ACTION)='SUBMIT PHYSICAL LOAD BID' THEN
+  	OPEN p_CURSOR FOR
+  		  SELECT TRANSACTION_NAME, A.TRANSACTION_ID
+  		  FROM INTERCHANGE_TRANSACTION A, IT_COMMODITY B, SCHEDULE_COORDINATOR C
+  		  WHERE IS_BID_OFFER = 1
+  		  	AND A.COMMODITY_ID = B.COMMODITY_ID
+            AND A.TRANSACTION_TYPE='Load'
+			AND A.TRAIT_CATEGORY='NYISO: Load'
+            AND A.SC_ID = C.SC_ID
+	    	AND C.SC_NAME='NYISO'
+  		  ORDER BY B.COMMODITY_NAME, A.TRANSACTION_NAME;
+  ELSIF UPPER(p_ACTION)='SUBMIT VIRTUAL LOAD BID' THEN
+  	OPEN p_CURSOR FOR
+  		  SELECT TRANSACTION_NAME, A.TRANSACTION_ID
+  		  FROM INTERCHANGE_TRANSACTION A, IT_COMMODITY B, SCHEDULE_COORDINATOR C
+  		  WHERE IS_BID_OFFER = 1
+  		  	AND A.COMMODITY_ID = B.COMMODITY_ID
+            AND A.TRANSACTION_TYPE='Load'
+			AND A.TRAIT_CATEGORY='NYISO: Virtual'
+            AND A.SC_ID = C.SC_ID
+	    	AND C.SC_NAME='NYISO'
+  		  ORDER BY B.COMMODITY_NAME, A.TRANSACTION_NAME;
+  ELSIF UPPER(p_ACTION)='SUBMIT BILATERAL BID' THEN
+  	OPEN p_CURSOR FOR
+  		  SELECT TRANSACTION_NAME, A.TRANSACTION_ID
+  		  FROM INTERCHANGE_TRANSACTION A, IT_COMMODITY B, SCHEDULE_COORDINATOR C
+  		  WHERE IS_BID_OFFER = 1
+  		  	AND A.COMMODITY_ID = B.COMMODITY_ID
+            AND A.TRANSACTION_TYPE!='Gen'
+            AND A.TRANSACTION_TYPE!='Load'
+            AND A.SC_ID = C.SC_ID
+	    	AND C.SC_NAME='NYISO'
+  		  ORDER BY B.COMMODITY_NAME, A.TRANSACTION_NAME;
+  ELSE
+	p_SOMETHING_DONE := FALSE;
+  END IF;
+END BID_OFFER_TRANSACTION_LIST;
+----------------------------------------------------------------------------
+PROCEDURE SYSTEM_ACTION_USES_HOURS
+	(
+    p_MKT_APP IN VARCHAR2,
+    p_ACTION IN VARCHAR2,
+	p_SHOW_HOURS OUT NUMBER
+    ) AS
+BEGIN
+	p_SHOW_HOURS := 1;
+END SYSTEM_ACTION_USES_HOURS;
+----------------------------------------------------------------------------------------------------
+FUNCTION IS_SUPPORTED_EXCHANGE_TYPE
+	(
+	p_MKT_APP IN VARCHAR2,
+	p_EXCHANGE_TYPE IN VARCHAR2
+	) RETURN BOOLEAN IS
+BEGIN
+	-- @TODO: dispatch based on p_MKT_APP
+	RETURN TRUE;
+END IS_SUPPORTED_EXCHANGE_TYPE;
+----------------------------------------------------------------------------
+FUNCTION GET_BID_OFFER_INTERVAL
+	(
+	p_TRANSACTION IN INTERCHANGE_TRANSACTION%ROWTYPE
+	) RETURN VARCHAR2 IS
+BEGIN
+	-- all bids/offers in NYISO are hourly
+	RETURN 'Hour';
+	-- update this if necessary for FTRs (usually monthly bids/offers)
+END GET_BID_OFFER_INTERVAL;
+-----------------------------------------------------------------------------------------
+PROCEDURE GET_TRAITS_FOR_TRANSACTION
+	(
+	p_TRANSACTION_ID IN NUMBER,
+	p_REPORT_TYPE IN VARCHAR2,
+	p_TRAIT_GROUP_FILTER IN VARCHAR2,
+	p_INTERVAL IN VARCHAR2,
+	p_WORK_ID OUT NUMBER
+	) AS
+
+	v_TRANSACTION INTERCHANGE_TRANSACTION%ROWTYPE;
+
+BEGIN
+
+    MM_NYISO_BIDPOST.GET_TRAITS_FOR_TRANSACTION
+    	(
+    	p_TRANSACTION_ID,
+    	p_REPORT_TYPE,
+    	p_TRAIT_GROUP_FILTER,
+    	p_INTERVAL,
+    	p_WORK_ID
+    	);
+
+END GET_TRAITS_FOR_TRANSACTION;
+-------------------------------------------------------------------------------------
+PROCEDURE NYISO_PTID_RPT
+(
+    p_STATUS OUT NUMBER,
+    p_CURSOR IN OUT REF_CURSOR
+) IS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+    OPEN p_CURSOR FOR
+        SELECT 0 "DUMMY", 0 "ADD_SVC_POINT", N.PTID_NAME, N.PTID, N.PTID_TYPE
+        FROM NYISO_PTID_NODE N
+        WHERE N.PTID_NAME NOT IN
+              (SELECT PTID_NAME
+               FROM NYISO_PTID_NODE, SERVICE_POINT
+               WHERE NYISO_PTID_NODE.PTID = SERVICE_POINT.EXTERNAL_IDENTIFIER)
+        ORDER BY N.PTID_TYPE, N.PTID_NAME;
+END NYISO_PTID_RPT;
+-------------------------------------------------------------------------------------
+FUNCTION GET_NODE_TYPE(
+    p_NODE_NAME VARCHAR2,
+    p_NODE_TYPE VARCHAR2)
+
+	RETURN VARCHAR2
+	AS
+	v_NODE_TYPE VARCHAR2(32);
+BEGIN
+
+    IF INSTR(p_NODE_TYPE, 'GENERATOR') > 0 THEN
+    	v_NODE_TYPE := 'Generator';
+    ELSIF INSTR(p_NODE_TYPE, 'LOAD') > 0 THEN
+        IF p_NODE_NAME = 'NYISO_LBMP_REFERENCE' THEN
+        	v_NODE_TYPE := 'Bus';
+        ELSE
+        	v_NODE_TYPE := 'Aggregate';
+        END IF;
+    ELSIF INSTR(p_NODE_TYPE, 'ZONE') > 0 THEN
+    	v_NODE_TYPE := 'Zone';
+	ELSE
+		v_NODE_TYPE := 'Interface';
+    END IF;
+
+	RETURN v_NODE_TYPE;
+
+END GET_NODE_TYPE;
+-------------------------------------------------------------------------------------
+PROCEDURE PUT_NYISO_PTID_RPT(
+        p_PTID_NAME IN VARCHAR2,
+        p_PTID_TYPE IN VARCHAR2,
+		p_PTID IN VARCHAR2,
+        p_ADD_SVC_POINT IN NUMBER,
+        p_STATUS OUT NUMBER
+    ) IS
+        v_SERVICE_POINT_ID SERVICE_POINT.SERVICE_POINT_ID%TYPE;
+		v_PTID_TYPE SERVICE_POINT.SERVICE_POINT_TYPE%TYPE;
+		v_EXT_ID SERVICE_POINT.EXTERNAL_IDENTIFIER%TYPE;
+		v_ZONE_ID SERVICE_POINT.SERVICE_ZONE_ID%TYPE;
+		v_ZONE_NAME SERVICE_ZONE.SERVICE_ZONE_ALIAS%TYPE;
+
+BEGIN
+        p_STATUS := GA.SUCCESS;
+
+        IF p_ADD_SVC_POINT = 1 THEN
+
+			v_PTID_TYPE := GET_NODE_TYPE(p_PTID_NAME, p_PTID_TYPE);
+			v_EXT_ID := p_PTID;
+			v_ZONE_ID := 0;
+
+			BEGIN -- lookup zone for this point
+                SELECT SZ.SERVICE_ZONE_ID
+                  INTO v_ZONE_ID
+                  FROM SERVICE_ZONE SZ, NYISO_PTID_NODE P
+                 WHERE P.ZONE_NAME = SZ.SERVICE_ZONE_ALIAS
+                   AND P.PTID_NAME = p_PTID_NAME;
+            EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+
+				-- get zone name to add
+				BEGIN
+    				SELECT ZONE_NAME
+    				  INTO v_ZONE_NAME
+    				  FROM NYISO_PTID_NODE
+    				 WHERE PTID_NAME = p_PTID_NAME;
+				EXCEPTION
+				WHEN OTHERS THEN NULL;
+				END;
+
+				IF v_ZONE_NAME IS NOT NULL THEN
+    				-- insert new service zone
+    				IO.PUT_SERVICE_ZONE(
+        				o_OID => v_ZONE_ID,
+        				p_SERVICE_ZONE_NAME => v_ZONE_NAME,
+        				p_SERVICE_ZONE_ALIAS => v_ZONE_NAME,
+        				p_SERVICE_ZONE_DESC => 'Created via Add NYISO PTID report',
+        				p_SERVICE_ZONE_ID => 0,
+						p_EXTERNAL_IDENTIFIER => NULL,
+        				p_MARKET_PRICE_ID => 0,
+        				p_CONTROL_AREA_ID => 0,
+						p_TIME_ZONE => NULL);
+				END IF;
+			END;
+
+            IO.PUT_SERVICE_POINT(
+                O_OID => v_SERVICE_POINT_ID,
+                p_SERVICE_POINT_NAME => p_PTID_NAME,
+                p_SERVICE_POINT_ALIAS => p_PTID_NAME,
+                p_SERVICE_POINT_DESC => 'Created via Add NYISO PTID report',
+                p_SERVICE_POINT_ID => 0,
+                p_SERVICE_POINT_TYPE => 'Retail',
+                p_TP_ID => 0,
+                p_CA_ID => 0,
+                p_EDC_ID => 0,
+                p_ROLLUP_ID => 0,
+                p_SERVICE_REGION_ID => 0,
+                p_SERVICE_AREA_ID => 0,
+                p_SERVICE_ZONE_ID => v_ZONE_ID,
+                p_TIME_ZONE => 'Eastern',
+                p_LATITUDE => NULL,
+                p_LONGITUDE => NULL,
+                p_EXTERNAL_IDENTIFIER => v_EXT_ID,
+                p_IS_INTERCONNECT => 0,
+                p_NODE_TYPE => v_PTID_TYPE,
+                p_SERVICE_POINT_NERC_CODE => '?',
+                p_PIPELINE_ID => NULL,
+                p_MILE_MARKER => NULL
+            );
+            COMMIT;
+        END IF;
+END PUT_NYISO_PTID_RPT;
+
+END MM_NYISO;
+/

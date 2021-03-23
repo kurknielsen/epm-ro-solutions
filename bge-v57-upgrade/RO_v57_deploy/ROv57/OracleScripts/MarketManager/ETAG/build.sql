@@ -1,0 +1,4 @@
+prompt ETAG_DATE_RANGE
+@@ETAG_DATE_RANGE.sql
+prompt MM_ETAG
+@@MM_ETAG.sql

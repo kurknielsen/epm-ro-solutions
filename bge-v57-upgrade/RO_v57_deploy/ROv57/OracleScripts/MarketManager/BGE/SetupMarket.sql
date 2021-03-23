@@ -1,0 +1,6 @@
+prompt BGE_Action_Creation
+@@BGE_Action_Creation.sql
+prompt BGE_Holiday_Creation
+@@BGE_Holiday_Creation.sql
+prompt BGE_Season_Template_Creation
+@@BGE_Season_Template_Creation.sql

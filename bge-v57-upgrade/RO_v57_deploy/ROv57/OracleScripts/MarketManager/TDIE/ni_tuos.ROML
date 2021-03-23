@@ -1,0 +1,2778 @@
+begin object
+    table_name:PURCHASING_SELLING_ENTITY
+    table_alias:PSE
+    PSE_ID:*PURCHASING_SELLING_ENTITY-0001
+    PSE_NAME:"NI TUOS PSE
+    PSE_ALIAS:"?
+    PSE_DESC:"?
+    PSE_NERC_CODE:"?
+    PSE_STATUS:"Active
+    PSE_DUNS_NUMBER:"?
+    PSE_BANK:"?
+    PSE_ACH_NUMBER:"?
+    PSE_TYPE:"IPP
+    PSE_EXTERNAL_IDENTIFIER:"?
+    PSE_IS_RETAIL_AGGREGATOR:#0
+    PSE_IS_BACKUP_GENERATION:#0
+    PSE_EXCLUDE_LOAD_SCHEDULE:#0
+    IS_BILLING_ENTITY:#1
+    TIME_ZONE:"EDT
+    STATEMENT_INTERVAL:"Day
+    INVOICE_INTERVAL:"Month
+    WEEK_BEGIN:"Sunday
+    INVOICE_LINE_ITEM_OPTION:"By Product-Component
+    INVOICE_EMAIL_SUBJECT:"?
+    INVOICE_EMAIL_PRIORITY:#0
+    INVOICE_EMAIL_BODY:"?
+    INVOICE_EMAIL_BODY_MIME_TYPE:"?
+    SCHEDULE_NAME_PREFIX:"?
+    SCHEDULE_FORMAT:"Pool
+    SCHEDULE_INTERVAL:"5 Minute
+    LOAD_ROUNDING_PREFERENCE:"None
+    LOSS_ROUNDING_PREFERENCE:"None
+    CREATE_TX_LOSS_SCHEDULE:#0
+    CREATE_DX_LOSS_SCHEDULE:#0
+    CREATE_UFE_SCHEDULE:#0
+    MINIMUM_SCHEDULE_AMT:#0
+    ENTRY_DATE:@DEC-14-2011 16:11:22
+end object
+begin object
+    table_name:SYSTEM_REALM
+    table_alias:REALM
+    REALM_ID:*SYSTEM_REALM-0002
+    REALM_NAME:"SEM Net Demand
+    REALM_ALIAS:"SEM Net Demand
+    REALM_DESC:"SEM Net Demand
+    ENTITY_DOMAIN_ID:#-200
+    REALM_CALC_TYPE:#1
+    CUSTOM_QUERY:"?
+    ENTRY_DATE:@SEP-04-2007 10:37:15
+    begin subtable
+        table_name:SYSTEM_REALM_COLUMN
+        relationship:REALM_ID
+        begin row
+            REALM_ID:*SYSTEM_REALM-0002
+            ENTITY_COLUMN:"COMMODITY_ID
+            IS_EXCLUDING_VALS:#0
+            COLUMN_VALS:"'2'
+            ENTRY_DATE:@MAR-07-2008 14:55:15
+        end row
+        begin row
+            REALM_ID:*SYSTEM_REALM-0002
+            ENTITY_COLUMN:"POD_ID
+            IS_EXCLUDING_VALS:#0
+            COLUMN_VALS:"${POD_ID}
+            ENTRY_DATE:@JUN-16-2008 12:17:12
+        end row
+        begin row
+            REALM_ID:*SYSTEM_REALM-0002
+            ENTITY_COLUMN:"SC_ID
+            IS_EXCLUDING_VALS:#0
+            COLUMN_VALS:"'6727','5255','5300','47183'
+            ENTRY_DATE:@DEC-20-2011 11:15:08
+        end row
+        begin row
+            REALM_ID:*SYSTEM_REALM-0002
+            ENTITY_COLUMN:"TRANSACTION_TYPE
+            IS_EXCLUDING_VALS:#0
+            COLUMN_VALS:"'Net Demand'
+            ENTRY_DATE:@MAR-07-2008 14:59:15
+        end row
+    end subtable
+end object
+begin object
+    table_name:COMPONENT
+    table_alias:COMPONENT
+    COMPONENT_ID:*COMPONENT-0003
+    COMPONENT_NAME:"Christmas Weekday All other times (ST03)
+    COMPONENT_ALIAS:"?
+    COMPONENT_DESC:"NI TUOS ST03 Tariff; 0800-2030 M-F during Christmas period
+    COMPONENT_ENTITY:"PSE
+    CHARGE_TYPE:"?
+    RATE_STRUCTURE:"Formula
+    RATE_INTERVAL:"30 Minute
+    IS_REBILL:#0
+    IS_TAXED:#0
+    IS_CUSTOM_CHARGE:#0
+    IS_CREDIT_CHARGE:#0
+    IS_INCLUDE_TX_LOSS:#0
+    IS_INCLUDE_DX_LOSS:#0
+    TEMPLATE_ID:#0
+    MARKET_PRICE_ID:#0
+    SERVICE_POINT_ID:#0
+    MODEL_ID:#1
+    EVENT_ID:#0
+    COMPONENT_REFERENCE:"None
+    INVOICE_GROUP_ID:#0
+    INVOICE_GROUP_ORDER:#0
+    COMPUTATION_ORDER:#0
+    QUANTITY_UNIT:"?
+    CURRENCY_UNIT:"?
+    QUANTITY_TYPE:"?
+    EXTERNAL_IDENTIFIER:"?
+    COMPONENT_CATEGORY:"?
+    GL_DEBIT_ACCOUNT:"?
+    GL_CREDIT_ACCOUNT:"?
+    FIRM_NON_FIRM:"Either
+    EXCLUDE_FROM_INVOICE:#0
+    EXCLUDE_FROM_INVOICE_TOTAL:#0
+    IMBALANCE_TYPE:"?
+    ACCUMULATION_PERIOD:#0
+    BASE_COMPONENT_ID:#0
+    BASE_LIMIT_ID:#0
+    MARKET_TYPE:"Real-Time
+    MARKET_PRICE_TYPE:"Locational Marginal Price
+    WHICH_INTERVAL:"First
+    LMP_PRICE_CALC:"Actual
+    LMP_INCLUDE_EXT:#0
+    LMP_INCLUDE_SALES:"All
+    CHARGE_WHEN:"Either
+    BILATERALS_SIGN:#1
+    LMP_COMMODITY_ID:#0
+    LMP_BASE_COMMODITY_ID:#0
+    USE_ZONAL_PRICE:#0
+    ALTERNATE_PRICE:"None
+    ALTERNATE_PRICE_FUNCTION:"Min
+    EXCLUDE_FROM_BILLING_EXPORT:#0
+    IS_DEFAULT_TEMPLATE:#0
+    KWH_MULTIPLIER:#0
+    ANCILLARY_SERVICE_ID:#0
+    APPLY_RATE_FOR:"End Date
+    LOSS_ADJ_TYPE:#0
+    ENTRY_DATE:@JAN-04-2012 17:24:08
+    begin subtable
+        table_name:COMPONENT_BLOCK_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COINCIDENT_PEAK
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMBINATION
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMPOSITE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_CONVERSION_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FLAT_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ENTITY_REF
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_INPUT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0003
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            INPUT_NAME:"NDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FUNCTION:"Select
+            WHERE_CLAUSE:"
+            ENTITY_DOMAIN_ID:#-200
+            ENTITY_TYPE:"R
+            ENTITY_ID:*SYSTEM_REALM-0002
+            WHAT_FIELD:"AMOUNT
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            STATE_FML:"
+            STATEMENT_TYPE_FML:"
+            SET_NUMBER_FML:"
+            CODE_FML:"
+            MEASUREMENT_SOURCE_FML:"
+            ENTRY_DATE:@JAN-04-2012 13:18:14
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ITERATOR
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0003
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"Is Christmas Weekday
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT 1 FROM DUAL WHERE TO_CHAR (:statement_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') NOT IN ('SAT', 'SUN')
+            IS_MULTICOLUMN:#0
+            IDENT_COLUMNS:"
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#1
+            ENTRY_DATE:@JAN-04-2012 16:37:33
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0003
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"SUPPLIER_UNIT, POD_ID, BILLING_PSE
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT STRING_COLLECTION(SUPPLIER_UNIT, POD_ID, BILLING_PSE) FROM \n(\nSELECT DISTINCT esi.external_identifier SUPPLIER_UNIT, \n                s.service_point_id POD_ID,\n                se.settlement_pse_id BILLING_PSE\n  FROM service_point s, \n       interchange_transaction t, \n       external_system_identifier esi, \n       sem_service_point_pse sp,\n       sem_settlement_entity se\n WHERE t.transaction_type = 'Net Demand'\n   AND t.pod_id = s.service_point_id\n   AND s.service_point_id = esi.entity_id\n   AND esi.external_system_id = 1000\n   AND esi.entity_domain_id = -210\n   AND esi.external_identifier like 'SU_5%'\n   AND sp.pse_id = se.participant_pse_id\n   AND se.market_name = 'EN'\n   AND sp.pod_id = s.service_point_id\n   AND :statement_date BETWEEN sp.begin_date AND NVL(sp.end_date, DATE '9999-12-31'))
+            IS_MULTICOLUMN:#1
+            IDENT_COLUMNS:#1
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#2
+            ENTRY_DATE:@JAN-04-2012 16:36:56
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_PARAMETER
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_RESULT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_VARIABLE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0003
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE QUANTITY#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"SNDLF * ${ST03 Applies}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 13:18:14
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0003
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE RATE#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"Rate * ${Rate Conversion Factor}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 13:18:14
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0003
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"NDA
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"MM_SEM_SHADOW_BILL.GET_PIR_VALUE('NDA', ${BILLING_PSE}, :statement_type, :cut_now, 'NDA_' || ${SUPPLIER_UNIT}, ${SUPPLIER_UNIT})
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#3
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 13:31:50
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0003
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"0.657
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"p/KWh
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 13:18:14
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0003
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate Conversion Factor
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"10
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"Converts rate from p/KWh to GBP/MWh
+            ROW_NUMBER:#1
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 13:18:14
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0003
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"SNDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"NDLF + NVL(NDA, 0)
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#4
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 17:24:08
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0003
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"ST03 Applies
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"CASE \nWHEN ${Time Of Day} BETWEEN 830 AND 2030 THEN \n    1\nELSE \n    0\nEND
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#5
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 13:31:50
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0003
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Time Of Day
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"TO_NUMBER(TO_CHAR(:now, 'hh24mi'))
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#2
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 13:18:14
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_IMBALANCE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_MARKET_PRICE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_PERCENTAGE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_TOU_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:EXTERNAL_SYSTEM_IDENTIFIER
+        relationship:ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630
+    end subtable
+    begin subtable
+        table_name:TEMPORAL_ENTITY_ATTRIBUTE
+        relationship:OWNER_ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+end object
+begin object
+    table_name:COMPONENT
+    table_alias:COMPONENT
+    COMPONENT_ID:*COMPONENT-0004
+    COMPONENT_NAME:"Mar-Oct Standard All other times (ST04)
+    COMPONENT_ALIAS:"?
+    COMPONENT_DESC:"NI TUOS ST04 Tariff: All hours 1-Mar to 31-Oct
+    COMPONENT_ENTITY:"PSE
+    CHARGE_TYPE:"?
+    RATE_STRUCTURE:"Formula
+    RATE_INTERVAL:"30 Minute
+    IS_REBILL:#0
+    IS_TAXED:#0
+    IS_CUSTOM_CHARGE:#0
+    IS_CREDIT_CHARGE:#0
+    IS_INCLUDE_TX_LOSS:#0
+    IS_INCLUDE_DX_LOSS:#0
+    TEMPLATE_ID:#0
+    MARKET_PRICE_ID:#0
+    SERVICE_POINT_ID:#0
+    MODEL_ID:#1
+    EVENT_ID:#0
+    COMPONENT_REFERENCE:"None
+    INVOICE_GROUP_ID:#0
+    INVOICE_GROUP_ORDER:#0
+    COMPUTATION_ORDER:#0
+    QUANTITY_UNIT:"?
+    CURRENCY_UNIT:"?
+    QUANTITY_TYPE:"?
+    EXTERNAL_IDENTIFIER:"?
+    COMPONENT_CATEGORY:"?
+    GL_DEBIT_ACCOUNT:"?
+    GL_CREDIT_ACCOUNT:"?
+    FIRM_NON_FIRM:"Either
+    EXCLUDE_FROM_INVOICE:#0
+    EXCLUDE_FROM_INVOICE_TOTAL:#0
+    IMBALANCE_TYPE:"?
+    ACCUMULATION_PERIOD:#0
+    BASE_COMPONENT_ID:#0
+    BASE_LIMIT_ID:#0
+    MARKET_TYPE:"Real-Time
+    MARKET_PRICE_TYPE:"Locational Marginal Price
+    WHICH_INTERVAL:"First
+    LMP_PRICE_CALC:"Actual
+    LMP_INCLUDE_EXT:#0
+    LMP_INCLUDE_SALES:"All
+    CHARGE_WHEN:"Either
+    BILATERALS_SIGN:#1
+    LMP_COMMODITY_ID:#0
+    LMP_BASE_COMMODITY_ID:#0
+    USE_ZONAL_PRICE:#0
+    ALTERNATE_PRICE:"None
+    ALTERNATE_PRICE_FUNCTION:"Min
+    EXCLUDE_FROM_BILLING_EXPORT:#0
+    IS_DEFAULT_TEMPLATE:#0
+    KWH_MULTIPLIER:#0
+    ANCILLARY_SERVICE_ID:#0
+    APPLY_RATE_FOR:"End Date
+    LOSS_ADJ_TYPE:#0
+    ENTRY_DATE:@JAN-04-2012 17:48:08
+    begin subtable
+        table_name:COMPONENT_BLOCK_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COINCIDENT_PEAK
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMBINATION
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMPOSITE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_CONVERSION_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FLAT_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ENTITY_REF
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_INPUT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0004
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            INPUT_NAME:"NDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FUNCTION:"Select
+            WHERE_CLAUSE:"
+            ENTITY_DOMAIN_ID:#-200
+            ENTITY_TYPE:"R
+            ENTITY_ID:*SYSTEM_REALM-0002
+            WHAT_FIELD:"AMOUNT
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            STATE_FML:"
+            STATEMENT_TYPE_FML:"
+            SET_NUMBER_FML:"
+            CODE_FML:"
+            MEASUREMENT_SOURCE_FML:"
+            ENTRY_DATE:@DEC-28-2011 15:12:43
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ITERATOR
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0004
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"In Mar-Oct Months
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT 1 FROM DUAL \nWHERE EXTRACT(MONTH FROM :statement_date) BETWEEN 3 AND 10
+            IS_MULTICOLUMN:#0
+            IDENT_COLUMNS:#0
+            IS_INNER_LOOP:#0
+            COMMENTS:"component only "runs" in mar-oct months
+            ROW_NUMBER:#1
+            ENTRY_DATE:@JAN-03-2012 15:11:25
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0004
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"SUPPLIER_UNIT, POD_ID, BILLING_PSE
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT STRING_COLLECTION(SUPPLIER_UNIT, POD_ID, BILLING_PSE) FROM \n(\nSELECT DISTINCT esi.external_identifier SUPPLIER_UNIT, \n                s.service_point_id POD_ID,\n                se.settlement_pse_id BILLING_PSE\n  FROM service_point s, \n       interchange_transaction t, \n       external_system_identifier esi, \n       sem_service_point_pse sp,\n       sem_settlement_entity se\n WHERE t.transaction_type = 'Net Demand'\n   AND t.pod_id = s.service_point_id\n   AND s.service_point_id = esi.entity_id\n   AND esi.external_system_id = 1000\n   AND esi.entity_domain_id = -210\n   AND esi.external_identifier like 'SU_5%'\n   AND sp.pse_id = se.participant_pse_id\n   AND se.market_name = 'EN'\n   AND sp.pod_id = s.service_point_id\n   AND :statement_date BETWEEN sp.begin_date AND NVL(sp.end_date, DATE '9999-12-31'))
+            IS_MULTICOLUMN:#1
+            IDENT_COLUMNS:#1
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#2
+            ENTRY_DATE:@DEC-28-2011 15:12:43
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_PARAMETER
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_RESULT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_VARIABLE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0004
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE QUANTITY#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"SNDLF
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 15:22:48
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0004
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE RATE#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"Rate * ${Rate Conversion Factor}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 15:22:48
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0004
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"NDA
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"MM_SEM_SHADOW_BILL.GET_PIR_VALUE('NDA', ${BILLING_PSE}, :statement_type, :cut_now, 'NDA_' || ${SUPPLIER_UNIT}, ${SUPPLIER_UNIT})
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#2
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 15:22:48
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0004
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"0.088
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"p/KWh
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:36:50
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0004
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate Conversion Factor
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"10
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"Converts rate from p/KWh to GBP/MWh
+            ROW_NUMBER:#1
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:36:50
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0004
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"SNDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"NDLF + NVL(NDA, 0)
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#3
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 17:48:11
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_IMBALANCE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_MARKET_PRICE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_PERCENTAGE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_TOU_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:EXTERNAL_SYSTEM_IDENTIFIER
+        relationship:ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630
+    end subtable
+    begin subtable
+        table_name:TEMPORAL_ENTITY_ATTRIBUTE
+        relationship:OWNER_ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+end object
+begin object
+    table_name:COMPONENT
+    table_alias:COMPONENT
+    COMPONENT_ID:*COMPONENT-0005
+    COMPONENT_NAME:"Nov-Feb Weekday All other times (ST04)
+    COMPONENT_ALIAS:"?
+    COMPONENT_DESC:"NI TUOS ST04 Tariff: 2230-0800 M-F, Nov-Feb (excluding Christmas period)
+    COMPONENT_ENTITY:"PSE
+    CHARGE_TYPE:"?
+    RATE_STRUCTURE:"Formula
+    RATE_INTERVAL:"30 Minute
+    IS_REBILL:#0
+    IS_TAXED:#0
+    IS_CUSTOM_CHARGE:#0
+    IS_CREDIT_CHARGE:#0
+    IS_INCLUDE_TX_LOSS:#0
+    IS_INCLUDE_DX_LOSS:#0
+    TEMPLATE_ID:#0
+    MARKET_PRICE_ID:#0
+    SERVICE_POINT_ID:#0
+    MODEL_ID:#1
+    EVENT_ID:#0
+    COMPONENT_REFERENCE:"None
+    INVOICE_GROUP_ID:#0
+    INVOICE_GROUP_ORDER:#0
+    COMPUTATION_ORDER:#0
+    QUANTITY_UNIT:"?
+    CURRENCY_UNIT:"?
+    QUANTITY_TYPE:"?
+    EXTERNAL_IDENTIFIER:"?
+    COMPONENT_CATEGORY:"?
+    GL_DEBIT_ACCOUNT:"?
+    GL_CREDIT_ACCOUNT:"?
+    FIRM_NON_FIRM:"Either
+    EXCLUDE_FROM_INVOICE:#0
+    EXCLUDE_FROM_INVOICE_TOTAL:#0
+    IMBALANCE_TYPE:"?
+    ACCUMULATION_PERIOD:#0
+    BASE_COMPONENT_ID:#0
+    BASE_LIMIT_ID:#0
+    MARKET_TYPE:"Real-Time
+    MARKET_PRICE_TYPE:"Locational Marginal Price
+    WHICH_INTERVAL:"First
+    LMP_PRICE_CALC:"Actual
+    LMP_INCLUDE_EXT:#0
+    LMP_INCLUDE_SALES:"All
+    CHARGE_WHEN:"Either
+    BILATERALS_SIGN:#1
+    LMP_COMMODITY_ID:#0
+    LMP_BASE_COMMODITY_ID:#0
+    USE_ZONAL_PRICE:#0
+    ALTERNATE_PRICE:"None
+    ALTERNATE_PRICE_FUNCTION:"Min
+    EXCLUDE_FROM_BILLING_EXPORT:#0
+    IS_DEFAULT_TEMPLATE:#0
+    KWH_MULTIPLIER:#0
+    ANCILLARY_SERVICE_ID:#0
+    APPLY_RATE_FOR:"End Date
+    LOSS_ADJ_TYPE:#0
+    ENTRY_DATE:@JAN-04-2012 17:24:47
+    begin subtable
+        table_name:COMPONENT_BLOCK_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COINCIDENT_PEAK
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMBINATION
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMPOSITE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_CONVERSION_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FLAT_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ENTITY_REF
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_INPUT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0005
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            INPUT_NAME:"NDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FUNCTION:"Select
+            WHERE_CLAUSE:"
+            ENTITY_DOMAIN_ID:#-200
+            ENTITY_TYPE:"R
+            ENTITY_ID:*SYSTEM_REALM-0002
+            WHAT_FIELD:"AMOUNT
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            STATE_FML:"
+            STATEMENT_TYPE_FML:"
+            SET_NUMBER_FML:"
+            CODE_FML:"
+            MEASUREMENT_SOURCE_FML:"
+            ENTRY_DATE:@DEC-28-2011 15:23:20
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ITERATOR
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0005
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"In Nov-Feb Weekday
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT 1 FROM DUAL \nWHERE EXTRACT(MONTH FROM :statement_date) IN (1, 2, 11, 12)\n   AND TO_CHAR (:statement_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') NOT IN ('SAT', 'SUN')
+            IS_MULTICOLUMN:#0
+            IDENT_COLUMNS:#0
+            IS_INNER_LOOP:#0
+            COMMENTS:"component only "runs" on weekdays in nov-feb months
+            ROW_NUMBER:#1
+            ENTRY_DATE:@JAN-03-2012 17:17:01
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0005
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"SUPPLIER_UNIT, POD_ID, BILLING_PSE
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT STRING_COLLECTION(SUPPLIER_UNIT, POD_ID, BILLING_PSE) FROM \n(\nSELECT DISTINCT esi.external_identifier SUPPLIER_UNIT, \n                s.service_point_id POD_ID,\n                se.settlement_pse_id BILLING_PSE\n  FROM service_point s, \n       interchange_transaction t, \n       external_system_identifier esi, \n       sem_service_point_pse sp,\n       sem_settlement_entity se\n WHERE t.transaction_type = 'Net Demand'\n   AND t.pod_id = s.service_point_id\n   AND s.service_point_id = esi.entity_id\n   AND esi.external_system_id = 1000\n   AND esi.entity_domain_id = -210\n   AND esi.external_identifier like 'SU_5%'\n   AND sp.pse_id = se.participant_pse_id\n   AND se.market_name = 'EN'\n   AND sp.pod_id = s.service_point_id\n   AND :statement_date BETWEEN sp.begin_date AND NVL(sp.end_date, DATE '9999-12-31'))
+            IS_MULTICOLUMN:#1
+            IDENT_COLUMNS:#1
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#3
+            ENTRY_DATE:@DEC-28-2011 15:35:08
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_PARAMETER
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_RESULT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_VARIABLE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0005
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE QUANTITY#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"SNDLF * ${ST04 Applies}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 15:23:20
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0005
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE RATE#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"Rate * ${Rate Conversion Factor}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 15:35:08
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0005
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"NDA
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"MM_SEM_SHADOW_BILL.GET_PIR_VALUE('NDA', ${BILLING_PSE}, :statement_type, :cut_now, 'NDA_' || ${SUPPLIER_UNIT}, ${SUPPLIER_UNIT})
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#4
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 15:23:20
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0005
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"0.088
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"p/KWh
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:36:32
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0005
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate Conversion Factor
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"10
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"Converts p/KWh to GBP/MWh
+            ROW_NUMBER:#1
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:36:32
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0005
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"SNDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"NDLF + NVL(NDA, 0)
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#5
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 17:24:47
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0005
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"ST04 Applies
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"case \nwhen ${Time Of Day} between 830 and 2230 then \n    0 \nelse \n    1 \nend
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#6
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 10:57:52
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0005
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Time Of Day
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"TO_NUMBER(TO_CHAR(:now, 'hh24mi'))
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#3
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:36:32
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_IMBALANCE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_MARKET_PRICE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_PERCENTAGE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_TOU_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:EXTERNAL_SYSTEM_IDENTIFIER
+        relationship:ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630
+    end subtable
+    begin subtable
+        table_name:TEMPORAL_ENTITY_ATTRIBUTE
+        relationship:OWNER_ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+end object
+begin object
+    table_name:COMPONENT
+    table_alias:COMPONENT
+    COMPONENT_ID:*COMPONENT-0006
+    COMPONENT_NAME:"Nov-Feb Weekday Evening and Weekend (ST03)
+    COMPONENT_ALIAS:"?
+    COMPONENT_DESC:"NI TUOS ST03 Tariff; 2030-2230 M-F, Nov-Feb.
+    COMPONENT_ENTITY:"PSE
+    CHARGE_TYPE:"?
+    RATE_STRUCTURE:"Formula
+    RATE_INTERVAL:"30 Minute
+    IS_REBILL:#0
+    IS_TAXED:#0
+    IS_CUSTOM_CHARGE:#0
+    IS_CREDIT_CHARGE:#0
+    IS_INCLUDE_TX_LOSS:#0
+    IS_INCLUDE_DX_LOSS:#0
+    TEMPLATE_ID:#0
+    MARKET_PRICE_ID:#0
+    SERVICE_POINT_ID:#0
+    MODEL_ID:#1
+    EVENT_ID:#0
+    COMPONENT_REFERENCE:"None
+    INVOICE_GROUP_ID:#0
+    INVOICE_GROUP_ORDER:#0
+    COMPUTATION_ORDER:#0
+    QUANTITY_UNIT:"?
+    CURRENCY_UNIT:"?
+    QUANTITY_TYPE:"?
+    EXTERNAL_IDENTIFIER:"?
+    COMPONENT_CATEGORY:"?
+    GL_DEBIT_ACCOUNT:"?
+    GL_CREDIT_ACCOUNT:"?
+    FIRM_NON_FIRM:"Either
+    EXCLUDE_FROM_INVOICE:#0
+    EXCLUDE_FROM_INVOICE_TOTAL:#0
+    IMBALANCE_TYPE:"?
+    ACCUMULATION_PERIOD:#0
+    BASE_COMPONENT_ID:#0
+    BASE_LIMIT_ID:#0
+    MARKET_TYPE:"Real-Time
+    MARKET_PRICE_TYPE:"Locational Marginal Price
+    WHICH_INTERVAL:"First
+    LMP_PRICE_CALC:"Actual
+    LMP_INCLUDE_EXT:#0
+    LMP_INCLUDE_SALES:"All
+    CHARGE_WHEN:"Either
+    BILATERALS_SIGN:#1
+    LMP_COMMODITY_ID:#0
+    LMP_BASE_COMMODITY_ID:#0
+    USE_ZONAL_PRICE:#0
+    ALTERNATE_PRICE:"None
+    ALTERNATE_PRICE_FUNCTION:"Min
+    EXCLUDE_FROM_BILLING_EXPORT:#0
+    IS_DEFAULT_TEMPLATE:#0
+    KWH_MULTIPLIER:#0
+    ANCILLARY_SERVICE_ID:#0
+    APPLY_RATE_FOR:"End Date
+    LOSS_ADJ_TYPE:#0
+    ENTRY_DATE:@JAN-04-2012 17:25:18
+    begin subtable
+        table_name:COMPONENT_BLOCK_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COINCIDENT_PEAK
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMBINATION
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMPOSITE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_CONVERSION_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FLAT_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ENTITY_REF
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_INPUT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0006
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            INPUT_NAME:"NDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FUNCTION:"Select
+            WHERE_CLAUSE:"
+            ENTITY_DOMAIN_ID:#-200
+            ENTITY_TYPE:"R
+            ENTITY_ID:*SYSTEM_REALM-0002
+            WHAT_FIELD:"AMOUNT
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            STATE_FML:"
+            STATEMENT_TYPE_FML:"
+            SET_NUMBER_FML:"
+            CODE_FML:"
+            MEASUREMENT_SOURCE_FML:"
+            ENTRY_DATE:@DEC-28-2011 16:00:12
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ITERATOR
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0006
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"In Nov-Feb Weekday
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT 1 FROM DUAL \nWHERE EXTRACT(MONTH FROM :statement_date) IN (1, 2, 11, 12)\n   AND TO_CHAR (:statement_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') NOT IN ('SAT', 'SUN')
+            IS_MULTICOLUMN:#0
+            IDENT_COLUMNS:#0
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#1
+            ENTRY_DATE:@JAN-03-2012 17:16:17
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0006
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"SUPPLIER_UNIT, POD_ID, BILLING_PSE
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT STRING_COLLECTION(SUPPLIER_UNIT, POD_ID, BILLING_PSE) FROM \n(\nSELECT DISTINCT esi.external_identifier SUPPLIER_UNIT, \n                s.service_point_id POD_ID,\n                se.settlement_pse_id BILLING_PSE\n  FROM service_point s, \n       interchange_transaction t, \n       external_system_identifier esi, \n       sem_service_point_pse sp,\n       sem_settlement_entity se\n WHERE t.transaction_type = 'Net Demand'\n   AND t.pod_id = s.service_point_id\n   AND s.service_point_id = esi.entity_id\n   AND esi.external_system_id = 1000\n   AND esi.entity_domain_id = -210\n   AND esi.external_identifier like 'SU_5%'\n   AND sp.pse_id = se.participant_pse_id\n   AND se.market_name = 'EN'\n   AND sp.pod_id = s.service_point_id\n   AND :statement_date BETWEEN sp.begin_date AND NVL(sp.end_date, DATE '9999-12-31'))
+            IS_MULTICOLUMN:#1
+            IDENT_COLUMNS:#1
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#2
+            ENTRY_DATE:@DEC-28-2011 16:00:12
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_PARAMETER
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_RESULT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_VARIABLE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0006
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE QUANTITY#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"SNDLF * ${ST03 Applies}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 16:00:12
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0006
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE RATE#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"Rate * ${Rate Conversion Factor}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 16:00:12
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0006
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"NDA
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"MM_SEM_SHADOW_BILL.GET_PIR_VALUE('NDA', ${BILLING_PSE}, :statement_type, :cut_now, 'NDA_' || ${SUPPLIER_UNIT}, ${SUPPLIER_UNIT})
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#3
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 16:00:12
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0006
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"0.657
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"p/KWh
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:37:13
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0006
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate Conversion Factor
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"10
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"Converts rate from p/KWh to GBP/MWh
+            ROW_NUMBER:#1
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:37:13
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0006
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"SNDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"NDLF + NVL(NDA, 0)
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#4
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 17:25:18
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0006
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"ST03 Applies
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"CASE \nWHEN ${Time Of Day} BETWEEN 2100 AND 2230 THEN \n    1\nELSE \n    0\nEND
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#5
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 10:57:40
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0006
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Time Of Day
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"TO_NUMBER(TO_CHAR(:now, 'hh24mi'))
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#2
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:37:13
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_IMBALANCE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_MARKET_PRICE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_PERCENTAGE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_TOU_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:EXTERNAL_SYSTEM_IDENTIFIER
+        relationship:ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630
+    end subtable
+    begin subtable
+        table_name:TEMPORAL_ENTITY_ATTRIBUTE
+        relationship:OWNER_ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+end object
+begin object
+    table_name:COMPONENT
+    table_alias:COMPONENT
+    COMPONENT_ID:*COMPONENT-0007
+    COMPONENT_NAME:"Nov-Feb Weekday Outside of Peak (ST02)
+    COMPONENT_ALIAS:"?
+    COMPONENT_DESC:"NI TUOS ST02 Tariff; 0800-2030, excluding 1600-1900, Monday to Friday, Nov-Feb (excluding xmas period)
+    COMPONENT_ENTITY:"PSE
+    CHARGE_TYPE:"?
+    RATE_STRUCTURE:"Formula
+    RATE_INTERVAL:"30 Minute
+    IS_REBILL:#0
+    IS_TAXED:#0
+    IS_CUSTOM_CHARGE:#0
+    IS_CREDIT_CHARGE:#0
+    IS_INCLUDE_TX_LOSS:#0
+    IS_INCLUDE_DX_LOSS:#0
+    TEMPLATE_ID:#0
+    MARKET_PRICE_ID:#0
+    SERVICE_POINT_ID:#0
+    MODEL_ID:#1
+    EVENT_ID:#0
+    COMPONENT_REFERENCE:"None
+    INVOICE_GROUP_ID:#0
+    INVOICE_GROUP_ORDER:#0
+    COMPUTATION_ORDER:#0
+    QUANTITY_UNIT:"?
+    CURRENCY_UNIT:"?
+    QUANTITY_TYPE:"?
+    EXTERNAL_IDENTIFIER:"?
+    COMPONENT_CATEGORY:"?
+    GL_DEBIT_ACCOUNT:"?
+    GL_CREDIT_ACCOUNT:"?
+    FIRM_NON_FIRM:"Either
+    EXCLUDE_FROM_INVOICE:#0
+    EXCLUDE_FROM_INVOICE_TOTAL:#0
+    IMBALANCE_TYPE:"?
+    ACCUMULATION_PERIOD:#0
+    BASE_COMPONENT_ID:#0
+    BASE_LIMIT_ID:#0
+    MARKET_TYPE:"Real-Time
+    MARKET_PRICE_TYPE:"Locational Marginal Price
+    WHICH_INTERVAL:"First
+    LMP_PRICE_CALC:"Actual
+    LMP_INCLUDE_EXT:#0
+    LMP_INCLUDE_SALES:"All
+    CHARGE_WHEN:"Either
+    BILATERALS_SIGN:#1
+    LMP_COMMODITY_ID:#0
+    LMP_BASE_COMMODITY_ID:#0
+    USE_ZONAL_PRICE:#0
+    ALTERNATE_PRICE:"None
+    ALTERNATE_PRICE_FUNCTION:"Min
+    EXCLUDE_FROM_BILLING_EXPORT:#0
+    IS_DEFAULT_TEMPLATE:#0
+    KWH_MULTIPLIER:#0
+    ANCILLARY_SERVICE_ID:#0
+    APPLY_RATE_FOR:"End Date
+    LOSS_ADJ_TYPE:#0
+    ENTRY_DATE:@JAN-04-2012 17:25:48
+    begin subtable
+        table_name:COMPONENT_BLOCK_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COINCIDENT_PEAK
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMBINATION
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMPOSITE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_CONVERSION_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FLAT_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ENTITY_REF
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_INPUT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0007
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            INPUT_NAME:"NDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FUNCTION:"Select
+            WHERE_CLAUSE:"
+            ENTITY_DOMAIN_ID:#-200
+            ENTITY_TYPE:"R
+            ENTITY_ID:*SYSTEM_REALM-0002
+            WHAT_FIELD:"AMOUNT
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            STATE_FML:"
+            STATEMENT_TYPE_FML:"
+            SET_NUMBER_FML:"
+            CODE_FML:"
+            MEASUREMENT_SOURCE_FML:"
+            ENTRY_DATE:@DEC-28-2011 16:06:35
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ITERATOR
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0007
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"In Christmas Period
+            BEGIN_DATE:@DEC-25-2011 00:00:00
+            END_DATE:@JAN-02-2012 00:00:00
+            ITERATOR_QUERY:"SELECT 1 FROM DUAL WHERE 1=0
+            IS_MULTICOLUMN:#0
+            IDENT_COLUMNS:#0
+            IS_INNER_LOOP:#0
+            COMMENTS:"Copy and update dates for each new Statement of Charges
+            ROW_NUMBER:#0
+            ENTRY_DATE:@JAN-04-2012 17:10:05
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0007
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"In Winter Weekday
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT 1 FROM DUAL WHERE EXTRACT(MONTH FROM :statement_date) IN (1, 2, 11, 12) \n   AND TO_CHAR (:statement_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') NOT IN ('SAT', 'SUN')
+            IS_MULTICOLUMN:#0
+            IDENT_COLUMNS:#0
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#1
+            ENTRY_DATE:@JAN-04-2012 17:10:05
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0007
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"SUPPLIER_UNIT, POD_ID, BILLING_PSE
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT STRING_COLLECTION(SUPPLIER_UNIT, POD_ID, BILLING_PSE) FROM \n(\nSELECT DISTINCT esi.external_identifier SUPPLIER_UNIT, \n                s.service_point_id POD_ID,\n                se.settlement_pse_id BILLING_PSE\n  FROM service_point s, \n       interchange_transaction t, \n       external_system_identifier esi, \n       sem_service_point_pse sp,\n       sem_settlement_entity se\n WHERE t.transaction_type = 'Net Demand'\n   AND t.pod_id = s.service_point_id\n   AND s.service_point_id = esi.entity_id\n   AND esi.external_system_id = 1000\n   AND esi.entity_domain_id = -210\n   AND esi.external_identifier like 'SU_5%'\n   AND sp.pse_id = se.participant_pse_id\n   AND se.market_name = 'EN'\n   AND sp.pod_id = s.service_point_id\n   AND :statement_date BETWEEN sp.begin_date AND NVL(sp.end_date, DATE '9999-12-31'))
+            IS_MULTICOLUMN:#1
+            IDENT_COLUMNS:#1
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#2
+            ENTRY_DATE:@DEC-28-2011 16:06:35
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_PARAMETER
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_RESULT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_VARIABLE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0007
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE QUANTITY#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"SNDLF * ${ST02 Applies}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 16:06:35
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0007
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE RATE#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"Rate * ${Rate Conversion Factor}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 16:08:33
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0007
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"NDA
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"MM_SEM_SHADOW_BILL.GET_PIR_VALUE('NDA', ${BILLING_PSE}, :statement_type, :cut_now, 'NDA_' || ${SUPPLIER_UNIT}, ${SUPPLIER_UNIT})
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#4
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 16:08:17
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0007
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"0.759
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"p/KWh
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:40:45
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0007
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate Conversion Factor
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"10
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"Converts p/KWh to GBP/MWh
+            ROW_NUMBER:#1
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:40:45
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0007
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"SNDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"NDLF + NVL(NDA, 0)
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#5
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 17:25:48
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0007
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"ST02 Applies
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"CASE \nWHEN (${Time Of Day} BETWEEN 830 AND 1600 OR ${Time Of Day} BETWEEN 1930 AND 2030) THEN\n    1    \nELSE \n    0\nEND 
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#6
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 17:10:04
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0007
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Time Of Day
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"TO_NUMBER(TO_CHAR(:now, 'hh24mi'))
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#3
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:40:45
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_IMBALANCE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_MARKET_PRICE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_PERCENTAGE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_TOU_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:EXTERNAL_SYSTEM_IDENTIFIER
+        relationship:ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630
+    end subtable
+    begin subtable
+        table_name:TEMPORAL_ENTITY_ATTRIBUTE
+        relationship:OWNER_ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+end object
+begin object
+    table_name:COMPONENT
+    table_alias:COMPONENT
+    COMPONENT_ID:*COMPONENT-0008
+    COMPONENT_NAME:"Nov-Feb Weekday Peak Units (ST01)
+    COMPONENT_ALIAS:"?
+    COMPONENT_DESC:"NI TUOS ST01 Tariff; 1600-1900, Monday - Friday, Nov-Feb (excluding xmas period)
+    COMPONENT_ENTITY:"PSE
+    CHARGE_TYPE:"?
+    RATE_STRUCTURE:"Formula
+    RATE_INTERVAL:"30 Minute
+    IS_REBILL:#0
+    IS_TAXED:#0
+    IS_CUSTOM_CHARGE:#0
+    IS_CREDIT_CHARGE:#0
+    IS_INCLUDE_TX_LOSS:#0
+    IS_INCLUDE_DX_LOSS:#0
+    TEMPLATE_ID:#0
+    MARKET_PRICE_ID:#0
+    SERVICE_POINT_ID:#0
+    MODEL_ID:#1
+    EVENT_ID:#0
+    COMPONENT_REFERENCE:"None
+    INVOICE_GROUP_ID:#0
+    INVOICE_GROUP_ORDER:#0
+    COMPUTATION_ORDER:#0
+    QUANTITY_UNIT:"?
+    CURRENCY_UNIT:"?
+    QUANTITY_TYPE:"?
+    EXTERNAL_IDENTIFIER:"?
+    COMPONENT_CATEGORY:"?
+    GL_DEBIT_ACCOUNT:"?
+    GL_CREDIT_ACCOUNT:"?
+    FIRM_NON_FIRM:"Either
+    EXCLUDE_FROM_INVOICE:#0
+    EXCLUDE_FROM_INVOICE_TOTAL:#0
+    IMBALANCE_TYPE:"?
+    ACCUMULATION_PERIOD:#0
+    BASE_COMPONENT_ID:#0
+    BASE_LIMIT_ID:#0
+    MARKET_TYPE:"Real-Time
+    MARKET_PRICE_TYPE:"Locational Marginal Price
+    WHICH_INTERVAL:"First
+    LMP_PRICE_CALC:"Actual
+    LMP_INCLUDE_EXT:#0
+    LMP_INCLUDE_SALES:"All
+    CHARGE_WHEN:"Either
+    BILATERALS_SIGN:#1
+    LMP_COMMODITY_ID:#0
+    LMP_BASE_COMMODITY_ID:#0
+    USE_ZONAL_PRICE:#0
+    ALTERNATE_PRICE:"None
+    ALTERNATE_PRICE_FUNCTION:"Min
+    EXCLUDE_FROM_BILLING_EXPORT:#0
+    IS_DEFAULT_TEMPLATE:#0
+    KWH_MULTIPLIER:#0
+    ANCILLARY_SERVICE_ID:#0
+    APPLY_RATE_FOR:"End Date
+    LOSS_ADJ_TYPE:#0
+    ENTRY_DATE:@JAN-04-2012 17:26:26
+    begin subtable
+        table_name:COMPONENT_BLOCK_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COINCIDENT_PEAK
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMBINATION
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMPOSITE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_CONVERSION_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FLAT_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ENTITY_REF
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_INPUT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0008
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            INPUT_NAME:"NDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FUNCTION:"Select
+            WHERE_CLAUSE:"
+            ENTITY_DOMAIN_ID:#-200
+            ENTITY_TYPE:"R
+            ENTITY_ID:*SYSTEM_REALM-0002
+            WHAT_FIELD:"AMOUNT
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            STATE_FML:"
+            STATEMENT_TYPE_FML:"
+            SET_NUMBER_FML:"
+            CODE_FML:"
+            MEASUREMENT_SOURCE_FML:"
+            ENTRY_DATE:@DEC-28-2011 16:08:54
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ITERATOR
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0008
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"In Christmas Period
+            BEGIN_DATE:@DEC-25-2011 00:00:00
+            END_DATE:@JAN-02-2012 00:00:00
+            ITERATOR_QUERY:"SELECT 1 FROM DUAL WHERE 1=0
+            IS_MULTICOLUMN:#0
+            IDENT_COLUMNS:"
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#0
+            ENTRY_DATE:@JAN-04-2012 17:13:03
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0008
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"In Winter Weekday
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT 1 FROM DUAL WHERE EXTRACT(MONTH FROM :statement_date) IN (1, 2, 11, 12)\nAND TO_CHAR (:statement_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') NOT IN ('SAT', 'SUN')
+            IS_MULTICOLUMN:#0
+            IDENT_COLUMNS:#0
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#1
+            ENTRY_DATE:@JAN-04-2012 17:13:03
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0008
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"SUPPLIER_UNIT, POD_ID, BILLING_PSE
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT STRING_COLLECTION(SUPPLIER_UNIT, POD_ID, BILLING_PSE) FROM \n(\nSELECT DISTINCT esi.external_identifier SUPPLIER_UNIT, \n                s.service_point_id POD_ID,\n                se.settlement_pse_id BILLING_PSE\n  FROM service_point s, \n       interchange_transaction t, \n       external_system_identifier esi, \n       sem_service_point_pse sp,\n       sem_settlement_entity se\n WHERE t.transaction_type = 'Net Demand'\n   AND t.pod_id = s.service_point_id\n   AND s.service_point_id = esi.entity_id\n   AND esi.external_system_id = 1000\n   AND esi.entity_domain_id = -210\n   AND esi.external_identifier like 'SU_5%'\n   AND sp.pse_id = se.participant_pse_id\n   AND se.market_name = 'EN'\n   AND sp.pod_id = s.service_point_id\n   AND :statement_date BETWEEN sp.begin_date AND NVL(sp.end_date, DATE '9999-12-31'))
+            IS_MULTICOLUMN:#1
+            IDENT_COLUMNS:#1
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#2
+            ENTRY_DATE:@DEC-28-2011 16:08:54
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_PARAMETER
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_RESULT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_VARIABLE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0008
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE QUANTITY#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"SNDLF * ${ST01 Applies}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 16:08:54
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0008
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE RATE#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"Rate * ${Rate Conversion Factor}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 16:09:44
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0008
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"NDA
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"MM_SEM_SHADOW_BILL.GET_PIR_VALUE('NDA', ${BILLING_PSE}, :statement_type, :cut_now, 'NDA_' || ${SUPPLIER_UNIT}, ${SUPPLIER_UNIT})
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#4
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 16:09:44
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0008
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"1.323
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"p/KWH
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:41:03
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0008
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate Conversion Factor
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"10
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"Converts p/KWh to GBP/MWh
+            ROW_NUMBER:#1
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:41:03
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0008
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"SNDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"NDLF + NVL(NDA, 0)
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#5
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 17:26:26
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0008
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"ST01 Applies
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"CASE \nWHEN ${Time Of Day} BETWEEN 1630 AND 1900 THEN \n  1 \nELSE \n  0\nEND
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#6
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 17:13:03
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0008
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Time Of Day
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"TO_NUMBER(TO_CHAR(:now, 'hh24mi'))
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#3
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:41:03
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_IMBALANCE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_MARKET_PRICE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_PERCENTAGE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_TOU_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:EXTERNAL_SYSTEM_IDENTIFIER
+        relationship:ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630
+    end subtable
+    begin subtable
+        table_name:TEMPORAL_ENTITY_ATTRIBUTE
+        relationship:OWNER_ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+end object
+begin object
+    table_name:COMPONENT
+    table_alias:COMPONENT
+    COMPONENT_ID:*COMPONENT-0009
+    COMPONENT_NAME:"Nov-Feb Weekend All other times (ST04)
+    COMPONENT_ALIAS:"?
+    COMPONENT_DESC:"NI TUOS ST04 Tariff: 2230-0800 weekends, Nov-Feb
+    COMPONENT_ENTITY:"PSE
+    CHARGE_TYPE:"?
+    RATE_STRUCTURE:"Formula
+    RATE_INTERVAL:"30 Minute
+    IS_REBILL:#0
+    IS_TAXED:#0
+    IS_CUSTOM_CHARGE:#0
+    IS_CREDIT_CHARGE:#0
+    IS_INCLUDE_TX_LOSS:#0
+    IS_INCLUDE_DX_LOSS:#0
+    TEMPLATE_ID:#0
+    MARKET_PRICE_ID:#0
+    SERVICE_POINT_ID:#0
+    MODEL_ID:#1
+    EVENT_ID:#0
+    COMPONENT_REFERENCE:"None
+    INVOICE_GROUP_ID:#0
+    INVOICE_GROUP_ORDER:#0
+    COMPUTATION_ORDER:#0
+    QUANTITY_UNIT:"?
+    CURRENCY_UNIT:"?
+    QUANTITY_TYPE:"?
+    EXTERNAL_IDENTIFIER:"?
+    COMPONENT_CATEGORY:"?
+    GL_DEBIT_ACCOUNT:"?
+    GL_CREDIT_ACCOUNT:"?
+    FIRM_NON_FIRM:"Either
+    EXCLUDE_FROM_INVOICE:#0
+    EXCLUDE_FROM_INVOICE_TOTAL:#0
+    IMBALANCE_TYPE:"?
+    ACCUMULATION_PERIOD:#0
+    BASE_COMPONENT_ID:#0
+    BASE_LIMIT_ID:#0
+    MARKET_TYPE:"Real-Time
+    MARKET_PRICE_TYPE:"Locational Marginal Price
+    WHICH_INTERVAL:"First
+    LMP_PRICE_CALC:"Actual
+    LMP_INCLUDE_EXT:#0
+    LMP_INCLUDE_SALES:"All
+    CHARGE_WHEN:"Either
+    BILATERALS_SIGN:#1
+    LMP_COMMODITY_ID:#0
+    LMP_BASE_COMMODITY_ID:#0
+    USE_ZONAL_PRICE:#0
+    ALTERNATE_PRICE:"None
+    ALTERNATE_PRICE_FUNCTION:"Min
+    EXCLUDE_FROM_BILLING_EXPORT:#0
+    IS_DEFAULT_TEMPLATE:#0
+    KWH_MULTIPLIER:#0
+    ANCILLARY_SERVICE_ID:#0
+    APPLY_RATE_FOR:"End Date
+    LOSS_ADJ_TYPE:#0
+    ENTRY_DATE:@JAN-04-2012 17:16:22
+    begin subtable
+        table_name:COMPONENT_BLOCK_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COINCIDENT_PEAK
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMBINATION
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMPOSITE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_CONVERSION_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FLAT_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ENTITY_REF
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_INPUT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0009
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            INPUT_NAME:"NDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FUNCTION:"Select
+            WHERE_CLAUSE:"
+            ENTITY_DOMAIN_ID:#-200
+            ENTITY_TYPE:"R
+            ENTITY_ID:*SYSTEM_REALM-0002
+            WHAT_FIELD:"AMOUNT
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            STATE_FML:"
+            STATEMENT_TYPE_FML:"
+            SET_NUMBER_FML:"
+            CODE_FML:"
+            MEASUREMENT_SOURCE_FML:"
+            ENTRY_DATE:@DEC-28-2011 15:35:53
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ITERATOR
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0009
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"In Nov-Feb Weekend
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT 1 FROM DUAL \nWHERE EXTRACT(MONTH FROM :statement_date) IN (1, 2, 11, 12)\n   AND TO_CHAR (:statement_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') IN ('SAT', 'SUN')
+            IS_MULTICOLUMN:#0
+            IDENT_COLUMNS:#0
+            IS_INNER_LOOP:#0
+            COMMENTS:"component only "runs" on weekdays in nov-feb months
+            ROW_NUMBER:#1
+            ENTRY_DATE:@JAN-03-2012 17:01:03
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0009
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"SUPPLIER_UNIT, POD_ID, BILLING_PSE
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT STRING_COLLECTION(SUPPLIER_UNIT, POD_ID, BILLING_PSE) FROM \n(\nSELECT DISTINCT esi.external_identifier SUPPLIER_UNIT, \n                s.service_point_id POD_ID,\n                se.settlement_pse_id BILLING_PSE\n  FROM service_point s, \n       interchange_transaction t, \n       external_system_identifier esi, \n       sem_service_point_pse sp,\n       sem_settlement_entity se\n WHERE t.transaction_type = 'Net Demand'\n   AND t.pod_id = s.service_point_id\n   AND s.service_point_id = esi.entity_id\n   AND esi.external_system_id = 1000\n   AND esi.entity_domain_id = -210\n   AND esi.external_identifier like 'SU_5%'\n   AND sp.pse_id = se.participant_pse_id\n   AND se.market_name = 'EN'\n   AND sp.pod_id = s.service_point_id\n   AND :statement_date BETWEEN sp.begin_date AND NVL(sp.end_date, DATE '9999-12-31'))
+            IS_MULTICOLUMN:#1
+            IDENT_COLUMNS:#1
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#3
+            ENTRY_DATE:@DEC-28-2011 15:35:53
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_PARAMETER
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_RESULT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_VARIABLE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0009
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE QUANTITY#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"SNDLF * ${ST04 Applies}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 15:35:53
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0009
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE RATE#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"Rate * ${Rate Conversion Factor}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 15:35:53
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0009
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"NDA
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"MM_SEM_SHADOW_BILL.GET_PIR_VALUE('NDA', ${BILLING_PSE}, :statement_type, :cut_now, 'NDA_' || ${SUPPLIER_UNIT}, ${SUPPLIER_UNIT})
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#4
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 15:35:53
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0009
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"0.088
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"p/KWh
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:41:22
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0009
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate Conversion Factor
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"10
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"Converts p/KWh to GBP/MWh
+            ROW_NUMBER:#1
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:41:22
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0009
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"SNDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"NDLF + NVL(NDA, 0)
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#5
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 17:16:22
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0009
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"ST04 Applies
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"case \nwhen ${Time Of Day} between 830 and 2230 then \n    0 \nelse \n    1 \nend
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#6
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:41:22
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0009
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Time Of Day
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"TO_NUMBER(TO_CHAR(:now, 'hh24mi'))
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#3
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:41:22
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_IMBALANCE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_MARKET_PRICE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_PERCENTAGE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_TOU_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:EXTERNAL_SYSTEM_IDENTIFIER
+        relationship:ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630
+    end subtable
+    begin subtable
+        table_name:TEMPORAL_ENTITY_ATTRIBUTE
+        relationship:OWNER_ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+end object
+begin object
+    table_name:COMPONENT
+    table_alias:COMPONENT
+    COMPONENT_ID:*COMPONENT-0010
+    COMPONENT_NAME:"Nov-Feb Weekend Evening and Weekend (ST03)
+    COMPONENT_ALIAS:"?
+    COMPONENT_DESC:"NI TUOS ST03 Tariff; 0800-2230 Saturday and Sunday, Nov-Feb.
+    COMPONENT_ENTITY:"PSE
+    CHARGE_TYPE:"?
+    RATE_STRUCTURE:"Formula
+    RATE_INTERVAL:"30 Minute
+    IS_REBILL:#0
+    IS_TAXED:#0
+    IS_CUSTOM_CHARGE:#0
+    IS_CREDIT_CHARGE:#0
+    IS_INCLUDE_TX_LOSS:#0
+    IS_INCLUDE_DX_LOSS:#0
+    TEMPLATE_ID:#0
+    MARKET_PRICE_ID:#0
+    SERVICE_POINT_ID:#0
+    MODEL_ID:#1
+    EVENT_ID:#0
+    COMPONENT_REFERENCE:"None
+    INVOICE_GROUP_ID:#0
+    INVOICE_GROUP_ORDER:#0
+    COMPUTATION_ORDER:#0
+    QUANTITY_UNIT:"?
+    CURRENCY_UNIT:"?
+    QUANTITY_TYPE:"?
+    EXTERNAL_IDENTIFIER:"?
+    COMPONENT_CATEGORY:"?
+    GL_DEBIT_ACCOUNT:"?
+    GL_CREDIT_ACCOUNT:"?
+    FIRM_NON_FIRM:"Either
+    EXCLUDE_FROM_INVOICE:#0
+    EXCLUDE_FROM_INVOICE_TOTAL:#0
+    IMBALANCE_TYPE:"?
+    ACCUMULATION_PERIOD:#0
+    BASE_COMPONENT_ID:#0
+    BASE_LIMIT_ID:#0
+    MARKET_TYPE:"Real-Time
+    MARKET_PRICE_TYPE:"Locational Marginal Price
+    WHICH_INTERVAL:"First
+    LMP_PRICE_CALC:"Actual
+    LMP_INCLUDE_EXT:#0
+    LMP_INCLUDE_SALES:"All
+    CHARGE_WHEN:"Either
+    BILATERALS_SIGN:#1
+    LMP_COMMODITY_ID:#0
+    LMP_BASE_COMMODITY_ID:#0
+    USE_ZONAL_PRICE:#0
+    ALTERNATE_PRICE:"None
+    ALTERNATE_PRICE_FUNCTION:"Min
+    EXCLUDE_FROM_BILLING_EXPORT:#0
+    IS_DEFAULT_TEMPLATE:#0
+    KWH_MULTIPLIER:#0
+    ANCILLARY_SERVICE_ID:#0
+    APPLY_RATE_FOR:"End Date
+    LOSS_ADJ_TYPE:#0
+    ENTRY_DATE:@JAN-04-2012 17:16:52
+    begin subtable
+        table_name:COMPONENT_BLOCK_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COINCIDENT_PEAK
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMBINATION
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_COMPOSITE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_CONVERSION_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FLAT_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ENTITY_REF
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_INPUT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0010
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            INPUT_NAME:"NDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FUNCTION:"Select
+            WHERE_CLAUSE:"
+            ENTITY_DOMAIN_ID:#-200
+            ENTITY_TYPE:"R
+            ENTITY_ID:*SYSTEM_REALM-0002
+            WHAT_FIELD:"AMOUNT
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            STATE_FML:"
+            STATEMENT_TYPE_FML:"
+            SET_NUMBER_FML:"
+            CODE_FML:"
+            MEASUREMENT_SOURCE_FML:"
+            ENTRY_DATE:@DEC-28-2011 15:54:31
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_ITERATOR
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0010
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"In Nov-Feb Weekend
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT 1 FROM DUAL \nWHERE EXTRACT(MONTH FROM :statement_date) IN (1, 2, 11, 12)\n   AND TO_CHAR (:statement_date, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH') IN ('SAT', 'SUN')
+            IS_MULTICOLUMN:#0
+            IDENT_COLUMNS:#0
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#1
+            ENTRY_DATE:@JAN-03-2012 17:08:29
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0010
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            ITERATOR_NAME:"SUPPLIER_UNIT, POD_ID, BILLING_PSE
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ITERATOR_QUERY:"SELECT STRING_COLLECTION(SUPPLIER_UNIT, POD_ID, BILLING_PSE) FROM \n(\nSELECT DISTINCT esi.external_identifier SUPPLIER_UNIT, \n                s.service_point_id POD_ID,\n                se.settlement_pse_id BILLING_PSE\n  FROM service_point s, \n       interchange_transaction t, \n       external_system_identifier esi, \n       sem_service_point_pse sp,\n       sem_settlement_entity se\n WHERE t.transaction_type = 'Net Demand'\n   AND t.pod_id = s.service_point_id\n   AND s.service_point_id = esi.entity_id\n   AND esi.external_system_id = 1000\n   AND esi.entity_domain_id = -210\n   AND esi.external_identifier like 'SU_5%'\n   AND sp.pse_id = se.participant_pse_id\n   AND se.market_name = 'EN'\n   AND sp.pod_id = s.service_point_id\n   AND :statement_date BETWEEN sp.begin_date AND NVL(sp.end_date, DATE '9999-12-31'))
+            IS_MULTICOLUMN:#1
+            IDENT_COLUMNS:#1
+            IS_INNER_LOOP:#0
+            COMMENTS:"
+            ROW_NUMBER:#2
+            ENTRY_DATE:@DEC-28-2011 15:54:31
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_PARAMETER
+        relationship:COMPONENT_ID
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_RESULT
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_FORMULA_VARIABLE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            COMPONENT_ID:*COMPONENT-0010
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE QUANTITY#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"SNDLF * ${ST03 Applies}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 15:54:31
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0010
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"#CHARGE RATE#
+            BEGIN_DATE:@JAN-01-1900 00:00:00
+            END_DATE:"
+            FORMULA:"Rate * ${Rate Conversion Factor}
+            IS_MULTICOLUMN:"
+            IS_PLSQL:"
+            COMMENTS:"
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 15:59:24
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0010
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"NDA
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"MM_SEM_SHADOW_BILL.GET_PIR_VALUE('NDA', ${BILLING_PSE}, :statement_type, :cut_now, 'NDA_' || ${SUPPLIER_UNIT}, ${SUPPLIER_UNIT})
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#3
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@DEC-28-2011 15:59:24
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0010
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"0.657
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"p/KWh
+            ROW_NUMBER:#0
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:41:38
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0010
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Rate Conversion Factor
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"10
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"Converts rate from p/KWh to GBP/MWh
+            ROW_NUMBER:#1
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:41:38
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0010
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"SNDLF
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"NDLF + NVL(NDA, 0)
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#4
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-04-2012 17:16:52
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0010
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"ST03 Applies
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"CASE \nWHEN ${Time Of Day} BETWEEN 830 AND 2230 THEN \n    1\nELSE \n    0\nEND
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#5
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:41:38
+        end row
+        begin row
+            COMPONENT_ID:*COMPONENT-0010
+            SUB_COMPONENT_TYPE:"?
+            SUB_COMPONENT_ID:#0
+            VARIABLE_NAME:"Time Of Day
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            FORMULA:"TO_NUMBER(TO_CHAR(:now, 'hh24mi'))
+            IS_MULTICOLUMN:#0
+            IS_PLSQL:#0
+            COMMENTS:"
+            ROW_NUMBER:#2
+            VIEW_ORDER:"
+            PERSIST_VALUE:#1
+            ENTRY_DATE:@JAN-03-2012 09:41:38
+        end row
+    end subtable
+    begin subtable
+        table_name:COMPONENT_IMBALANCE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_MARKET_PRICE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_PERCENTAGE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:COMPONENT_TOU_RATE
+        relationship:COMPONENT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+    begin subtable
+        table_name:EXTERNAL_SYSTEM_IDENTIFIER
+        relationship:ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630
+    end subtable
+    begin subtable
+        table_name:TEMPORAL_ENTITY_ATTRIBUTE
+        relationship:OWNER_ENTITY_ID=COMPONENT_ID;ENTITY_DOMAIN_ID=-630;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+    end subtable
+end object
+begin object
+    table_name:PRODUCT
+    table_alias:PRODUCT
+    PRODUCT_ID:*PRODUCT-0011
+    PRODUCT_NAME:"NI TUOS
+    PRODUCT_ALIAS:"?
+    PRODUCT_DESC:"?
+    PRODUCT_EXTERNAL_IDENTIFIER:"?
+    PRODUCT_CATEGORY:"?
+    BEGIN_DATE:@JAN-01-2000 00:00:00
+    END_DATE:@JAN-01-2050 00:00:00
+    ENTRY_DATE:@DEC-28-2011 16:12:01
+    begin subtable
+        table_name:EXTERNAL_SYSTEM_IDENTIFIER
+        relationship:ENTITY_ID=PRODUCT_ID;ENTITY_DOMAIN_ID=-620
+    end subtable
+    begin subtable
+        table_name:PRODUCT_COMPONENT
+        relationship:PRODUCT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0004
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ENTRY_DATE:@DEC-28-2011 15:12:43
+        end row
+        begin row
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0005
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ENTRY_DATE:@DEC-28-2011 15:23:20
+        end row
+        begin row
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0009
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ENTRY_DATE:@DEC-28-2011 15:35:53
+        end row
+        begin row
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0010
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ENTRY_DATE:@DEC-28-2011 16:12:01
+        end row
+        begin row
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0006
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ENTRY_DATE:@DEC-28-2011 16:12:01
+        end row
+        begin row
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0007
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ENTRY_DATE:@DEC-28-2011 16:06:35
+        end row
+        begin row
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0008
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ENTRY_DATE:@DEC-28-2011 16:08:54
+        end row
+        begin row
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0003
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:"
+            ENTRY_DATE:@JAN-04-2012 13:18:14
+        end row
+    end subtable
+end object
+begin object
+    table_name:INTERCHANGE_CONTRACT
+    table_alias:CONTRACT
+    CONTRACT_ID:*INTERCHANGE_CONTRACT-0012
+    CONTRACT_NAME:"NI TUOS CONTRACT
+    CONTRACT_ALIAS:"?
+    CONTRACT_DESC:"?
+    CONTRACT_STATUS:"Active
+    BEGIN_DATE:@JAN-01-2000 00:00:00
+    END_DATE:@JAN-01-2050 00:00:00
+    IS_EVERGREEN:#0
+    CONTRACT_TYPE:"Supply
+    BILLING_ENTITY_ID:*PURCHASING_SELLING_ENTITY-0001
+    PURCHASER_ID:#0
+    SELLER_ID:#0
+    SOURCE_ID:#0
+    SINK_ID:#0
+    POR_ID:#0
+    POD_ID:#0
+    SC_ID:#0
+    AGREEMENT_TYPE:"Enabling
+    APPROVAL_TYPE:"?
+    MARKET_TYPE:"?
+    LOSS_OPTION:"?
+    CONTRACT_FILE_NAME:"?
+    PIPELINE_ID:#0
+    PIPELINE_TARIFF_TYPE:"Zone to Zone
+    ENTRY_DATE:@JAN-04-2012 16:38:30
+    begin subtable
+        table_name:CONTRACT_PRODUCT_COMPONENT
+        relationship:CONTRACT_ID;BEGIN_DATE <= (DATE '2012-09-30' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND) AND NVL(END_DATE, DATE '9999-12-31') >= (DATE '2000-01-01' + INTERVAL '00' HOUR + INTERVAL '00' MINUTE + INTERVAL '00' SECOND)
+        begin row
+            CONTRACT_ID:*INTERCHANGE_CONTRACT-0012
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0004
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:@DEC-31-9999 00:00:00
+            ENTRY_DATE:@DEC-28-2011 16:12:29
+        end row
+        begin row
+            CONTRACT_ID:*INTERCHANGE_CONTRACT-0012
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0005
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:@DEC-31-9999 00:00:00
+            ENTRY_DATE:@DEC-28-2011 16:12:29
+        end row
+        begin row
+            CONTRACT_ID:*INTERCHANGE_CONTRACT-0012
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0009
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:@DEC-31-9999 00:00:00
+            ENTRY_DATE:@DEC-28-2011 16:12:29
+        end row
+        begin row
+            CONTRACT_ID:*INTERCHANGE_CONTRACT-0012
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0010
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:@DEC-31-9999 00:00:00
+            ENTRY_DATE:@DEC-28-2011 16:12:29
+        end row
+        begin row
+            CONTRACT_ID:*INTERCHANGE_CONTRACT-0012
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0006
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:@DEC-31-9999 00:00:00
+            ENTRY_DATE:@DEC-28-2011 16:12:29
+        end row
+        begin row
+            CONTRACT_ID:*INTERCHANGE_CONTRACT-0012
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0007
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:@DEC-31-9999 00:00:00
+            ENTRY_DATE:@DEC-28-2011 16:12:29
+        end row
+        begin row
+            CONTRACT_ID:*INTERCHANGE_CONTRACT-0012
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0008
+            BEGIN_DATE:@JAN-01-2000 00:00:00
+            END_DATE:@DEC-31-9999 00:00:00
+            ENTRY_DATE:@DEC-28-2011 16:12:29
+        end row
+        begin row
+            CONTRACT_ID:*INTERCHANGE_CONTRACT-0012
+            PRODUCT_ID:*PRODUCT-0011
+            COMPONENT_ID:*COMPONENT-0003
+            BEGIN_DATE:@DEC-25-2011 00:00:00
+            END_DATE:@JAN-02-2012 00:00:00
+            ENTRY_DATE:@JAN-04-2012 16:38:30
+        end row
+    end subtable
+    begin subtable
+        table_name:TP_CONTRACT_NUMBER
+        relationship:CONTRACT_ID
+    end subtable
+end object

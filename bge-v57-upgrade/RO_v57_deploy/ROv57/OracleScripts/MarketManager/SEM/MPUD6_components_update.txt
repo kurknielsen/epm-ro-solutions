@@ -1,0 +1,1099 @@
+begin object
+   table_name:SCHEDULE_COORDINATOR
+   table_alias:SC
+   SC_ID:*SCHEDULE_COORDINATOR-0000
+   SC_NAME:"SEM
+   SC_ALIAS:"SEM
+   SC_DESC:"SEM
+   SC_NERC_CODE:"?
+   SC_DUNS_NUMBER:"?
+   SC_STATUS:"Active
+   SC_EXTERNAL_IDENTIFIER:"SEM
+   SC_SCHEDULE_NAME_PREFIX:"?
+   SC_SCHEDULE_FORMAT:"Schedule Group
+   SC_SCHEDULE_INTERVAL:"Day
+   SC_LOAD_ROUNDING_PREFERENCE:"None
+   SC_LOSS_ROUNDING_PREFERENCE:"None
+   SC_CREATE_TX_LOSS_SCHEDULE:#0
+   SC_CREATE_DX_LOSS_SCHEDULE:#0
+   SC_CREATE_UFE_SCHEDULE:#0
+   SC_MARKET_PRICE_ID:#0
+   SC_MINIMUM_SCHEDULE_AMT:#0
+   ENTRY_DATE:@Feb-18-2008 09:30:30
+end object
+begin object
+   table_name:IT_COMMODITY
+   table_alias:COMMODITY
+   COMMODITY_ID:*IT_COMMODITY-0001
+   COMMODITY_NAME:"Capacity
+   COMMODITY_ALIAS:"Capacity
+   COMMODITY_DESC:"Capacity
+   COMMODITY_TYPE:"Capacity
+   COMMODITY_UNIT:"?
+   COMMODITY_UNIT_FORMAT:"?
+   COMMODITY_PRICE_UNIT:"Dollars
+   COMMODITY_PRICE_FORMAT:"?
+   IS_VIRTUAL:#
+   MARKET_TYPE:"
+   ENTRY_DATE:@Jan-23-2007 10:37:11
+end object
+begin object
+   table_name:MARKET_PRICE
+   table_alias:MARKET_PRICE
+   MARKET_PRICE_ID:*MARKET_PRICE-0002
+   MARKET_PRICE_NAME:"SEM:Annual Capacity Exchange Rate: Euro to Pound
+   MARKET_PRICE_ALIAS:"?
+   MARKET_PRICE_DESC:"?
+   MARKET_PRICE_TYPE:"Exchange Rate
+   MARKET_PRICE_INTERVAL:"Month
+   MARKET_TYPE:"?
+   COMMODITY_ID:*IT_COMMODITY-0001
+   SERVICE_POINT_TYPE:"?
+   EXTERNAL_IDENTIFIER:"Annual Capacity Exchange Rate: Euro to Pound
+   EDC_ID:#0
+   SC_ID:*SCHEDULE_COORDINATOR-0000
+   POD_ID:#0
+   ZOD_ID:#0
+   ENTRY_DATE:@Feb-29-2008 16:59:01
+end object
+begin object
+   table_name:IT_COMMODITY
+   table_alias:COMMODITY
+   COMMODITY_ID:*IT_COMMODITY-0003
+   COMMODITY_NAME:"Energy
+   COMMODITY_ALIAS:"Energy
+   COMMODITY_DESC:"Energy
+   COMMODITY_TYPE:"Energy
+   COMMODITY_UNIT:"MWH
+   COMMODITY_UNIT_FORMAT:"?
+   COMMODITY_PRICE_UNIT:"Dollars
+   COMMODITY_PRICE_FORMAT:"?
+   IS_VIRTUAL:#
+   MARKET_TYPE:"
+   ENTRY_DATE:@Jan-23-2007 10:37:11
+end object
+begin object
+   table_name:MARKET_PRICE
+   table_alias:MARKET_PRICE
+   MARKET_PRICE_ID:*MARKET_PRICE-0004
+   MARKET_PRICE_NAME:"SEM:Capacity Payments Demand Price
+   MARKET_PRICE_ALIAS:"CPDP
+   MARKET_PRICE_DESC:"?
+   MARKET_PRICE_TYPE:"User Defined
+   MARKET_PRICE_INTERVAL:"30 Minute
+   MARKET_TYPE:"?
+   COMMODITY_ID:*IT_COMMODITY-0003
+   SERVICE_POINT_TYPE:"?
+   EXTERNAL_IDENTIFIER:"Capacity Payments Demand Price
+   EDC_ID:#0
+   SC_ID:*SCHEDULE_COORDINATOR-0000
+   POD_ID:#0
+   ZOD_ID:#0
+   ENTRY_DATE:@Oct-18-2007 17:12:35
+end object
+begin object
+   table_name:SYSTEM_REALM
+   table_alias:REALM
+   REALM_ID:*SYSTEM_REALM-0005
+   REALM_NAME:"SEM Load Transactions
+   REALM_ALIAS:"SEM Load Transactions
+   REALM_DESC:"SEM Load Transactions
+   ENTITY_DOMAIN_ID:#-200
+   IS_FORMULA_CHARGE_REALM:#1
+   USING_CUSTOM_QUERY:#0
+   CUSTOM_QUERY:"?
+   ENTRY_DATE:@Aug-29-2007 12:37:39
+end object
+begin object
+   table_name:COMPONENT
+   table_alias:COMPONENT
+   COMPONENT_ID:*COMPONENT-0006
+   COMPONENT_NAME:"CCEX
+   COMPONENT_ALIAS:"CCEX
+   COMPONENT_DESC:"Capacity Charges to Supplier Units
+   COMPONENT_ENTITY:"PSE
+   CHARGE_TYPE:"?
+   RATE_STRUCTURE:"Formula
+   RATE_INTERVAL:"30 Minute
+   IS_REBILL:#0
+   IS_TAXED:#1
+   IS_CUSTOM_CHARGE:#0
+   IS_CREDIT_CHARGE:#0
+   IS_INCLUDE_TX_LOSS:#0
+   IS_INCLUDE_DX_LOSS:#0
+   TEMPLATE_ID:#0
+   MARKET_PRICE_ID:#0
+   SERVICE_POINT_ID:#0
+   MODEL_ID:#0
+   EVENT_ID:#0
+   COMPONENT_REFERENCE:"?
+   INVOICE_GROUP_ID:#0
+   INVOICE_GROUP_ORDER:#0
+   COMPUTATION_ORDER:#0
+   QUANTITY_UNIT:"?
+   CURRENCY_UNIT:"?
+   QUANTITY_TYPE:"?
+   EXTERNAL_IDENTIFIER:"CCEX
+   COMPONENT_CATEGORY:"CA
+   GL_DEBIT_ACCOUNT:"?
+   GL_CREDIT_ACCOUNT:"?
+   FIRM_NON_FIRM:"?
+   EXCLUDE_FROM_INVOICE:#0
+   EXCLUDE_FROM_INVOICE_TOTAL:#0
+   IMBALANCE_TYPE:"?
+   ACCUMULATION_PERIOD:#0
+   BASE_COMPONENT_ID:#0
+   BASE_LIMIT_ID:#0
+   MARKET_TYPE:"?
+   MARKET_PRICE_TYPE:"?
+   WHICH_INTERVAL:"First
+   LMP_PRICE_CALC:"?
+   LMP_INCLUDE_EXT:#0
+   LMP_INCLUDE_SALES:"0
+   CHARGE_WHEN:"?
+   BILATERALS_SIGN:#1
+   LMP_COMMODITY_ID:#0
+   LMP_BASE_COMMODITY_ID:#0
+   USE_ZONAL_PRICE:#0
+   ALTERNATE_PRICE:"?
+   ALTERNATE_PRICE_FUNCTION:"?
+   ENTRY_DATE:@Oct-20-2008 13:25:23
+   begin subtable
+      table_name:COMPONENT_FORMULA_INPUT
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"AnnualExchangeRate
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Select
+         ENTITY_DOMAIN_ID:#-610
+         ENTITY_ID:*MARKET_PRICE-0002
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Mar-03-2008 14:38:53
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"CPDPrice
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Average
+         ENTITY_DOMAIN_ID:#-610
+         ENTITY_ID:*MARKET_PRICE-0004
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Feb-29-2008 17:01:41
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"MeteredDemand
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Sum
+         ENTITY_DOMAIN_ID:#-901
+         ENTITY_ID:*SYSTEM_REALM-0005
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Oct-25-2007 09:45:48
+      end row
+   end subtable
+   begin subtable
+      table_name:COMPONENT_FORMULA_VARIABLE
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"#CHARGE RATE#
+         BEGIN_DATE:@Jan-01-1900 00:00:00
+         END_DATE:@
+         FORMULA:"CPDP
+         COMMENTS:"
+         ROW_NUMBER:#0
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Aug-29-2007 12:21:14
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"#CHARGE QUANTITY#
+         BEGIN_DATE:@Jan-01-1900 00:00:00
+         END_DATE:@
+         FORMULA:"NDLF
+         COMMENTS:"
+         ROW_NUMBER:#0
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Aug-29-2007 12:21:14
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"NDLF
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"MeteredDemand * TPD
+         COMMENTS:"assume MeteredDemand in MW, not MWh
+         ROW_NUMBER:#3
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Oct-20-2008 13:25:27
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"TPD
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"1
+         COMMENTS:"
+         ROW_NUMBER:#2
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Feb-29-2008 17:02:34
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"Use_Euro
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"MM_SEM_SHADOW_BILL.GET_CURRENCY(:billing_entity, :statement_date)
+         COMMENTS:"
+         ROW_NUMBER:#4
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Sep-25-2007 18:26:44
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"CPDP
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"case when Use_Euro = 0 then CPDPrice else CPDPrice *AnnualExchangeRate end
+         COMMENTS:"
+         ROW_NUMBER:#7
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Mar-03-2008 14:38:53
+      end row
+   end subtable
+   begin subtable
+      table_name:COMPONENT_FORMULA_ITERATOR
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0006
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         ITERATOR_ORDER:#1
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         ITERATOR_NAME:"Service_Point
+         ITERATOR_QUERY:"SELECT s.service_point_name FROM service_point s, sem_service_point_pse p, temporal_entity_attribute t  WHERE pse_id = (SELECT participant_pse_ID from SEM_SETTLEMENT_ENTITY where settlement_pse_id = :billing_entity) and t.attribute_id = (select attribute_id from entity_attribute where attribute_name = 'Resource Type') and attribute_val = 'SU' and p.pod_id = t.owner_entity_id and s.service_point_id = p.pod_id and :statement_date between p.begin_date and nvl(p.end_date, DATE '9999-12-31')
+         IS_MULTICOLUMN:#0
+         IDENT_COLUMNS:#1
+         IS_INNER_LOOP:#0
+         COMMENTS:"
+         ENTRY_DATE:@Oct-03-2007 17:58:21
+      end row
+   end subtable
+end object
+begin object
+   table_name:MARKET_PRICE
+   table_alias:MARKET_PRICE
+   MARKET_PRICE_ID:*MARKET_PRICE-0007
+   MARKET_PRICE_NAME:"SEM:System Marginal Price Euro
+   MARKET_PRICE_ALIAS:"?
+   MARKET_PRICE_DESC:"?
+   MARKET_PRICE_TYPE:"Commodity Price
+   MARKET_PRICE_INTERVAL:"30 Minute
+   MARKET_TYPE:"?
+   COMMODITY_ID:*IT_COMMODITY-0003
+   SERVICE_POINT_TYPE:"?
+   EXTERNAL_IDENTIFIER:"System Marginal Price Euro
+   EDC_ID:#0
+   SC_ID:*SCHEDULE_COORDINATOR-0000
+   POD_ID:#0
+   ZOD_ID:#0
+   ENTRY_DATE:@Aug-07-2007 08:42:13
+end object
+begin object
+   table_name:MARKET_PRICE
+   table_alias:MARKET_PRICE
+   MARKET_PRICE_ID:*MARKET_PRICE-0008
+   MARKET_PRICE_NAME:"SEM:System Marginal Price Pound
+   MARKET_PRICE_ALIAS:"?
+   MARKET_PRICE_DESC:"?
+   MARKET_PRICE_TYPE:"Commodity Price
+   MARKET_PRICE_INTERVAL:"30 Minute
+   MARKET_TYPE:"?
+   COMMODITY_ID:*IT_COMMODITY-0003
+   SERVICE_POINT_TYPE:"?
+   EXTERNAL_IDENTIFIER:"System Marginal Price Pound
+   EDC_ID:#0
+   SC_ID:*SCHEDULE_COORDINATOR-0000
+   POD_ID:#0
+   ZOD_ID:#0
+   ENTRY_DATE:@Aug-07-2007 08:42:13
+end object
+begin object
+   table_name:COMPONENT
+   table_alias:COMPONENT
+   COMPONENT_ID:*COMPONENT-0009
+   COMPONENT_NAME:"ENCEX
+   COMPONENT_ALIAS:"ENCEX
+   COMPONENT_DESC:"Energy Charge to Supplier Units
+   COMPONENT_ENTITY:"PSE
+   CHARGE_TYPE:"?
+   RATE_STRUCTURE:"Formula
+   RATE_INTERVAL:"30 Minute
+   IS_REBILL:#0
+   IS_TAXED:#1
+   IS_CUSTOM_CHARGE:#0
+   IS_CREDIT_CHARGE:#0
+   IS_INCLUDE_TX_LOSS:#0
+   IS_INCLUDE_DX_LOSS:#0
+   TEMPLATE_ID:#0
+   MARKET_PRICE_ID:#0
+   SERVICE_POINT_ID:#0
+   MODEL_ID:#0
+   EVENT_ID:#0
+   COMPONENT_REFERENCE:"?
+   INVOICE_GROUP_ID:#0
+   INVOICE_GROUP_ORDER:#0
+   COMPUTATION_ORDER:#0
+   QUANTITY_UNIT:"?
+   CURRENCY_UNIT:"?
+   QUANTITY_TYPE:"?
+   EXTERNAL_IDENTIFIER:"ENCEX
+   COMPONENT_CATEGORY:"EN
+   GL_DEBIT_ACCOUNT:"?
+   GL_CREDIT_ACCOUNT:"?
+   FIRM_NON_FIRM:"?
+   EXCLUDE_FROM_INVOICE:#0
+   EXCLUDE_FROM_INVOICE_TOTAL:#0
+   IMBALANCE_TYPE:"?
+   ACCUMULATION_PERIOD:#0
+   BASE_COMPONENT_ID:#0
+   BASE_LIMIT_ID:#0
+   MARKET_TYPE:"?
+   MARKET_PRICE_TYPE:"?
+   WHICH_INTERVAL:"First
+   LMP_PRICE_CALC:"?
+   LMP_INCLUDE_EXT:#0
+   LMP_INCLUDE_SALES:"0
+   CHARGE_WHEN:"?
+   BILATERALS_SIGN:#1
+   LMP_COMMODITY_ID:#0
+   LMP_BASE_COMMODITY_ID:#0
+   USE_ZONAL_PRICE:#0
+   ALTERNATE_PRICE:"?
+   ALTERNATE_PRICE_FUNCTION:"?
+   ENTRY_DATE:@Oct-20-2008 13:29:07
+   begin subtable
+      table_name:COMPONENT_FORMULA_INPUT
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0009
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"MeteredDemand
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Sum
+         ENTITY_DOMAIN_ID:#-901
+         ENTITY_ID:*SYSTEM_REALM-0005
+         RESTRICT_CONTRACT:#
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Aug-29-2007 13:04:53
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0009
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"SMP_Euro
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Average
+         ENTITY_DOMAIN_ID:#-610
+         ENTITY_ID:*MARKET_PRICE-0007
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Sep-27-2007 15:44:35
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0009
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"SMP_Pound
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Average
+         ENTITY_DOMAIN_ID:#-610
+         ENTITY_ID:*MARKET_PRICE-0008
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Sep-27-2007 15:44:35
+      end row
+   end subtable
+   begin subtable
+      table_name:COMPONENT_FORMULA_VARIABLE
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0009
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"SMP
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"case when Use_Euro = 0 then SMP_Euro else SMP_Pound end
+         COMMENTS:"
+         ROW_NUMBER:#2
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Oct-04-2007 10:18:08
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0009
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"NDLF
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"MeteredDemand * TPD
+         COMMENTS:"assume Metered Demand in MW, not MWh
+         ROW_NUMBER:#5
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Oct-20-2008 13:29:07
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0009
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"Use_Euro
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"MM_SEM_SHADOW_BILL.GET_CURRENCY(:billing_entity, :statement_date)
+         COMMENTS:"
+         ROW_NUMBER:#1
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Aug-29-2007 13:06:35
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0009
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"#CHARGE RATE#
+         BEGIN_DATE:@Jan-01-1900 00:00:00
+         END_DATE:@
+         FORMULA:"SMP
+         COMMENTS:"
+         ROW_NUMBER:#0
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Aug-29-2007 13:07:19
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0009
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"#CHARGE QUANTITY#
+         BEGIN_DATE:@Jan-01-1900 00:00:00
+         END_DATE:@
+         FORMULA:"NDLF
+         COMMENTS:"
+         ROW_NUMBER:#0
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Sep-27-2007 15:56:17
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0009
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"TPD
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"1.0
+         COMMENTS:"
+         ROW_NUMBER:#4
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Feb-29-2008 18:27:04
+      end row
+   end subtable
+   begin subtable
+      table_name:COMPONENT_FORMULA_ITERATOR
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0009
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         ITERATOR_ORDER:#1
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         ITERATOR_NAME:"Service_Point
+         ITERATOR_QUERY:"SELECT s.service_point_name FROM service_point s, sem_service_point_pse p, temporal_entity_attribute t  WHERE pse_id = (SELECT participant_pse_ID from SEM_SETTLEMENT_ENTITY where settlement_pse_id = :billing_entity) and t.attribute_id = (select attribute_id from entity_attribute where attribute_name = 'Resource Type') and attribute_val = 'SU' and p.pod_id = t.owner_entity_id and s.service_point_id = p.pod_id and :statement_date between p.begin_date and nvl(p.end_date, DATE '9999-12-31')
+         IS_MULTICOLUMN:#0
+         IDENT_COLUMNS:#1
+         IS_INNER_LOOP:#0
+         COMMENTS:"
+         ENTRY_DATE:@Oct-03-2007 18:00:07
+      end row
+   end subtable
+end object
+begin object
+   table_name:MARKET_PRICE
+   table_alias:MARKET_PRICE
+   MARKET_PRICE_ID:*MARKET_PRICE-0010
+   MARKET_PRICE_NAME:"SEM:Trading Day Exchange Rate: Euro to Pound
+   MARKET_PRICE_ALIAS:"?
+   MARKET_PRICE_DESC:"?
+   MARKET_PRICE_TYPE:"Exchange Rate
+   MARKET_PRICE_INTERVAL:"Day
+   MARKET_TYPE:"?
+   COMMODITY_ID:*IT_COMMODITY-0003
+   SERVICE_POINT_TYPE:"?
+   EXTERNAL_IDENTIFIER:"Trading Day Exchange Rate: Euro to Pound
+   EDC_ID:#0
+   SC_ID:*SCHEDULE_COORDINATOR-0000
+   POD_ID:#0
+   ZOD_ID:#0
+   ENTRY_DATE:@Aug-06-2007 15:12:51
+end object
+begin object
+   table_name:MARKET_PRICE
+   table_alias:MARKET_PRICE
+   MARKET_PRICE_ID:*MARKET_PRICE-0011
+   MARKET_PRICE_NAME:"SEM:Annual Imperfections Price
+   MARKET_PRICE_ALIAS:"IMP
+   MARKET_PRICE_DESC:"SEM:Annual Imperfections Price
+   MARKET_PRICE_TYPE:"User Defined
+   MARKET_PRICE_INTERVAL:"Month
+   MARKET_TYPE:"?
+   COMMODITY_ID:#0
+   SERVICE_POINT_TYPE:"?
+   EXTERNAL_IDENTIFIER:"Annual Imperfection Price
+   EDC_ID:#0
+   SC_ID:*SCHEDULE_COORDINATOR-0000
+   POD_ID:#0
+   ZOD_ID:#0
+   ENTRY_DATE:@Apr-04-2008 14:54:16
+end object
+begin object
+   table_name:COMPONENT
+   table_alias:COMPONENT
+   COMPONENT_ID:*COMPONENT-0012
+   COMPONENT_NAME:"IMPCEX
+   COMPONENT_ALIAS:"IMPCEX
+   COMPONENT_DESC:"Imperfections Charges to Supplier Units
+   COMPONENT_ENTITY:"PSE
+   CHARGE_TYPE:"?
+   RATE_STRUCTURE:"Formula
+   RATE_INTERVAL:"30 Minute
+   IS_REBILL:#0
+   IS_TAXED:#1
+   IS_CUSTOM_CHARGE:#0
+   IS_CREDIT_CHARGE:#0
+   IS_INCLUDE_TX_LOSS:#0
+   IS_INCLUDE_DX_LOSS:#0
+   TEMPLATE_ID:#0
+   MARKET_PRICE_ID:#0
+   SERVICE_POINT_ID:#0
+   MODEL_ID:#0
+   EVENT_ID:#0
+   COMPONENT_REFERENCE:"?
+   INVOICE_GROUP_ID:#0
+   INVOICE_GROUP_ORDER:#0
+   COMPUTATION_ORDER:#0
+   QUANTITY_UNIT:"?
+   CURRENCY_UNIT:"?
+   QUANTITY_TYPE:"?
+   EXTERNAL_IDENTIFIER:"IMPCEX
+   COMPONENT_CATEGORY:"EN
+   GL_DEBIT_ACCOUNT:"?
+   GL_CREDIT_ACCOUNT:"?
+   FIRM_NON_FIRM:"?
+   EXCLUDE_FROM_INVOICE:#0
+   EXCLUDE_FROM_INVOICE_TOTAL:#0
+   IMBALANCE_TYPE:"?
+   ACCUMULATION_PERIOD:#0
+   BASE_COMPONENT_ID:#0
+   BASE_LIMIT_ID:#0
+   MARKET_TYPE:"?
+   MARKET_PRICE_TYPE:"?
+   WHICH_INTERVAL:"First
+   LMP_PRICE_CALC:"?
+   LMP_INCLUDE_EXT:#0
+   LMP_INCLUDE_SALES:"0
+   CHARGE_WHEN:"?
+   BILATERALS_SIGN:#1
+   LMP_COMMODITY_ID:#0
+   LMP_BASE_COMMODITY_ID:#0
+   USE_ZONAL_PRICE:#0
+   ALTERNATE_PRICE:"?
+   ALTERNATE_PRICE_FUNCTION:"?
+   ENTRY_DATE:@Oct-20-2008 13:29:37
+   begin subtable
+      table_name:COMPONENT_FORMULA_INPUT
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"CurrencyRateToday
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Select
+         ENTITY_DOMAIN_ID:#-610
+         ENTITY_ID:*MARKET_PRICE-0010
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Oct-25-2007 09:39:34
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"IMPrice
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Select
+         ENTITY_DOMAIN_ID:#-610
+         ENTITY_ID:*MARKET_PRICE-0011
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Oct-02-2007 10:11:25
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"MeteredDemand
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Sum
+         ENTITY_DOMAIN_ID:#-901
+         ENTITY_ID:*SYSTEM_REALM-0005
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Oct-02-2007 10:11:25
+      end row
+   end subtable
+   begin subtable
+      table_name:COMPONENT_FORMULA_VARIABLE
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"IMPF
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"1
+         COMMENTS:"
+         ROW_NUMBER:#7
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Oct-25-2007 09:38:51
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"NDLF
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"MeteredDemand * TPD
+         COMMENTS:"assume Metered Demand in MW, not MWh
+         ROW_NUMBER:#6
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Oct-20-2008 13:29:37
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"IMPC
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"nvl(NDLF,0) * IMPF * IMP
+         COMMENTS:"for effective dating of calculation
+         ROW_NUMBER:#8
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Oct-25-2007 09:38:51
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"#CHARGE QUANTITY#
+         BEGIN_DATE:@Jan-01-1900 00:00:00
+         END_DATE:@
+         FORMULA:"nvl(NDLF,0) * IMPF
+         COMMENTS:"
+         ROW_NUMBER:#0
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Feb-26-2008 11:12:50
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"#CHARGE RATE#
+         BEGIN_DATE:@Jan-01-1900 00:00:00
+         END_DATE:@
+         FORMULA:"IMP
+         COMMENTS:"
+         ROW_NUMBER:#0
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Feb-26-2008 11:12:50
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"TPD
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"1.0
+         COMMENTS:"
+         ROW_NUMBER:#5
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Feb-29-2008 18:26:37
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"IMP
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"case when Use_Euro = 0 then IMPrice else IMPrice * CurrencyRate end
+         COMMENTS:"assume Imp Price is in Euro
+         ROW_NUMBER:#3
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Oct-25-2007 09:38:51
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"Use_Euro
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"MM_SEM_SHADOW_BILL.GET_CURRENCY(:billing_entity, :statement_date)
+         COMMENTS:"
+         ROW_NUMBER:#0
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Sep-26-2007 12:05:39
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"UsePreviousDay
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"case when trunc(:now) = :now then 1 when :now <= (trunc(:now) + (6/24)) then 0 else 1 end
+         COMMENTS:"
+         ROW_NUMBER:#1
+         PERSIST_VALUE:#
+         ENTRY_DATE:@Oct-25-2007 09:38:51
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"CurrencyRate
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"case when Use_Euro = 0 then 0 when UsePreviousDay = 1 then CurrencyRateToday else MM_SEM_SHADOW_BILL.GET_RATE_PRIOR_DAY(:now, 'Trading Day Exchange Rate: Euro to Pound') end
+         COMMENTS:"
+         ROW_NUMBER:#2
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Oct-25-2007 09:39:34
+      end row
+   end subtable
+   begin subtable
+      table_name:COMPONENT_FORMULA_ITERATOR
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0012
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         ITERATOR_ORDER:#1
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         ITERATOR_NAME:"Service_Point
+         ITERATOR_QUERY:"SELECT s.service_point_name FROM service_point s, sem_service_point_pse p, temporal_entity_attribute t  WHERE pse_id = (SELECT participant_pse_ID from SEM_SETTLEMENT_ENTITY where settlement_pse_id = :billing_entity) and t.attribute_id = (select attribute_id from entity_attribute where attribute_name = 'Resource Type') and attribute_val = 'SU' and p.pod_id = t.owner_entity_id and s.service_point_id = p.pod_id and :statement_date between p.begin_date and nvl(p.end_date, DATE '9999-12-31')
+         IS_MULTICOLUMN:#0
+         IDENT_COLUMNS:#1
+         IS_INNER_LOOP:#0
+         COMMENTS:"
+         ENTRY_DATE:@Oct-03-2007 18:03:19
+      end row
+   end subtable
+end object
+begin object
+   table_name:MARKET_PRICE
+   table_alias:MARKET_PRICE
+   MARKET_PRICE_ID:*MARKET_PRICE-0013
+   MARKET_PRICE_NAME:"SEM:Annual Variable Market Operator Price
+   MARKET_PRICE_ALIAS:"VMOP
+   MARKET_PRICE_DESC:"?
+   MARKET_PRICE_TYPE:"Market Result
+   MARKET_PRICE_INTERVAL:"Month
+   MARKET_TYPE:"?
+   COMMODITY_ID:*IT_COMMODITY-0003
+   SERVICE_POINT_TYPE:"?
+   EXTERNAL_IDENTIFIER:"Annual Variable Market Operator Price
+   EDC_ID:#0
+   SC_ID:*SCHEDULE_COORDINATOR-0000
+   POD_ID:#0
+   ZOD_ID:#0
+   ENTRY_DATE:@Apr-04-2008 14:54:25
+end object
+begin object
+   table_name:COMPONENT
+   table_alias:COMPONENT
+   COMPONENT_ID:*COMPONENT-0014
+   COMPONENT_NAME:"VMOC_EX
+   COMPONENT_ALIAS:"VMOC_EX
+   COMPONENT_DESC:"Variable Market Operator Charge
+   COMPONENT_ENTITY:"PSE
+   CHARGE_TYPE:"?
+   RATE_STRUCTURE:"Formula
+   RATE_INTERVAL:"30 Minute
+   IS_REBILL:#0
+   IS_TAXED:#1
+   IS_CUSTOM_CHARGE:#0
+   IS_CREDIT_CHARGE:#0
+   IS_INCLUDE_TX_LOSS:#0
+   IS_INCLUDE_DX_LOSS:#0
+   TEMPLATE_ID:#0
+   MARKET_PRICE_ID:#0
+   SERVICE_POINT_ID:#0
+   MODEL_ID:#0
+   EVENT_ID:#0
+   COMPONENT_REFERENCE:"?
+   INVOICE_GROUP_ID:#0
+   INVOICE_GROUP_ORDER:#0
+   COMPUTATION_ORDER:#0
+   QUANTITY_UNIT:"?
+   CURRENCY_UNIT:"?
+   QUANTITY_TYPE:"?
+   EXTERNAL_IDENTIFIER:"VMOC_EX
+   COMPONENT_CATEGORY:"MO
+   GL_DEBIT_ACCOUNT:"?
+   GL_CREDIT_ACCOUNT:"?
+   FIRM_NON_FIRM:"?
+   EXCLUDE_FROM_INVOICE:#0
+   EXCLUDE_FROM_INVOICE_TOTAL:#0
+   IMBALANCE_TYPE:"?
+   ACCUMULATION_PERIOD:#0
+   BASE_COMPONENT_ID:#0
+   BASE_LIMIT_ID:#0
+   MARKET_TYPE:"?
+   MARKET_PRICE_TYPE:"?
+   WHICH_INTERVAL:"First
+   LMP_PRICE_CALC:"?
+   LMP_INCLUDE_EXT:#0
+   LMP_INCLUDE_SALES:"0
+   CHARGE_WHEN:"?
+   BILATERALS_SIGN:#1
+   LMP_COMMODITY_ID:#0
+   LMP_BASE_COMMODITY_ID:#0
+   USE_ZONAL_PRICE:#0
+   ALTERNATE_PRICE:"?
+   ALTERNATE_PRICE_FUNCTION:"?
+   ENTRY_DATE:@Oct-20-2008 13:30:23
+   begin subtable
+      table_name:COMPONENT_FORMULA_INPUT
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0014
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"CurrencyRateToday
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Select
+         ENTITY_DOMAIN_ID:#-610
+         ENTITY_ID:*MARKET_PRICE-0010
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Oct-25-2007 09:42:51
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0014
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"MeteredDemand
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Sum
+         ENTITY_DOMAIN_ID:#-901
+         ENTITY_ID:*SYSTEM_REALM-0005
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Aug-31-2007 13:53:10
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0014
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         INPUT_NAME:"VarMOPrice
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FUNCTION:"Select
+         ENTITY_DOMAIN_ID:#-610
+         ENTITY_ID:*MARKET_PRICE-0013
+         RESTRICT_CONTRACT:#0
+         TRANSACTION_TYPE:"
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Oct-02-2007 10:05:04
+      end row
+   end subtable
+   begin subtable
+      table_name:COMPONENT_FORMULA_VARIABLE
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0014
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"Use_Euro
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"MM_SEM_SHADOW_BILL.GET_CURRENCY(:billing_entity, :statement_date)
+         COMMENTS:"
+         ROW_NUMBER:#4
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Aug-31-2007 13:52:43
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0014
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"NDLF
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"MeteredDemand * TPD
+         COMMENTS:"Assume Metered Demand in MW, not MWh
+         ROW_NUMBER:#3
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Oct-20-2008 13:30:23
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0014
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"VMOP
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"case when Use_Euro = 0 then VarMOPrice else VarMOPrice * nvl(CurrencyRate,1) end
+         COMMENTS:"assume VarMOPrice is in EUROs
+         ROW_NUMBER:#7
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Oct-25-2007 09:43:56
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0014
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"#CHARGE RATE#
+         BEGIN_DATE:@Jan-01-1900 00:00:00
+         END_DATE:@
+         FORMULA:"VMOP
+         COMMENTS:"
+         ROW_NUMBER:#0
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Aug-29-2007 14:13:02
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0014
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"#CHARGE QUANTITY#
+         BEGIN_DATE:@Jan-01-1900 00:00:00
+         END_DATE:@
+         FORMULA:"NDLF
+         COMMENTS:"
+         ROW_NUMBER:#0
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Feb-26-2008 11:23:08
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0014
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"TPD
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"1
+         COMMENTS:"
+         ROW_NUMBER:#2
+         PERSIST_VALUE:#0
+         ENTRY_DATE:@Feb-29-2008 18:25:58
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0014
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"UsePreviousDay
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"case when trunc(:now) = :now then 1 when :now <= (trunc(:now) + (6/24)) then 0 else 1 end
+         COMMENTS:"
+         ROW_NUMBER:#5
+         PERSIST_VALUE:#
+         ENTRY_DATE:@Oct-25-2007 09:43:56
+      end row
+      begin row
+         COMPONENT_ID:*COMPONENT-0014
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         VARIABLE_NAME:"CurrencyRate
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         FORMULA:"case when Use_Euro = 0 then 0 when UsePreviousDay = 1 then CurrencyRateToday else MM_SEM_SHADOW_BILL.GET_RATE_PRIOR_DAY(:now, 'Trading Day Exchange Rate: Euro to Pound') end
+         COMMENTS:"
+         ROW_NUMBER:#6
+         PERSIST_VALUE:#1
+         ENTRY_DATE:@Oct-25-2007 09:43:56
+      end row
+   end subtable
+   begin subtable
+      table_name:COMPONENT_FORMULA_ITERATOR
+      relationship:COMPONENT_ID
+      begin row
+         COMPONENT_ID:*COMPONENT-0014
+         SUB_COMPONENT_TYPE:"?
+         SUB_COMPONENT_ID:#0
+         ITERATOR_ORDER:#1
+         BEGIN_DATE:@Jan-01-2007 00:00:00
+         END_DATE:@
+         ITERATOR_NAME:"Service_Point
+         ITERATOR_QUERY:"SELECT s.service_point_name FROM service_point s, sem_service_point_pse p, temporal_entity_attribute t  WHERE pse_id = (SELECT participant_pse_ID from SEM_SETTLEMENT_ENTITY where settlement_pse_id = :billing_entity) and t.attribute_id = (select attribute_id from entity_attribute where attribute_name = 'Resource Type') and attribute_val = 'SU' and p.pod_id = t.owner_entity_id and s.service_point_id = p.pod_id and :statement_date between p.begin_date and nvl(p.end_date, DATE '9999-12-31')
+         IS_MULTICOLUMN:#0
+         IDENT_COLUMNS:#1
+         IS_INNER_LOOP:#0
+         COMMENTS:"
+         ENTRY_DATE:@Oct-03-2007 18:05:13
+      end row
+   end subtable
+end object

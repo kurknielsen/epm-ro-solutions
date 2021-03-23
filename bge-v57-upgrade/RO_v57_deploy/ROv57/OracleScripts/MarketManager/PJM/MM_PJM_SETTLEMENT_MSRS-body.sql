@@ -1,0 +1,12444 @@
+CREATE OR REPLACE PACKAGE BODY MM_PJM_SETTLEMENT_MSRS IS
+----------------------------------------------------------------------------------------------------
+g_STATEMENT_TYPE NUMBER(9) := 1; -- put everything in Forecast statement type for now
+g_MARKET_PRICE_CODE CHAR(1) := 'A'; -- put prices in Actual
+
+g_MISC_PRODUCT_EXT_ID VARCHAR2(32) := 'PJM:Other';
+g_FTR_CONG_CRED_WK_ID NUMBER(9) := 0;
+g_EMKT_GEN_ATTR ENTITY_ATTRIBUTE.ATTRIBUTE_ID%TYPE;
+
+----------------------------------------------------------------------------------------------------
+FUNCTION WHAT_VERSION RETURN VARCHAR2 IS
+BEGIN
+    RETURN '$Revision: 1.1 $';
+END WHAT_VERSION;
+---------------------------------------------------------------------------------------------------
+-- These are helper routines to perform some I/O on behalf of the import logic.
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_PSE
+	(
+	p_ORG_ID IN VARCHAR2,
+	p_ORG_NAME IN VARCHAR2
+  ) RETURN NUMBER IS
+v_PSE_ID NUMBER := NULL;
+BEGIN
+	IF NOT p_ORG_ID IS NULL THEN
+		BEGIN
+			SELECT PSE_ID INTO v_PSE_ID
+			FROM PURCHASING_SELLING_ENTITY
+			WHERE UPPER(PSE_EXTERNAL_IDENTIFIER) = UPPER('PJM-'||TRUNC(p_ORG_ID, 0));
+		EXCEPTION
+			WHEN NO_DATA_FOUND THEN
+				v_PSE_ID := NULL;
+			WHEN TOO_MANY_ROWS THEN
+				LOGS.LOG_WARN('More than one PSE for PJM found. Using the first one.');
+				SELECT PSE_ID INTO v_PSE_ID
+				FROM PURCHASING_SELLING_ENTITY
+				WHERE UPPER(PSE_EXTERNAL_IDENTIFIER) = UPPER('PJM-'||TRUNC(p_ORG_ID, 0))
+       				AND ROWNUM = 1; -- just grab the first one
+		END;
+	END IF;
+	IF v_PSE_ID IS NULL AND NOT p_ORG_NAME IS NULL THEN
+		BEGIN
+			SELECT PSE_ID INTO v_PSE_ID
+			FROM PURCHASING_SELLING_ENTITY
+			WHERE UPPER(PSE_DESC) = UPPER('PJM: '||TRIM(p_ORG_NAME));
+		EXCEPTION
+			WHEN NO_DATA_FOUND THEN
+        		BEGIN
+        			SELECT PSE_ID INTO v_PSE_ID
+        			FROM PURCHASING_SELLING_ENTITY
+        			WHERE UPPER(REPLACE(PSE_DESC,',','')) = UPPER('PJM: '||TRIM(REPLACE(p_ORG_NAME,',','')));
+        		EXCEPTION
+              WHEN NO_DATA_FOUND THEN
+                BEGIN
+            		  -- schedule 9 and 10 summary replaces the comma in the name with a space
+                	SELECT PSE_ID INTO v_PSE_ID
+            			FROM PURCHASING_SELLING_ENTITY
+            			WHERE UPPER(REPLACE(PSE_DESC,',',' ')) = UPPER('PJM: '||TRIM(REPLACE(p_ORG_NAME,',',' ')));
+                EXCEPTION
+            			WHEN NO_DATA_FOUND THEN
+            				v_PSE_ID := NULL;
+            			WHEN TOO_MANY_ROWS THEN
+                   			LOGS.LOG_WARN('More than one PSE for PJM found. Using the first one.');
+            				SELECT PSE_ID INTO v_PSE_ID
+            				FROM PURCHASING_SELLING_ENTITY
+    	        			WHERE UPPER(REPLACE(PSE_DESC,',','')) = UPPER('PJM: '||TRIM(REPLACE(p_ORG_NAME,',','')))
+                   				AND ROWNUM = 1; -- just grab the first one
+          		  END;
+            END;
+			WHEN TOO_MANY_ROWS THEN
+				LOGS.LOG_WARN('More than one PSE for PJM found. Using the first one.');
+				SELECT PSE_ID INTO v_PSE_ID
+				FROM PURCHASING_SELLING_ENTITY
+				WHERE UPPER(PSE_DESC) = UPPER('PJM: '||TRIM(p_ORG_NAME))
+       				AND ROWNUM = 1; -- just grab the first one
+		END;
+	END IF;
+	IF v_PSE_ID IS NULL THEN
+		BEGIN
+			SELECT PSE_ID INTO v_PSE_ID
+			FROM PURCHASING_SELLING_ENTITY
+			WHERE UPPER(PSE_EXTERNAL_IDENTIFIER) = 'PJM';
+		EXCEPTION
+			WHEN TOO_MANY_ROWS THEN
+				LOGS.LOG_WARN('More than one PSE for PJM found. Using the first one.');
+				SELECT PSE_ID INTO v_PSE_ID
+				FROM PURCHASING_SELLING_ENTITY
+				WHERE UPPER(PSE_EXTERNAL_IDENTIFIER) = 'PJM'
+       				AND ROWNUM = 1; -- just grab the first one
+		END;
+	END IF;
+	RETURN v_PSE_ID;
+END GET_PSE;
+----------------------------------------------------------------------------------------------------
+FUNCTION TRIM_COMPONENT_NAME
+	(
+	p_NAME IN VARCHAR2
+	) RETURN VARCHAR2 IS
+v_SHORT_NAME VARCHAR2(128);
+v_POS NUMBER(3);
+BEGIN
+	v_POS := INSTR(p_NAME, '-');
+	IF v_POS > 0 THEN
+        BEGIN
+            -- trim off '- MonYYYY'
+        	v_SHORT_NAME := TRIM(SUBSTR(p_NAME, 1, v_POS - 1));
+        EXCEPTION
+        	WHEN OTHERS THEN
+            	-- if not a date after dash, don't trim
+            	v_SHORT_NAME := p_NAME;
+        END;
+	ELSE
+    	v_SHORT_NAME := p_NAME;
+    END IF;
+
+	RETURN v_SHORT_NAME;
+END TRIM_COMPONENT_NAME;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_SERVICE_POINT
+	(
+	p_NAME IN VARCHAR2,
+	p_EXT_IDENT IN VARCHAR2 := NULL
+	) RETURN NUMBER IS
+v_ID NUMBER := NULL;
+BEGIN
+	IF p_EXT_IDENT IS NULL THEN
+		v_ID := MM_PJM_UTIL.ID_FOR_SERVICE_POINT_NAME(p_NAME);
+	ELSE
+		v_ID := MM_PJM_UTIL.ID_FOR_SERVICE_POINT_PNODE(p_EXT_IDENT);
+	END IF;
+
+	RETURN v_ID;
+END GET_SERVICE_POINT;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_COMPONENT
+	(
+	p_COMPONENT_NAME IN VARCHAR2,
+	p_PJM_CHARGE_ID IN VARCHAR2,
+	p_IS_CREDIT IN NUMBER
+	) RETURN NUMBER IS
+v_COMPONENT_ID NUMBER;
+v_COMPONENT_NAME COMPONENT.COMPONENT_NAME%TYPE;
+
+BEGIN
+	BEGIN
+		-- first check external ID which now should match the PJM charge ID
+		SELECT COMPONENT_ID INTO v_COMPONENT_ID
+		FROM COMPONENT
+		WHERE EXTERNAL_IDENTIFIER = p_PJM_CHARGE_ID;
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+			BEGIN
+			-- None? Then create a component
+			IF p_IS_CREDIT = 1 THEN
+				v_COMPONENT_NAME := p_COMPONENT_NAME || ' Credits';
+			ELSE
+				v_COMPONENT_NAME := p_COMPONENT_NAME || ' Charges';
+			END IF;
+
+			SELECT OID.NEXTVAL INTO v_COMPONENT_ID FROM DUAL;
+			INSERT INTO COMPONENT (
+				COMPONENT_ID, COMPONENT_NAME, COMPONENT_ALIAS, COMPONENT_DESC, RATE_STRUCTURE, CHARGE_TYPE, EXTERNAL_IDENTIFIER, ENTRY_DATE
+				) VALUES (
+					v_COMPONENT_ID, SUBSTR(TRIM(v_COMPONENT_NAME),1,256), 'Generated by PJM Import', v_COMPONENT_NAME, 'External', 'PJM Charge', p_PJM_CHARGE_ID, SYSDATE
+					);
+			EXCEPTION
+				WHEN TOO_MANY_ROWS THEN
+					LOGS.LOG_WARN('More than one component found with Desc. of '''|| v_COMPONENT_NAME ||'''. Using the first one.');
+        			SELECT COMPONENT_ID INTO v_COMPONENT_ID
+        			FROM COMPONENT
+					WHERE UPPER(COMPONENT_DESC) = UPPER(TRIM(v_COMPONENT_NAME))
+        				AND ROWNUM = 1; -- just grab the first one
+			END;
+		WHEN TOO_MANY_ROWS THEN
+			LOGS.LOG_WARN('More than one component found with Ext.ID of '''|| v_COMPONENT_NAME ||'''. Using the first one.');
+			SELECT COMPONENT_ID INTO v_COMPONENT_ID
+			FROM COMPONENT
+			WHERE EXTERNAL_IDENTIFIER = p_PJM_CHARGE_ID
+				AND ROWNUM = 1; -- just grab the first one
+	END;
+	RETURN v_COMPONENT_ID;
+END GET_COMPONENT;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_PRODUCT
+	(
+	p_COMPONENT_ID IN NUMBER
+	) RETURN NUMBER IS
+v_PRODUCT_ID NUMBER;
+BEGIN
+	BEGIN
+		SELECT PRODUCT_ID INTO v_PRODUCT_ID
+		FROM PRODUCT_COMPONENT
+		WHERE COMPONENT_ID = p_COMPONENT_ID;
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+			-- use default product for unknown components
+			BEGIN
+        		SELECT PRODUCT_ID INTO v_PRODUCT_ID
+        		FROM PRODUCT
+        		WHERE UPPER(PRODUCT.PRODUCT_EXTERNAL_IDENTIFIER) = UPPER(g_MISC_PRODUCT_EXT_ID);
+			EXCEPTION
+				WHEN NO_DATA_FOUND THEN
+					-- None? then create the product
+					SELECT OID.NEXTVAL INTO v_PRODUCT_ID FROM DUAL;
+					INSERT INTO PRODUCT (
+						PRODUCT_ID, PRODUCT_NAME, PRODUCT_ALIAS, PRODUCT_DESC, PRODUCT_EXTERNAL_IDENTIFIER, BEGIN_DATE, END_DATE, ENTRY_DATE
+					) VALUES (
+						v_PRODUCT_ID, 'PJM Other Charges', 'PJM Other Charges', 'Generated by PJM Import - Product to group unknown/unshadowed components', g_MISC_PRODUCT_EXT_ID, TO_DATE('01/01/2001','MM/DD/YYYY'), NULL, SYSDATE
+					);
+				WHEN TOO_MANY_ROWS THEN
+        			LOGS.LOG_WARN('More than one product with Ext.ID of '''||g_MISC_PRODUCT_EXT_ID||'''. Using the first one.');
+            		SELECT PRODUCT_ID INTO v_PRODUCT_ID
+            		FROM PRODUCT
+            		WHERE UPPER(PRODUCT.PRODUCT_EXTERNAL_IDENTIFIER) = UPPER(g_MISC_PRODUCT_EXT_ID)
+        	            AND ROWNUM = 1; -- just grab the first one
+			END;
+		WHEN TOO_MANY_ROWS THEN
+			LOGS.LOG_WARN('Component '||p_COMPONENT_ID||' is associated with more than one product. Using the first one.');
+    		SELECT PRODUCT_ID INTO v_PRODUCT_ID
+    		FROM PRODUCT_COMPONENT
+    		WHERE COMPONENT_ID = p_COMPONENT_ID
+	            AND ROWNUM = 1; -- just grab the first one
+	END;
+	RETURN v_PRODUCT_ID;
+END GET_PRODUCT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE GET_PRODUCT_COMPONENT
+	(
+	p_LINE_ITEM_NAME IN VARCHAR2,
+	p_EXT_ID IN VARCHAR2,
+	p_IS_CREDIT IN NUMBER,
+	p_PRODUCT_ID OUT NUMBER,
+	p_COMPONENT_ID OUT NUMBER
+	) AS
+BEGIN
+	-- First get the component
+	p_COMPONENT_ID := GET_COMPONENT(p_LINE_ITEM_NAME, p_EXT_ID, p_IS_CREDIT);
+	p_PRODUCT_ID := GET_PRODUCT(p_COMPONENT_ID);
+END GET_PRODUCT_COMPONENT;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_CHARGE_ID
+	(
+	p_PSE_ID IN NUMBER,
+	p_COMPONENT_ID IN NUMBER,
+	p_MONTH IN DATE,
+	p_CHARGE_VIEW_TYPE IN VARCHAR2
+	) RETURN NUMBER IS
+v_CHARGE_ID NUMBER;
+v_PRODUCT_ID NUMBER(9);
+v_BILLING_STATEMENT BILLING_STATEMENT%ROWTYPE;
+BEGIN
+	SELECT CHARGE_ID INTO v_CHARGE_ID
+	FROM BILLING_STATEMENT A
+	WHERE ENTITY_ID = p_PSE_ID
+		AND COMPONENT_ID = p_COMPONENT_ID
+		AND STATEMENT_TYPE = g_STATEMENT_TYPE
+		AND STATEMENT_STATE = g_EXTERNAL_STATE
+		AND STATEMENT_DATE = p_MONTH
+		AND AS_OF_DATE = (SELECT MAX(AS_OF_DATE)
+							FROM BILLING_STATEMENT
+							WHERE ENTITY_ID = A.ENTITY_ID
+								AND PRODUCT_ID = A.PRODUCT_ID
+								AND COMPONENT_ID = A.COMPONENT_ID
+								AND STATEMENT_TYPE = A.STATEMENT_TYPE
+								AND STATEMENT_STATE = A.STATEMENT_STATE
+								AND STATEMENT_DATE = A.STATEMENT_DATE
+								AND AS_OF_DATE <= SYSDATE);
+
+	UPDATE BILLING_STATEMENT
+		SET CHARGE_VIEW_TYPE = p_CHARGE_VIEW_TYPE
+	WHERE CHARGE_ID = v_CHARGE_ID;
+
+	RETURN v_CHARGE_ID;
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+        --create charge_id
+        v_PRODUCT_ID := GET_PRODUCT(p_COMPONENT_ID);
+        v_BILLING_STATEMENT.Entity_Id := p_PSE_ID;
+        v_BILLING_STATEMENT.Product_Id := v_PRODUCT_ID;
+        v_BILLING_STATEMENT.Component_Id := p_COMPONENT_ID;
+        v_BILLING_STATEMENT.Statement_Type := g_STATEMENT_TYPE;
+        v_BILLING_STATEMENT.Statement_State := g_EXTERNAL_STATE;
+        v_BILLING_STATEMENT.Statement_Date := p_MONTH;
+        v_BILLING_STATEMENT.As_Of_Date := LOW_DATE;
+        v_BILLING_STATEMENT.Statement_End_Date := LAST_DAY(p_MONTH);
+        v_BILLING_STATEMENT.Charge_View_Type := p_CHARGE_VIEW_TYPE;
+        v_BILLING_STATEMENT.Entity_Type := 'PSE';
+        v_BILLING_STATEMENT.Charge_Quantity := NULL;
+        v_BILLING_STATEMENT.Charge_Rate := NULL;
+        v_BILLING_STATEMENT.Charge_Amount := NULL;
+
+        PC.GET_CHARGE_ID(v_BILLING_STATEMENT);
+	    RETURN v_BILLING_STATEMENT.Charge_Id;
+END GET_CHARGE_ID;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_COMBO_CHARGE_ID
+	(
+	p_CHARGE_ID IN NUMBER,
+	p_COMPONENT_ID IN NUMBER,
+	p_MONTH IN DATE,
+	p_CHARGE_VIEW_TYPE IN VARCHAR2,
+    p_IS_DAILY IN BOOLEAN := FALSE
+	) RETURN NUMBER IS
+v_COMBO_CHARGE_ID NUMBER;
+v_END_DATE DATE;
+BEGIN
+    IF p_IS_DAILY = TRUE THEN
+        v_END_DATE := p_MONTH;
+    ELSE
+        v_END_DATE := LAST_DAY(p_MONTH);
+    END IF;
+
+	SELECT COMBINED_CHARGE_ID INTO v_COMBO_CHARGE_ID
+	FROM COMBINATION_CHARGE
+	WHERE CHARGE_ID = p_CHARGE_ID
+		AND COMPONENT_ID = p_COMPONENT_ID
+		AND BEGIN_DATE = p_MONTH;
+
+	UPDATE COMBINATION_CHARGE
+		SET CHARGE_VIEW_TYPE = p_CHARGE_VIEW_TYPE
+	WHERE CHARGE_ID = p_CHARGE_ID
+		AND COMPONENT_ID = p_COMPONENT_ID
+		AND BEGIN_DATE = p_MONTH;
+
+	RETURN v_COMBO_CHARGE_ID;
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		SELECT BID.NEXTVAL INTO v_COMBO_CHARGE_ID FROM DUAL;
+		INSERT INTO COMBINATION_CHARGE (
+			CHARGE_ID, COMPONENT_ID, BEGIN_DATE, END_DATE,
+			COMBINED_CHARGE_ID, CHARGE_VIEW_TYPE, COEFFICIENT,
+			CHARGE_FACTOR, ENTRY_DATE)
+		VALUES (
+			p_CHARGE_ID, p_COMPONENT_ID, p_MONTH, v_END_DATE,
+			v_COMBO_CHARGE_ID, p_CHARGE_VIEW_TYPE, 1.0,
+			1.0, SYSDATE);
+		RETURN v_COMBO_CHARGE_ID;
+END GET_COMBO_CHARGE_ID;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_CHARGE_DATE
+	(
+	p_DAY IN DATE,
+	p_HOUR IN NUMBER,
+	p_DST_FLAG IN NUMBER
+	) RETURN DATE IS
+v_TZ VARCHAR2(4) := 'EDT';
+BEGIN
+	--DST FLAG DENOTES SECOND HOUR ENDING 2.
+	IF NVL(p_DST_FLAG,0) = 1 THEN
+		RETURN TO_CUT_WITH_OPTIONS(p_DAY + p_HOUR/24 + 1/86400, v_TZ, MM_PJM_UTIL.g_DST_SPRING_AHEAD_OPTION);
+	--HOUR 25 ALSO DENOTES SECOND HOUR ENDING 2.
+    ELSIF p_HOUR = 25 THEN
+        RETURN TO_CUT_WITH_OPTIONS(p_DAY + 2/24 + 1/86400, v_TZ, MM_PJM_UTIL.g_DST_SPRING_AHEAD_OPTION);
+	ELSE
+		RETURN TO_CUT_WITH_OPTIONS(p_DAY + p_HOUR/24, v_TZ, MM_PJM_UTIL.g_DST_SPRING_AHEAD_OPTION);
+	END IF;
+END GET_CHARGE_DATE;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_MARKET_PRICE
+    (
+    p_EXT_ID IN VARCHAR2
+    ) RETURN NUMBER IS
+
+    v_MKT_PRICE_ID NUMBER;
+BEGIN
+
+    SELECT MARKET_PRICE_ID
+    INTO v_MKT_PRICE_ID
+    FROM MARKET_PRICE
+    WHERE UPPER(EXTERNAL_IDENTIFIER) = UPPER(TRIM(p_EXT_ID));
+
+    RETURN v_MKT_PRICE_ID;
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN NULL;
+    WHEN TOO_MANY_ROWS THEN
+    LOGS.LOG_WARN('More than one Market Price with Ext.ID of ''' || p_EXT_ID
+            || ''' was found. Using the first one.');
+
+        SELECT MARKET_PRICE_ID
+        INTO v_MKT_PRICE_ID
+        FROM MARKET_PRICE
+        WHERE UPPER(EXTERNAL_IDENTIFIER) = UPPER(TRIM(p_EXT_ID))
+            AND ROWNUM = 1; -- just grab the first one
+
+        RETURN v_MKT_PRICE_ID;
+END GET_MARKET_PRICE;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_CONTRACT_ID
+    (
+	p_BILLING_ENTITY_ID IN NUMBER
+	)  RETURN NUMBER IS
+
+-- Answer the interchange contract id associated with the counter party.
+
+v_CONTRACT_ID NUMBER;
+
+BEGIN
+
+	SELECT CONTRACT_ID
+	INTO v_CONTRACT_ID
+	FROM INTERCHANGE_CONTRACT
+	WHERE BILLING_ENTITY_ID = p_BILLING_ENTITY_ID
+	    AND ROWNUM = 1;
+
+	RETURN v_CONTRACT_ID;
+
+	 EXCEPTION
+ 		WHEN NO_DATA_FOUND THEN
+			RETURN 0;
+	 	WHEN OTHERS THEN
+ 			RAISE;
+
+END GET_CONTRACT_ID;
+----------------------------------------------------------------------------------------------------
+FUNCTION ID_FOR_PJM_CONTRACT
+	(
+	p_ISO_SOURCE IN VARCHAR2
+	) RETURN NUMBER AS
+v_ID NUMBER;
+-- Answer the interchange contract id associated with the ISO account name.
+BEGIN
+	SELECT CONTRACT_ID
+	INTO v_ID
+	FROM INTERCHANGE_CONTRACT A
+	WHERE A.CONTRACT_ALIAS = p_ISO_SOURCE
+		AND ROWNUM = 1;
+
+	RETURN v_ID;
+
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		RETURN 0;
+	WHEN OTHERS THEN
+		RAISE;
+END ID_FOR_PJM_CONTRACT;
+ -------------------------------------------------------------------------------------
+FUNCTION GET_TX_ID
+  (
+  p_EXT_ID IN VARCHAR2,
+  p_TRANS_TYPE IN VARCHAR2 := 'Market Result',
+  p_NAME IN VARCHAR2 := NULL,
+  p_INTERVAL IN VARCHAR2 := 'Hour',
+  p_COMMODITY_ID IN NUMBER := 0,
+  p_CONTRACT_ID IN NUMBER := 0,
+  p_ZOD_ID IN NUMBER := 0,
+  p_SERVICE_POINT_ID IN NUMBER := 0,
+  p_POOL_ID IN NUMBER := 0,
+  p_SELLER_ID IN NUMBER := 0
+  ) RETURN NUMBER IS
+
+  v_ID NUMBER;
+  v_SC NUMBER(9);
+  v_SUFFIX VARCHAR2(32) := '';
+  v_TMP VARCHAR2(32);
+  v_NAME VARCHAR2(64);
+  v_TRANSACTION INTERCHANGE_TRANSACTION%ROWTYPE;
+  v_TRANSACTION_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+
+BEGIN
+	IF p_EXT_ID IS NULL THEN
+        SELECT TRANSACTION_ID
+        INTO v_ID
+        FROM INTERCHANGE_TRANSACTION
+        WHERE TRANSACTION_TYPE = p_TRANS_TYPE
+            AND CONTRACT_ID = p_CONTRACT_ID
+            AND (p_SERVICE_POINT_ID = 0 OR POD_ID = p_SERVICE_POINT_ID)
+            AND (p_POOL_ID = 0 OR POOL_ID = p_POOL_ID)
+			AND (p_SELLER_ID = 0 OR SELLER_ID = p_SELLER_ID)
+            AND (p_ZOD_ID = 0 OR ZOD_ID = p_ZOD_ID);
+	ELSE
+        SELECT TRANSACTION_ID
+        INTO v_ID
+        FROM INTERCHANGE_TRANSACTION
+        WHERE TRANSACTION_IDENTIFIER = p_EXT_ID
+            AND (p_CONTRACT_ID = 0 OR CONTRACT_ID = p_CONTRACT_ID)
+            AND (p_SERVICE_POINT_ID = 0 OR POD_ID = p_SERVICE_POINT_ID)
+            AND (p_POOL_ID = 0 OR POOL_ID = p_POOL_ID)
+			AND (p_SELLER_ID = 0 OR SELLER_ID = p_SELLER_ID)
+            AND (p_ZOD_ID = 0 OR ZOD_ID = p_ZOD_ID);
+	END IF;
+
+	RETURN v_ID;
+
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		v_NAME := NVL(p_NAME,p_EXT_ID);
+
+        SELECT SC_ID
+        INTO v_SC
+        FROM SCHEDULE_COORDINATOR
+        WHERE SC_NAME = 'PJM';
+
+		IF p_CONTRACT_ID <> 0 THEN
+    	    SELECT ': '||CONTRACT_NAME
+	        INTO v_TMP
+	        FROM INTERCHANGE_CONTRACT
+	        WHERE CONTRACT_ID = p_CONTRACT_ID;
+			v_SUFFIX := SUBSTR(v_SUFFIX||v_TMP,1,32);
+		END IF;
+        IF p_SELLER_ID <> 0 THEN
+    	    SELECT ': '||PSE_NAME
+	        INTO v_TMP
+	        FROM PURCHASING_SELLING_ENTITY
+	        WHERE PSE_ID = p_SELLER_ID;
+			v_SUFFIX := SUBSTR(v_SUFFIX||v_TMP,1,32);
+        END IF;
+        IF p_POOL_ID <> 0 THEN
+    	    SELECT ': '||POOL_NAME
+	        INTO v_TMP
+	        FROM POOL
+	        WHERE POOL_ID = p_POOL_ID;
+			v_SUFFIX := SUBSTR(v_SUFFIX||v_TMP,1,32);
+        END IF;
+        IF p_SERVICE_POINT_ID <> 0 THEN
+    	    SELECT ': '||SERVICE_POINT_NAME
+	        INTO v_TMP
+	        FROM SERVICE_POINT
+	        WHERE SERVICE_POINT_ID = p_SERVICE_POINT_ID;
+			v_SUFFIX := SUBSTR(v_SUFFIX||v_TMP,1,32);
+        END IF;
+
+	--create the transaction
+
+    	v_TRANSACTION.TRANSACTION_ID := 0;
+        v_TRANSACTION.TRANSACTION_NAME := SUBSTR(v_NAME||v_SUFFIX,1,64);
+        v_TRANSACTION.TRANSACTION_ALIAS := SUBSTR(v_NAME||v_SUFFIX,1,32);
+        v_TRANSACTION.TRANSACTION_DESC := v_NAME||v_SUFFIX;
+        v_TRANSACTION.TRANSACTION_TYPE := p_TRANS_TYPE;
+        v_TRANSACTION.TRANSACTION_IDENTIFIER := p_EXT_ID;
+        v_TRANSACTION.TRANSACTION_INTERVAL := p_INTERVAL;
+        v_TRANSACTION.BEGIN_DATE := TO_DATE('1/1/2000','MM/DD/YYYY');
+        v_TRANSACTION.END_DATE := TO_DATE('12/31/2020','MM/DD/YYYY');
+        v_TRANSACTION.SELLER_ID := p_SELLER_ID;
+        v_TRANSACTION.CONTRACT_ID := p_CONTRACT_ID;
+        v_TRANSACTION.SC_ID := v_SC;
+        v_TRANSACTION.POD_ID := p_SERVICE_POINT_ID;
+        v_TRANSACTION.POOL_ID := p_POOL_ID;
+        v_TRANSACTION.ZOD_ID := p_ZOD_ID;
+        v_TRANSACTION.COMMODITY_ID := p_COMMODITY_ID;
+
+		MM_UTIL.PUT_TRANSACTION(v_TRANSACTION_ID, v_TRANSACTION, GA.INTERNAL_STATE, 'Active');
+
+		RETURN v_TRANSACTION_ID;
+END GET_TX_ID;
+---------------------------------------------------------------------------------------------------
+--      Only Reconciliation Report Schedule 1 has EDC (PSE) field. The associated Zone must be known.
+--      When importing Reconciliation Report Schedule 1A, which has both EDC (PSE) and Zone, create
+--      PSE if does not exist and set its Zone custom attribute it its associated Zone
+FUNCTION PUT_PSE
+    (
+    p_PSE_ALIAS IN VARCHAR2,
+    p_ZONE_NAME IN VARCHAR2
+    ) RETURN NUMBER AS
+v_PSE_ID NUMBER(9) := 0;
+v_PJM_ID NUMBER(9);
+v_ZONE_ATTRIBUTE_ID NUMBER(9);
+v_STATUS NUMBER;
+BEGIN
+    v_STATUS := GA.SUCCESS;
+    BEGIN
+		SELECT POM.OBJECT_VALUE
+			INTO v_PJM_ID
+			FROM PJM_OBJECT_MAP POM
+		 WHERE POM.OBJECT_TYPE = 'PSE'
+			 AND UPPER(POM.OBJECT_NAME) = UPPER(p_PSE_ALIAS);
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+		LOGS.LOG_WARN('No PJM Org ID found with name ' || p_PSE_ALIAS || ', try downloading latest eSchedules Company modeling data.');
+	END;
+
+        IO.PUT_PSE(o_OID                       => v_PSE_ID,
+        			 p_PSE_NAME                  => p_PSE_ALIAS,
+        			 p_PSE_ALIAS                 => p_PSE_ALIAS,
+        			 p_PSE_DESC                  => 'Created via Reconcil import',
+        			 p_PSE_ID                    => 0,
+        			 p_PSE_NERC_CODE             => NULL,
+        			 p_PSE_STATUS                => 'Active',
+        			 p_PSE_DUNS_NUMBER           => NULL,
+        			 p_PSE_BANK                  => NULL,
+        			 p_PSE_ACH_NUMBER            => NULL,
+        			 p_PSE_TYPE                  => NULL,
+        			 p_PSE_EXTERNAL_IDENTIFIER   => 'PJM-' || v_PJM_ID,
+        			 p_PSE_IS_RETAIL_AGGREGATOR  => NULL,
+        			 p_PSE_IS_BACKUP_GENERATION  => NULL,
+        			 p_PSE_EXCLUDE_LOAD_SCHEDULE => NULL,
+        			 p_IS_BILLING_ENTITY         => NULL,
+        			 p_TIME_ZONE                 => 'EDT',
+        			 p_STATEMENT_INTERVAL        => NULL,
+        			 p_INVOICE_INTERVAL          => NULL,
+        			 p_WEEK_BEGIN                => NULL,
+        			 p_INVOICE_LINE_ITEM_OPTION  => NULL,
+					 p_SCHEDULE_NAME_PREFIX => NULL,
+					 p_SCHEDULE_FORMAT => NULL,
+					 p_SCHEDULE_INTERVAL => NULL,
+					 p_LOAD_ROUNDING_PREFERENCE => NULL,
+					 p_LOSS_ROUNDING_PREFERENCE => NULL,
+					 p_CREATE_TX_LOSS_SCHEDULE => NULL,
+					 p_CREATE_DX_LOSS_SCHEDULE => NULL,
+					 p_CREATE_UFE_SCHEDULE => NULL,
+					 p_MINIMUM_SCHEDULE_AMT => NULL,
+					 p_INVOICE_EMAIL_SUBJECT => NULL,
+					 p_INVOICE_EMAIL_PRIORITY => NULL,
+					 p_INVOICE_EMAIL_BODY => NULL,
+					 p_INVOICE_EMAIL_BODY_MIME_TYPE => NULL);
+
+
+    ID.ID_FOR_ENTITY_ATTRIBUTE('Zone', 'PSE', 'String', TRUE, v_ZONE_ATTRIBUTE_ID);
+
+    SP.PUT_TEMPORAL_ENTITY_ATTRIBUTE(v_PSE_ID, v_ZONE_ATTRIBUTE_ID,
+        								SYSDATE, NULL, p_ZONE_NAME,
+                                        v_PSE_ID, v_ZONE_ATTRIBUTE_ID,
+                                        SYSDATE, v_STATUS);
+
+    COMMIT;
+    RETURN v_PSE_ID;
+
+END PUT_PSE;
+------------------------------------------------------------------------------------------------------
+FUNCTION ID_FOR_SERVICE_ZONE
+	(
+	p_ZONE_NAME IN VARCHAR2
+	) RETURN NUMBER AS
+v_ID NUMBER(9);
+BEGIN
+	SELECT A.SERVICE_ZONE_ID
+	INTO v_ID
+	FROM SERVICE_ZONE A
+	WHERE A.SERVICE_ZONE_ALIAS= p_ZONE_NAME
+		AND ROWNUM = 1;
+
+	RETURN v_ID;
+
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		v_ID := 0;
+		RETURN v_ID;
+END ID_FOR_SERVICE_ZONE;
+---------------------------------------------------------------------------------------------------
+FUNCTION GET_IS_DAILY_CHARGE
+    (
+    p_COMPONENT_ID IN NUMBER
+    ) RETURN BOOLEAN IS
+TYPE ARRAY IS VARRAY(65) OF VARCHAR2(64);
+v_COMP_EXT_ID VARCHAR2(32);
+v_IS_DAILY BOOLEAN := FALSE;
+v_DAILY_CHARGES ARRAY :=
+	ARRAY(g_BAL_OP_RES_CHG_COMP_IDENT, g_BAL_OP_RES_CR_COMP_IDENT,
+    	  g_DA_OP_RES_CHG_COMP_IDENT, g_DA_OP_RES_CR_COMP_IDENT,
+            g_DA_SPOT_CHG_COMP_IDENT,
+            g_BAL_SPOT_CHG_COMP_IDENT,
+            g_DA_TX_CONG_CHG_COMP_IDENT,
+			g_BAL_TX_CONG_CHG_COMP_IDENT,
+            g_TX_CONG_CR_COMP_IDENT,
+            g_DA_TX_LOSS_CR_COMP_IDENT,
+            g_BAL_TX_LOSS_CHG_COMP_IDENT,
+            g_REGULATION_CHG_COMP_IDENT, g_REGULATION_CR_COMP_IDENT,
+            g_SYNC_RESERVE_CHG_COMP_IDENT,
+            g_SYNCH_CONDENS_CHG_COMP_IDENT,
+            g_BAL_TX_LOSS_CHG_COMP_IDENT, g_INADV_INTERCH_CHG_COMP_IDENT,
+            g_DA_TX_LOSS_CHG_COMP_IDENT,
+            g_LOCATION_REL_CHG_COMP_IDENT,
+            g_RPM_AUCTION_CHG_COMP_IDENT, g_RPM_AUCTION_CR_COMP_IDENT,
+            g_FTR_AUCTION_CHG_COMP_IDENT, g_FTR_AUCTION_CR_COMP_IDENT,
+            g_REACTIVE_SERV_CHG_COMP_IDENT,
+            g_EXP_CST_RECOV_CHG_COMP_IDENT,
+            g_RTO_STARTUP_CHG_COMP_IDENT,
+            g_TOSSCD_CONG_CHG_COMP_IDENT,
+            g_TOSSCD_CONG_CR_COMP_IDENT,
+            g_FIRM_P2P_CHG_COMP_IDENT,
+            g_NON_FIRM_P2P_CHG_COMP_IDENT,
+            g_NITS_CHG_COMP_IDENT, g_NITS_CR_COMP_IDENT,
+            g_NITS_OFFSET_CHG_COMP_IDENT,
+			g_ARR_AUCTION_CR_COMP_IDENT,
+			g_SSCD_CONT_AREA_ADMIN_IDENT,
+			g_SSCD_FTR_ADMIN_COMP_IDENT,
+			g_SSCD_MKT_SUPP_COMP_IDENT,
+			g_SSCD_REG_MKT_ADMIN_IDENT,
+			g_SSCD_CAP_RES_OBLIG_IDENT,
+			g_INTERRUPT_LD_REL_IDENT,
+			g_SSCD_REG_REFUND_IDENT,
+			g_SSCD_MKT_REFUND_IDENT,
+			g_SSCD_FTR_ADMIN_REFUND_IDENT,
+			g_SSCD_CONTROL_REFUND_IDENT,
+			g_SSCD_CAP_RES_REFUND_IDENT,
+			g_SSCD_ADVANCED_IDENT,
+			g_FERC_ANNUAL_RECOV_IDENT,
+			g_OPSI_FUNDING_IDENT,
+			g_RFC_CHARGE_IDENT,
+			g_CAP_RES_DEF_IDENT,
+			g_NERC_CHARGE_IDENT,
+			g_SYNC_RESERVE_CR_COMP_IDENT,
+            g_DA_SCHED_CHG_IDENT,
+            g_DA_SCHED_CR_IDENT,
+            g_CAP_TRANSFER_CR_IDENT,
+            g_MMU_FUNDING_CHG_IDENT);
+
+BEGIN
+    SELECT EXTERNAL_IDENTIFIER INTO v_COMP_EXT_ID
+    FROM COMPONENT
+    WHERE COMPONENT_ID = p_COMPONENT_ID;
+
+	FOR I IN v_DAILY_CHARGES.FIRST .. v_DAILY_CHARGES.LAST LOOP
+        IF v_DAILY_CHARGES(I) = v_COMP_EXT_ID THEN
+            v_IS_DAILY := TRUE;
+            EXIT;
+        END IF;
+    END LOOP;
+
+    RETURN v_IS_DAILY;
+
+END GET_IS_DAILY_CHARGE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_SCHEDULE_VALUE
+  (
+  p_TX_ID IN NUMBER,
+  p_SCHED_DATE IN DATE,
+  p_AMOUNT NUMBER,
+  p_PRICE NUMBER := NULL,
+  p_TO_INTERNAL BOOLEAN := TRUE
+  ) AS
+
+  v_STATUS NUMBER;
+  v_IDX BINARY_INTEGER;
+
+  BEGIN
+
+	FOR v_IDX IN 1..MM_PJM_UTIL.g_STATEMENT_TYPE_ID_ARRAY.COUNT LOOP
+		IF p_TO_INTERNAL THEN
+            ITJ.PUT_IT_SCHEDULE(p_TRANSACTION_ID => p_TX_ID,
+                               p_SCHEDULE_TYPE => MM_PJM_UTIL.g_STATEMENT_TYPE_ID_ARRAY(v_IDX),
+                               p_SCHEDULE_STATE => 1,
+                               p_SCHEDULE_DATE => p_SCHED_DATE,
+                               p_AS_OF_DATE => SYSDATE,
+                               p_AMOUNT => p_AMOUNT,
+                               p_PRICE => p_PRICE,
+                               p_STATUS => v_STATUS);
+		END IF;
+        ITJ.PUT_IT_SCHEDULE(p_TRANSACTION_ID => p_TX_ID,
+                           p_SCHEDULE_TYPE => MM_PJM_UTIL.g_STATEMENT_TYPE_ID_ARRAY(v_IDX),
+                           p_SCHEDULE_STATE => 2,
+                           p_SCHEDULE_DATE => p_SCHED_DATE,
+                           p_AS_OF_DATE => SYSDATE,
+                           p_AMOUNT => p_AMOUNT,
+                           p_PRICE => p_PRICE,
+                           p_STATUS => v_STATUS);
+	END LOOP;
+
+  END PUT_SCHEDULE_VALUE;
+---------------------------------------------------------------------------------------------------
+PROCEDURE PUT_MARKET_PRICE_VALUE
+    (
+    p_MARKET_PRICE_ID IN NUMBER,
+    p_PRICE_DATE IN DATE,
+    p_PRICE IN NUMBER
+    ) AS
+
+v_AS_OF_DATE DATE;
+BEGIN
+	IF p_MARKET_PRICE_ID IS NULL THEN RETURN; END IF;
+
+	IF GA.VERSION_MARKET_PRICE THEN
+		v_AS_OF_DATE := SYSDATE;
+	ELSE
+		v_AS_OF_DATE := LOW_DATE;
+	END IF;
+
+	UPDATE MARKET_PRICE_VALUE
+		SET PRICE = p_PRICE
+	WHERE MARKET_PRICE_ID = p_MARKET_PRICE_ID
+		AND PRICE_DATE = p_PRICE_DATE
+		AND PRICE_CODE = g_MARKET_PRICE_CODE
+		AND AS_OF_DATE = v_AS_OF_DATE;
+
+	IF SQL%NOTFOUND THEN
+		INSERT INTO MARKET_PRICE_VALUE (
+			MARKET_PRICE_ID, PRICE_DATE, PRICE_CODE, AS_OF_DATE, PRICE)
+		VALUES (
+			p_MARKET_PRICE_ID, p_PRICE_DATE, g_MARKET_PRICE_CODE, v_AS_OF_DATE, p_PRICE);
+	END IF;
+END PUT_MARKET_PRICE_VALUE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_MARKET_PRICE_VALUE_EXTID
+	(
+	p_MARKET_PRICE IN VARCHAR2,
+	p_PRICE_DATE IN DATE,
+	p_PRICE IN NUMBER
+	) AS
+BEGIN
+	PUT_MARKET_PRICE_VALUE(GET_MARKET_PRICE(p_MARKET_PRICE),p_PRICE_DATE,p_PRICE);
+END PUT_MARKET_PRICE_VALUE_EXTID;
+---------------------------------------------------------------------------------------------------
+PROCEDURE FILL_NON_SHADOWED_TXNS
+	(
+    p_PSE_ID IN NUMBER,
+    p_COMPONENT_ID IN NUMBER,
+    p_CHARGE_AMOUNT IN NUMBER,
+    p_DATE IN DATE
+    ) AS
+v_COMPONENT_ID NUMBER(9);
+v_CONTRACT_ID NUMBER(9);
+v_PSE_NAME VARCHAR2(32);
+v_INT VARCHAR2(16);
+TYPE ARRAY IS VARRAY(5) OF VARCHAR2(128);
+v_NON_SHADOWED_CHARGES ARRAY :=
+	ARRAY('Capacity Credit Market Charges', 'Auction Revenue Rights Credits',	
+            'Non-Firm Point-to-Point Transmission Service Credits');
+
+PROCEDURE UPDATE_SCHEDULE(v_EXT_ID IN VARCHAR2, v_CONTRACT IN NUMBER,
+							v_TRXN_NAME IN VARCHAR2) IS
+v_TRANSACTION_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+	BEGIN
+		v_TRANSACTION_ID := GET_TX_ID(v_EXT_ID,
+                                      'Market Result',
+                                      v_TRXN_NAME,
+                                      v_INT,
+                                      0,
+                                      v_CONTRACT);
+
+        PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           p_DATE + 1/86400,
+                           p_CHARGE_AMOUNT);
+
+        COMMIT;
+	END UPDATE_SCHEDULE;
+BEGIN
+	v_CONTRACT_ID := GET_CONTRACT_ID(p_PSE_ID);
+    SELECT PSE_ALIAS INTO v_PSE_NAME FROM PURCHASING_SELLING_ENTITY
+    WHERE PSE_ID = p_PSE_ID;
+
+	FOR I IN v_NON_SHADOWED_CHARGES.FIRST .. v_NON_SHADOWED_CHARGES.LAST LOOP
+    	BEGIN
+      		SELECT COMPONENT_ID INTO v_COMPONENT_ID
+            FROM COMPONENT
+            WHERE COMPONENT_DESC = v_NON_SHADOWED_CHARGES(I);
+        --EXCEPTION
+        --	WHEN NO_DATA_FOUND THEN
+            --	POST_TO_APP_EVENT_LOG('Admin','MM_PJM_SETTLEMENT','FILL_NON_SHADOWED_TXNS','WARNING','PROCESS',
+       					--			NULL,NULL,'Component not found with description of ' || v_NON_SHADOWED_CHARGES(I),
+       					--			GB.g_OSUSER);
+        END;
+
+        IF p_COMPONENT_ID = v_COMPONENT_ID THEN
+        	CASE
+            WHEN I = 1 THEN
+				v_INT := 'Day';
+            	UPDATE_SCHEDULE('PJM-CapCredMktChg$', v_CONTRACT_ID,
+                				'PJM ' || v_PSE_NAME || ' Capacity Credit Mkt Charges Amount');
+            WHEN I = 2 THEN
+				v_INT := 'Day';
+            	UPDATE_SCHEDULE('PJM-ARR$', v_CONTRACT_ID,
+                				'PJM ' || v_PSE_NAME || ' Auction Revenue Rights Charge Amount');
+       		ELSE -- I=3
+                v_INT := 'Month';
+            	UPDATE_SCHEDULE('PJM-NFP2PCred$', v_CONTRACT_ID,
+                				'PJM ' || v_PSE_NAME || ' Non-Firm P2P Trans. Svc Cred Amount');
+            END CASE;
+
+       		EXIT;
+		END IF;
+
+	END LOOP;
+
+END FILL_NON_SHADOWED_TXNS;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_TRANSACTION
+	(
+	p_TX_EXT_ID IN VARCHAR2
+	) RETURN NUMBER IS
+v_TX_ID NUMBER;
+BEGIN
+	SELECT TRANSACTION_ID
+	INTO v_TX_ID
+	FROM INTERCHANGE_TRANSACTION
+	WHERE UPPER(TRANSACTION_IDENTIFIER) = UPPER(TRIM(p_TX_EXT_ID));
+	RETURN v_TX_ID;
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		RETURN NULL;
+	WHEN TOO_MANY_ROWS THEN
+        -- ??
+     --   POST_TO_APP_EVENT_LOG('Admin','MM_PJM_SETTLEMENT','Retrieve Transaction ID','WARNING','PROCESS',
+     --   				NULL,NULL,'More than one Transaction with Ext.ID of '''||p_TX_EXT_ID||''' was found. Using the first one.',
+     --   				GB.g_OSUSER);
+    	SELECT TRANSACTION_ID
+    	INTO v_TX_ID
+    	FROM INTERCHANGE_TRANSACTION
+    	WHERE UPPER(TRANSACTION_IDENTIFIER) = UPPER(TRIM(p_TX_EXT_ID))
+			AND ROWNUM = 1; -- just grab the first one
+		RETURN v_TX_ID;
+END GET_TRANSACTION;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_SOURCE_SINK_ITERATOR_ID
+	(
+	p_CHARGE_ID IN NUMBER,
+	p_SOURCE_NAME IN VARCHAR2,
+	p_SINK_NAME IN VARCHAR2
+	) RETURN NUMBER IS
+	v_ITERATOR_ID NUMBER(9);
+	v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+	v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+	v_SOURCE_ID NUMBER(9);
+	v_SINK_ID NUMBER(9);
+	v_SOURCE_NAME VARCHAR2(64);
+	v_SINK_NAME VARCHAR2(64);
+BEGIN
+
+	IF p_SOURCE_NAME IS NULL AND p_SINK_NAME IS NULL THEN
+		v_ITERATOR_ID := 0;
+	ELSE
+		--Make sure the Service Point exists, and get the correct name.
+		v_SOURCE_ID := MM_PJM_UTIL.ID_FOR_SERVICE_POINT_NAME(p_SOURCE_NAME);
+		v_SINK_ID := MM_PJM_UTIL.ID_FOR_SERVICE_POINT_NAME(p_SINK_NAME);
+		SELECT SERVICE_POINT_NAME INTO v_SOURCE_NAME FROM SERVICE_POINT WHERE SERVICE_POINT_ID = v_SOURCE_ID;
+		SELECT SERVICE_POINT_NAME INTO v_SINK_NAME FROM SERVICE_POINT WHERE SERVICE_POINT_ID = v_SINK_ID;
+
+		--Get the ITERATOR id if it exists.  Otherwise, create one.
+
+		BEGIN
+			SELECT ITERATOR_ID
+			INTO v_ITERATOR_ID
+			FROM FORMULA_CHARGE_ITERATOR
+			WHERE CHARGE_ID = p_CHARGE_ID
+				AND ITERATOR1 = v_SOURCE_NAME
+				AND ITERATOR2 = v_SINK_NAME;
+		EXCEPTION
+			WHEN NO_DATA_FOUND THEN
+				v_ITERATOR_NAME.CHARGE_ID := p_CHARGE_ID;
+				v_ITERATOR_NAME.ITERATOR_NAME1 := 'source';
+				v_ITERATOR_NAME.ITERATOR_NAME2 := 'sink';
+				v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+				v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+				v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+				PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+				v_ITERATOR.CHARGE_ID := p_CHARGE_ID;
+				SELECT NVL(MAX(ITERATOR_ID),0) + 1 INTO v_ITERATOR.ITERATOR_ID FROM FORMULA_CHARGE_ITERATOR WHERE CHARGE_ID = p_CHARGE_ID;
+				v_ITERATOR.ITERATOR1 := v_SOURCE_NAME;
+				v_ITERATOR.ITERATOR2 := v_SINK_NAME;
+				v_ITERATOR.ITERATOR3 := NULL;
+				v_ITERATOR.ITERATOR4 := NULL;
+				v_ITERATOR.ITERATOR5 := NULL;
+				PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+				v_ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+		END;
+	END IF;
+
+	RETURN v_ITERATOR_ID;
+END GET_SOURCE_SINK_ITERATOR_ID;
+----------------------------------------------------------------------------------------------------
+FUNCTION GET_FORMULA_CHARGE
+	(
+	p_CHARGE_ID IN NUMBER,
+	p_CHARGE_DATE IN DATE,
+	p_ITERATOR_ID IN NUMBER
+	) RETURN FORMULA_CHARGE%ROWTYPE IS
+
+	v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+BEGIN
+
+	BEGIN
+		SELECT * INTO v_FORMULA_CHARGE
+		FROM FORMULA_CHARGE
+		WHERE CHARGE_ID = p_CHARGE_ID
+			AND ITERATOR_ID = p_ITERATOR_ID
+			AND CHARGE_DATE = p_CHARGE_DATE;
+
+	EXCEPTION
+		WHEN NO_DATA_FOUND THEN
+			v_FORMULA_CHARGE.CHARGE_DATE := p_CHARGE_DATE;
+			v_FORMULA_CHARGE.CHARGE_FACTOR := 1.0;
+			v_FORMULA_CHARGE.ITERATOR_ID := p_ITERATOR_ID;
+			v_FORMULA_CHARGE.CHARGE_ID := p_CHARGE_ID;
+	END;
+
+	RETURN v_FORMULA_CHARGE;
+
+END GET_FORMULA_CHARGE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_LMP_FORMULA_CHARGE_VAR
+	(
+	p_CHARGE_ID IN NUMBER,
+	p_CHARGE_DATE IN DATE,
+	p_SOURCE_NAME IN VARCHAR2,
+	p_SINK_NAME IN VARCHAR2,
+	p_DA_LOAD IN NUMBER,
+	p_DA_GEN IN NUMBER,
+	p_DA_PURCH IN NUMBER,
+	p_DA_SALES IN NUMBER,
+	p_INC IN NUMBER,
+	p_DEC IN NUMBER,
+	p_RT_LOAD IN NUMBER,
+	p_RT_GEN IN NUMBER,
+	p_RT_PURCH IN NUMBER,
+	p_RT_SALES IN NUMBER
+	) AS
+
+	v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+	v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+	v_ITERATOR_ID NUMBER(9);
+
+
+	PROCEDURE ADD_VAR
+		(
+		p_VAR_NAME IN VARCHAR2,
+		p_VAR_VAL IN NUMBER
+		) AS
+	BEGIN
+
+		IF NOT p_VAR_VAL IS NULL THEN
+			v_FORMULA_CHARGE_VAR.VARIABLE_NAME := p_VAR_NAME;
+			v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_VAR_VAL;
+			PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		END IF;
+	END ADD_VAR;
+BEGIN
+	-- null charge ID? then skip it
+	IF p_CHARGE_ID IS NULL THEN RETURN; END IF;
+
+	v_ITERATOR_ID := GET_SOURCE_SINK_ITERATOR_ID(p_CHARGE_ID, p_SOURCE_NAME, p_SINK_NAME);
+
+	v_FORMULA_CHARGE_VAR.CHARGE_DATE := p_CHARGE_DATE;
+	v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR_ID;
+	v_FORMULA_CHARGE_VAR.CHARGE_ID := p_CHARGE_ID;
+
+	--ADD FORMULA CHARGE VARIABLES IF VALUES ARE NOT NULL.
+	ADD_VAR('DALoad', p_DA_LOAD);
+	ADD_VAR('DAGen', -1 * p_DA_GEN);
+	ADD_VAR('DAPurch', -1 * p_DA_PURCH);
+	ADD_VAR('DASales', p_DA_SALES);
+	ADD_VAR('Inc', -1 * p_INC);
+	ADD_VAR('Dec', p_DEC);
+	ADD_VAR('RTLoad', p_RT_LOAD);
+	ADD_VAR('RTGen', -1 * p_RT_GEN);
+	ADD_VAR('RTPurch', -1 * p_RT_PURCH);
+	ADD_VAR('RTSales', p_RT_SALES);
+
+	--MAKE SURE A FORMULA CHARGE ROW EXISTS.
+	v_FORMULA_CHARGE := GET_FORMULA_CHARGE(p_CHARGE_ID, p_CHARGE_DATE, v_ITERATOR_ID);
+	PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+END PUT_LMP_FORMULA_CHARGE_VAR;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_LMP_FORMULA_CHARGE_VAR_RT
+	(
+	p_CHARGE_ID IN NUMBER,
+	p_CHARGE_DATE IN DATE,
+	p_SINK_NAME IN VARCHAR2,
+	p_SOURCE_NAME IN VARCHAR2,
+	p_RT_LOAD IN NUMBER,
+	p_RT_GEN IN NUMBER,
+	p_RT_PURCH IN NUMBER,
+	p_RT_SALES IN NUMBER
+	) AS
+BEGIN
+	PUT_LMP_FORMULA_CHARGE_VAR(p_CHARGE_ID, p_CHARGE_DATE, p_SINK_NAME, p_SOURCE_NAME, NULL, NULL, NULL, NULL, NULL, NULL,
+			p_RT_LOAD, p_RT_GEN, p_RT_PURCH, p_RT_SALES);
+END PUT_LMP_FORMULA_CHARGE_VAR_RT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_LMP_FORMULA_CHARGE_VAR_DA
+	(
+	p_CHARGE_ID IN NUMBER,
+	p_CHARGE_DATE IN DATE,
+	p_SOURCE_NAME IN VARCHAR2,
+	p_SINK_NAME IN VARCHAR2,
+	p_DA_LOAD IN NUMBER,
+	p_DA_GEN IN NUMBER,
+	p_DA_PURCH IN NUMBER,
+	p_DA_SALES IN NUMBER,
+	p_INC IN NUMBER,
+	p_DEC IN NUMBER
+	) AS
+BEGIN
+	PUT_LMP_FORMULA_CHARGE_VAR(p_CHARGE_ID, p_CHARGE_DATE, p_SINK_NAME, p_SOURCE_NAME,
+			p_DA_LOAD, p_DA_GEN, p_DA_PURCH, p_DA_SALES, p_INC, p_DEC, NULL, NULL, NULL, NULL);
+END PUT_LMP_FORMULA_CHARGE_VAR_DA;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_LMP_FORMULA_CHARGE
+	(
+	p_CHARGE_ID IN NUMBER,
+	p_CHARGE_DATE IN DATE,
+	p_SOURCE_NAME IN VARCHAR2,
+	p_SINK_NAME IN VARCHAR2,
+	p_CHARGE_QUANTITY IN NUMBER,
+	p_CHARGE_RATE IN NUMBER,
+	p_CHARGE_AMOUNT IN NUMBER,
+	p_CHARGE_FACTOR IN NUMBER
+	) AS
+
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_ITERATOR_ID NUMBER(9);
+BEGIN
+	-- null charge ID? then skip it
+	IF p_CHARGE_ID IS NULL THEN RETURN; END IF;
+
+	v_ITERATOR_ID := GET_SOURCE_SINK_ITERATOR_ID(p_CHARGE_ID, p_SOURCE_NAME, p_SINK_NAME);
+	v_FORMULA_CHARGE := GET_FORMULA_CHARGE(p_CHARGE_ID, p_CHARGE_DATE, v_ITERATOR_ID);
+
+
+--	IF p_CHARGE_RATE IS NULL AND v_FORMULA_CHARGE.CHARGE_RATE IS NULL THEN
+--		v_FORMULA_CHARGE.CHARGE_RATE := NVL(p_PRICE1,0)-NVL(p_PRICE2,0);
+
+	IF NOT p_CHARGE_RATE IS NULL THEN v_FORMULA_CHARGE.CHARGE_RATE := p_CHARGE_RATE; END IF;
+	IF NOT p_CHARGE_QUANTITY IS NULL THEN v_FORMULA_CHARGE.CHARGE_QUANTITY := p_CHARGE_QUANTITY; END IF;
+	IF NOT p_CHARGE_FACTOR IS NULL THEN v_FORMULA_CHARGE.CHARGE_FACTOR := p_CHARGE_FACTOR; END IF;
+	IF NOT p_CHARGE_AMOUNT IS NULL THEN v_FORMULA_CHARGE.CHARGE_AMOUNT := p_CHARGE_AMOUNT; END IF;
+
+	PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+END PUT_LMP_FORMULA_CHARGE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_LMP_FORMULA_CHARGE
+	(
+	p_CHARGE_ID IN NUMBER,
+	p_CHARGE_DATE IN DATE,
+	p_CHARGE_QUANTITY IN NUMBER,
+	p_CHARGE_RATE IN NUMBER,
+	p_CHARGE_AMOUNT IN NUMBER,
+	p_CHARGE_FACTOR IN NUMBER
+	) AS
+--NO ITERATOR NECESSARY.
+BEGIN
+	PUT_LMP_FORMULA_CHARGE(p_CHARGE_ID, p_CHARGE_DATE, NULL, NULL,
+		p_CHARGE_QUANTITY, p_CHARGE_RATE, p_CHARGE_AMOUNT, p_CHARGE_FACTOR);
+END PUT_LMP_FORMULA_CHARGE;
+----------------------------------------------------------------------------------------------------
+FUNCTION PUT_SERVICE_POINT(p_POINT_NAME IN VARCHAR2)
+	RETURN SERVICE_POINT.SERVICE_POINT_ID%TYPE IS
+	v_SERVICE_POINT_ID SERVICE_POINT.SERVICE_POINT_ID%TYPE;
+BEGIN
+	IO.PUT_SERVICE_POINT(o_OID                     => v_SERVICE_POINT_ID,
+											 p_SERVICE_POINT_NAME      => p_POINT_NAME,
+											 p_SERVICE_POINT_ALIAS     => p_POINT_NAME,
+											 p_SERVICE_POINT_DESC      => 'Created by MarketManager',
+											 p_SERVICE_POINT_ID        => 0,
+											 p_SERVICE_POINT_TYPE      => 'Retail',
+											 p_TP_ID                   => 0,
+											 p_CA_ID                   => 0,
+											 p_EDC_ID                  => 0,
+											 p_ROLLUP_ID               => 0,
+											 p_SERVICE_REGION_ID       => 0,
+											 p_SERVICE_AREA_ID         => 0,
+											 p_SERVICE_ZONE_ID         => 0,
+											 p_TIME_ZONE               => local_time_zone,
+											 p_LATITUDE                => NULL,
+											 p_LONGITUDE               => NULL,
+											 p_EXTERNAL_IDENTIFIER     => NULL,
+											 p_IS_INTERCONNECT         => 0,
+											 p_NODE_TYPE               => 'Bus',
+											 p_SERVICE_POINT_NERC_CODE => NULL,
+											 p_PIPELINE_ID => 0,
+											 p_MILE_MARKER => 0
+											 );
+  RETURN v_SERVICE_POINT_ID;
+END PUT_SERVICE_POINT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE UPDATE_COMBINATION_CHARGE
+	(
+	p_CHARGE_ID IN NUMBER,
+	p_COMBINED_CHARGE_ID IN NUMBER,
+	p_CHARGE_TABLE IN VARCHAR2,
+    p_MULTIPLIER IN NUMBER := 1,
+    p_DATE IN DATE := SYSDATE,
+    p_COMPONENT_ID IN NUMBER := 0
+	) AS
+v_CHARGE_QUANTITY NUMBER;
+v_CHARGE_RATE NUMBER;
+v_CHARGE_AMOUNT NUMBER;
+v_TEST NUMBER;
+BEGIN
+	IF p_CHARGE_TABLE = 'LMP' THEN
+		SELECT SUM(CHARGE_QUANTITY), AVG(CHARGE_RATE), SUM(CHARGE_AMOUNT)
+		INTO v_CHARGE_QUANTITY, v_CHARGE_RATE, v_CHARGE_AMOUNT
+		FROM LMP_CHARGE
+		WHERE CHARGE_ID = p_COMBINED_CHARGE_ID;
+	ELSIF p_CHARGE_TABLE = 'FTR' THEN
+		SELECT SUM(CHARGE_QUANTITY), AVG(CHARGE_RATE), SUM(CHARGE_AMOUNT)
+		INTO v_CHARGE_QUANTITY, v_CHARGE_RATE, v_CHARGE_AMOUNT
+		FROM FTR_CHARGE
+		WHERE CHARGE_ID = p_COMBINED_CHARGE_ID;
+	/*ELSIF p_CHARGE_TABLE = 'FORMULA' THEN
+		SELECT SUM(CHARGE_QUANTITY), AVG(CHARGE_RATE), SUM(CHARGE_AMOUNT)
+		INTO v_CHARGE_QUANTITY, v_CHARGE_RATE, v_CHARGE_AMOUNT
+		FROM FORMULA_CHARGE
+		WHERE CHARGE_ID = p_COMBINED_CHARGE_ID;
+	ELSIF p_CHARGE_TABLE = 'COMBINATION' THEN
+		SELECT SUM(CHARGE_QUANTITY), AVG(CHARGE_RATE), SUM(CHARGE_AMOUNT)
+		INTO v_CHARGE_QUANTITY, v_CHARGE_RATE, v_CHARGE_AMOUNT
+		FROM COMBINATION_CHARGE
+		WHERE CHARGE_ID = p_COMBINED_CHARGE_ID;*/
+    ELSIF p_CHARGE_TABLE = 'FORMULA' THEN
+		SELECT SUM(CHARGE_QUANTITY), SUM(CHARGE_AMOUNT)
+		INTO v_CHARGE_QUANTITY, v_CHARGE_AMOUNT
+		FROM FORMULA_CHARGE
+		WHERE CHARGE_ID = p_COMBINED_CHARGE_ID;
+        IF v_CHARGE_QUANTITY <> 0 THEN
+            v_CHARGE_RATE := v_CHARGE_AMOUNT / v_CHARGE_QUANTITY;
+        ELSE
+            v_CHARGE_RATE := 0;
+        END IF;
+	ELSIF p_CHARGE_TABLE = 'COMBINATION' THEN
+		SELECT SUM(CHARGE_QUANTITY), AVG(CHARGE_RATE), SUM(CHARGE_AMOUNT)
+		INTO v_CHARGE_QUANTITY, v_CHARGE_RATE, v_CHARGE_AMOUNT
+		FROM COMBINATION_CHARGE
+		WHERE CHARGE_ID = p_COMBINED_CHARGE_ID;
+        IF v_CHARGE_QUANTITY <> 0 THEN
+            v_CHARGE_RATE := v_CHARGE_AMOUNT / v_CHARGE_QUANTITY;
+        ELSE
+            v_CHARGE_RATE := 0;
+        END IF;
+	END IF;
+
+	BEGIN
+        SELECT CHARGE_ID INTO v_TEST
+        FROM COMBINATION_CHARGE
+        WHERE CHARGE_ID = p_CHARGE_ID
+        AND COMBINED_CHARGE_ID = p_COMBINED_CHARGE_ID;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            INSERT INTO COMBINATION_CHARGE (
+			CHARGE_ID, COMPONENT_ID, BEGIN_DATE, END_DATE,
+			COMBINED_CHARGE_ID, CHARGE_VIEW_TYPE, COEFFICIENT,
+			CHARGE_FACTOR, ENTRY_DATE)
+		VALUES (
+			p_CHARGE_ID, p_COMPONENT_ID, p_DATE, p_DATE,
+			p_COMBINED_CHARGE_ID, p_CHARGE_TABLE, 1.0,
+			1.0, SYSDATE);
+        END;
+
+    UPDATE COMBINATION_CHARGE
+		SET CHARGE_QUANTITY = v_CHARGE_QUANTITY,
+			CHARGE_RATE = v_CHARGE_RATE,
+			CHARGE_AMOUNT = p_MULTIPLIER * v_CHARGE_AMOUNT
+		WHERE CHARGE_ID = p_CHARGE_ID
+			AND COMBINED_CHARGE_ID = p_COMBINED_CHARGE_ID;
+END UPDATE_COMBINATION_CHARGE;
+----------------------------------------------------------------------------------------------------
+-- These routines are private routines used by the public ones for actually putting the data
+-- into RO/MM tables.
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_MONTHLY_STATEMENT
+	(
+	p_RECORDS IN MEX_PJM_MONTHLY_STMNT_MSRS_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+v_PSE_ID NUMBER(9);
+v_PRODUCT_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_BILLING_STATEMENT BILLING_STATEMENT%ROWTYPE;
+v_INVOICE_ROW INVOICE%ROWTYPE;
+v_NUM_LINE_ITEMS NUMBER;
+v_INVOICE_LINE_ITEM INVOICE_LINE_ITEM%ROWTYPE;
+v_INVOICE_ADJ_LINE_ITEM INVOICE_USER_LINE_ITEM%ROWTYPE;
+v_IDX BINARY_INTEGER;
+v_AS_OF_DATE DATE := SYSDATE;
+v_AMT NUMBER;
+v_TOTAL_SO_FAR NUMBER := 0;
+v_COMP_NAME COMPONENT.COMPONENT_NAME%TYPE;
+v_COMP_EXT_IDENT COMPONENT.EXTERNAL_IDENTIFIER%TYPE;
+v_SOURCE_BILL_START VARCHAR2(8);
+BEGIN
+  p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+	IF NOT GA.VERSION_STATEMENT THEN
+		v_AS_OF_DATE := LOW_DATE;
+	END IF;
+
+	v_PSE_ID := GET_PSE(p_RECORDS(v_IDX).ORG_ID, p_RECORDS(v_IDX).ORG_NAME);
+
+    -- clear out existing/old invoice
+    DELETE INVOICE WHERE ENTITY_ID = v_PSE_ID
+          AND STATEMENT_TYPE = g_STATEMENT_TYPE
+		  AND STATEMENT_STATE = g_EXTERNAL_STATE
+          AND BEGIN_DATE = p_RECORDS(v_IDX).BEGIN_DATE
+		  AND AS_OF_DATE = v_AS_OF_DATE;
+    DELETE INVOICE_USER_LINE_ITEM WHERE ENTITY_ID = v_PSE_ID
+          AND STATEMENT_TYPE = g_STATEMENT_TYPE
+		  AND STATEMENT_STATE = g_EXTERNAL_STATE
+          AND BEGIN_DATE = p_RECORDS(v_IDX).BEGIN_DATE;
+
+    PC.GET_INVOICE (v_PSE_ID,'PSE',g_STATEMENT_TYPE, p_RECORDS(v_IDX).BEGIN_DATE, v_AS_OF_DATE, v_INVOICE_ROW);
+    -- is this an existing internal invoice?
+    SELECT COUNT(*) INTO v_NUM_LINE_ITEMS FROM INVOICE_LINE_ITEM
+    WHERE INVOICE_ID = v_INVOICE_ROW.INVOICE_ID;
+    IF v_NUM_LINE_ITEMS > 0 THEN
+        -- existing invoice? then don't overwrite it - get new ID before doing PUT
+        SELECT BID.NEXTVAL INTO v_INVOICE_ROW.INVOICE_ID FROM DUAL;
+    END IF;
+    v_INVOICE_ROW.STATEMENT_STATE := g_EXTERNAL_STATE;
+	v_INVOICE_ROW.END_DATE := p_RECORDS(v_IDX).END_DATE;
+    v_INVOICE_ROW.INVOICE_DATE := p_RECORDS(v_IDX).END_DATE+1;
+    -- save invoice
+    PC.PUT_INVOICE(v_INVOICE_ROW);
+	-- init line item records
+	v_INVOICE_LINE_ITEM.INVOICE_ID := v_INVOICE_ROW.INVOICE_ID;
+	v_INVOICE_LINE_ITEM.STATEMENT_TYPE := g_STATEMENT_TYPE;
+	v_INVOICE_LINE_ITEM.BEGIN_DATE := v_INVOICE_ROW.BEGIN_DATE;
+	v_INVOICE_LINE_ITEM.END_DATE := v_INVOICE_ROW.END_DATE;
+	v_INVOICE_LINE_ITEM.DEFAULT_DISPLAY := 'CHARGE';
+	v_INVOICE_LINE_ITEM.LINE_ITEM_OPTION := 'By Component';
+	v_INVOICE_ADJ_LINE_ITEM.ENTITY_ID := v_PSE_ID;
+	v_INVOICE_ADJ_LINE_ITEM.STATEMENT_TYPE := g_STATEMENT_TYPE;
+	v_INVOICE_ADJ_LINE_ITEM.STATEMENT_STATE := g_EXTERNAL_STATE;
+	v_INVOICE_ADJ_LINE_ITEM.BEGIN_DATE := p_RECORDS(v_IDX).BEGIN_DATE;
+	v_INVOICE_ADJ_LINE_ITEM.DEFAULT_DISPLAY := 'CHARGE';
+	v_INVOICE_ADJ_LINE_ITEM.LINE_ITEM_POSTED_DATE := v_INVOICE_ROW.INVOICE_DATE;
+	v_INVOICE_ADJ_LINE_ITEM.LINE_ITEM_TYPE := 'A';
+ 	-- init billing statement record
+	v_BILLING_STATEMENT.ENTITY_ID := v_PSE_ID;
+	v_BILLING_STATEMENT.ENTITY_TYPE := 'PSE';
+	v_BILLING_STATEMENT.STATEMENT_TYPE := g_STATEMENT_TYPE;
+	v_BILLING_STATEMENT.STATEMENT_STATE := g_EXTERNAL_STATE;
+	v_BILLING_STATEMENT.STATEMENT_DATE := p_RECORDS(v_IDX).BEGIN_DATE;
+	v_BILLING_STATEMENT.STATEMENT_END_DATE := p_RECORDS(v_IDX).END_DATE;
+	v_BILLING_STATEMENT.AS_OF_DATE := v_AS_OF_DATE;
+
+    -- now get invoice line items and billing statement items
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+		v_AMT := p_RECORDS(v_IDX).LINE_ITEM_AMOUNT;
+		IF p_RECORDS(v_IDX).IS_CREDIT = 1 THEN
+			v_AMT := -v_AMT;
+		END IF;
+
+		IF p_RECORDS(v_IDX).IS_TOTAL = 1 THEN
+        NULL;
+		--	IF ABS(v_TOTAL_SO_FAR) <> ABS(v_AMT) THEN
+				-- log error message
+			--	POST_TO_APP_EVENT_LOG('Admin','MM_PJM_SETTLEMENT_MSRS','Monthly Billing Statement','WARNING','PROCESS',
+			--						NULL,NULL,'Error importing statement: Total in statement file ('||v_AMT||') does not match total imported ('||v_TOTAL_SO_FAR||')',
+			--						GB.g_OSUSER);
+		--	END IF;
+		ELSE
+			v_TOTAL_SO_FAR := v_TOTAL_SO_FAR + v_AMT;
+
+            v_COMP_EXT_IDENT := 'PJM-' || p_RECORDS(v_IDX).CHARGE_ID;
+            IF p_RECORDS(v_IDX).IS_ADJUSTMENT = 1 THEN
+				v_SOURCE_BILL_START := TO_CHAR(p_RECORDS(v_IDX).BILL_PERIOD_START, 'Mon YYYY');
+                v_COMP_NAME := 'Adj. to ' || p_RECORDS(v_IDX).LINE_ITEM_NAME || ' - ' || v_SOURCE_BILL_START;
+            	v_COMP_EXT_IDENT := v_COMP_EXT_IDENT || '-A' || v_SOURCE_BILL_START;
+            ELSE
+            	v_COMP_NAME := 'PJM ' || p_RECORDS(v_IDX).LINE_ITEM_NAME;
+            END IF;
+
+            GET_PRODUCT_COMPONENT(v_COMP_NAME, v_COMP_EXT_IDENT, p_RECORDS(v_IDX).IS_CREDIT,v_PRODUCT_ID, v_COMPONENT_ID);
+
+                --don't delete / put billing_statement for daily charges
+                IF GET_IS_DAILY_CHARGE(v_COMPONENT_ID) = FALSE THEN
+                    DELETE BILLING_STATEMENT
+					 WHERE ENTITY_ID = v_PSE_ID
+					   AND COMPONENT_ID = v_COMPONENT_ID
+                       AND STATEMENT_TYPE = g_STATEMENT_TYPE
+					   AND STATEMENT_STATE = g_EXTERNAL_STATE
+                       AND STATEMENT_DATE = p_RECORDS(v_IDX).BEGIN_DATE
+					   AND AS_OF_DATE = v_AS_OF_DATE;
+    				v_BILLING_STATEMENT.PRODUCT_ID := v_PRODUCT_ID;
+    				v_BILLING_STATEMENT.COMPONENT_ID := v_COMPONENT_ID;
+    				v_BILLING_STATEMENT.CHARGE_VIEW_TYPE := 'BILLING CHARGE'; -- default - override when we import details
+    				v_BILLING_STATEMENT.CHARGE_QUANTITY := v_AMT;
+    				v_BILLING_STATEMENT.CHARGE_RATE := 1;
+    				v_BILLING_STATEMENT.CHARGE_AMOUNT := v_AMT;
+    				v_BILLING_STATEMENT.BILL_QUANTITY := v_BILLING_STATEMENT.CHARGE_QUANTITY;
+    				v_BILLING_STATEMENT.BILL_AMOUNT := v_BILLING_STATEMENT.CHARGE_AMOUNT;
+    				PC.GET_CHARGE_ID(v_BILLING_STATEMENT);
+                    PC.PUT_BILLING_STATEMENT(v_BILLING_STATEMENT);
+                END IF;
+				IF p_RECORDS(v_IDX).IS_CREDIT = 1 THEN
+                    v_INVOICE_LINE_ITEM.LINE_ITEM_NAME := p_RECORDS(v_IDX).LINE_ITEM_NAME || ' Credit';
+                ELSE
+                    v_INVOICE_LINE_ITEM.LINE_ITEM_NAME := p_RECORDS(v_IDX).LINE_ITEM_NAME || ' Charge';
+                END IF;
+                IF p_RECORDS(v_IDX).IS_ADJUSTMENT = 1 THEN
+                    v_INVOICE_LINE_ITEM.LINE_ITEM_NAME := 'Adj. to ' || v_INVOICE_LINE_ITEM.LINE_ITEM_NAME || ' - ' || v_SOURCE_BILL_START;
+                END IF;
+				v_INVOICE_LINE_ITEM.COMPONENT_ID := v_COMPONENT_ID;
+				v_INVOICE_LINE_ITEM.LINE_ITEM_QUANTITY := v_AMT;
+				v_INVOICE_LINE_ITEM.LINE_ITEM_RATE := 1;
+				v_INVOICE_LINE_ITEM.LINE_ITEM_AMOUNT := v_AMT;
+				v_INVOICE_LINE_ITEM.LINE_ITEM_BILL_AMOUNT := v_AMT;
+				PC.PUT_INVOICE_LINE_ITEM(v_INVOICE_LINE_ITEM);
+
+		END IF;
+		v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+  IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+    COMMIT;
+  END IF;
+END IMPORT_MONTHLY_STATEMENT;
+----------------------------------------------------------------------------------------------------
+ PROCEDURE IMPORT_MONTH_TO_DATE_BILL
+	(
+	p_RECORDS IN MEX_PJM_MONTH_TO_DATE_BILL_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+v_PSE_ID NUMBER(9);
+v_PRODUCT_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_BILLING_STATEMENT BILLING_STATEMENT%ROWTYPE;
+v_IDX BINARY_INTEGER;
+v_QTY_IDX BINARY_INTEGER;
+v_STATEMENT_DATE DATE;
+v_END_DATE DATE;
+v_AS_OF_DATE DATE := SYSDATE;
+v_AMT NUMBER;
+v_COMP_NAME COMPONENT.COMPONENT_NAME%TYPE;
+v_COMP_EXT_IDENT COMPONENT.EXTERNAL_IDENTIFIER%TYPE;
+v_SOURCE_BILL_START VARCHAR2(8);
+v_CHG_QUANTITIES PRICE_QUANTITY_SUMMARY_TABLE;
+v_TOTAL_SO_FAR NUMBER := 0;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF;
+
+	v_IDX := p_RECORDS.FIRST;
+	IF NOT GA.VERSION_STATEMENT THEN
+		v_AS_OF_DATE := LOW_DATE;
+	END IF;
+
+   --bugzilla 19459: quotes enclose account name
+    v_PSE_ID := GET_PSE(NULL, REPLACE(p_RECORDS(v_IDX).ORG_NAME,'"',''));   
+
+ 	-- init billing statement record
+	v_BILLING_STATEMENT.ENTITY_ID := v_PSE_ID;
+	v_BILLING_STATEMENT.ENTITY_TYPE := 'PSE';
+	v_BILLING_STATEMENT.STATEMENT_TYPE := g_STATEMENT_TYPE;
+	v_BILLING_STATEMENT.STATEMENT_STATE := g_EXTERNAL_STATE;
+	v_BILLING_STATEMENT.AS_OF_DATE := v_AS_OF_DATE;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_CHG_QUANTITIES := p_RECORDS(v_IDX).CHARGE_AMOUNT_TBL;
+        v_QTY_IDX := v_CHG_QUANTITIES.FIRST;
+
+        v_COMP_EXT_IDENT := 'PJM-' || p_RECORDS(v_IDX).CHARGE_ID;
+        IF p_RECORDS(v_IDX).IS_ADJ = 1 THEN
+            v_SOURCE_BILL_START := TO_CHAR(p_RECORDS(v_IDX).SOURCE_BILL_PERIOD, 'Mon YYYY');
+            v_COMP_NAME := 'Adj. to ' || p_RECORDS(v_IDX).LINE_ITEM_NAME || ' - ' || v_SOURCE_BILL_START;
+            v_COMP_EXT_IDENT := v_COMP_EXT_IDENT || '-A' || v_SOURCE_BILL_START;
+        ELSE
+            v_COMP_NAME := 'PJM ' || p_RECORDS(v_IDX).LINE_ITEM_NAME;
+        END IF;
+
+        GET_PRODUCT_COMPONENT(v_COMP_NAME, v_COMP_EXT_IDENT, p_RECORDS(v_IDX).IS_CREDIT, v_PRODUCT_ID, v_COMPONENT_ID);
+
+        WHILE v_CHG_QUANTITIES.EXISTS(v_QTY_IDX) LOOP
+            v_AMT := v_CHG_QUANTITIES(v_QTY_IDX).QUANTITY;
+            v_STATEMENT_DATE := v_CHG_QUANTITIES(v_QTY_IDX).SCHEDULE_DATE;
+
+            IF p_RECORDS(v_IDX).IS_ADJ = 1 THEN
+                v_END_DATE := LAST_DAY(v_STATEMENT_DATE);
+            ELSE
+                v_END_DATE := v_STATEMENT_DATE;
+            END IF;
+
+            v_TOTAL_SO_FAR := v_TOTAL_SO_FAR + v_AMT;
+
+            --monthly charges only display a total but we don't know they are monthly charges until
+            --the entire row is processed
+            IF v_CHG_QUANTITIES.COUNT = v_QTY_IDX THEN
+                IF p_RECORDS(v_IDX).IS_ADJ = 0 THEN
+                    IF ABS(p_RECORDS(v_IDX).TOTAL_CHARGE) > ABS(v_TOTAL_SO_FAR) THEN
+                        DELETE BILLING_STATEMENT
+                        WHERE ENTITY_ID = v_PSE_ID
+                        AND COMPONENT_ID = v_COMPONENT_ID
+                        AND STATEMENT_TYPE = g_STATEMENT_TYPE
+                        AND STATEMENT_STATE = g_EXTERNAL_STATE
+                        AND TRUNC(STATEMENT_DATE,'MM') = p_RECORDS(v_IDX).START_DATE
+                        AND AS_OF_DATE = v_AS_OF_DATE;
+
+                        v_STATEMENT_DATE :=  p_RECORDS(v_IDX).START_DATE;
+                        v_END_DATE := v_STATEMENT_DATE;
+                        v_AMT := p_RECORDS(v_IDX).TOTAL_CHARGE;
+                    END IF;
+                END IF;
+            END IF;
+
+		    IF p_RECORDS(v_IDX).IS_CREDIT = 1 THEN
+			    v_AMT := -v_AMT;
+		    END IF;
+
+            DELETE BILLING_STATEMENT
+            WHERE ENTITY_ID = v_PSE_ID
+            AND COMPONENT_ID = v_COMPONENT_ID
+            AND STATEMENT_TYPE = g_STATEMENT_TYPE
+            AND STATEMENT_STATE = g_EXTERNAL_STATE
+            AND STATEMENT_DATE = v_STATEMENT_DATE
+            AND STATEMENT_END_DATE = v_END_DATE
+            AND AS_OF_DATE = v_AS_OF_DATE;
+
+            v_BILLING_STATEMENT.PRODUCT_ID := v_PRODUCT_ID;
+            v_BILLING_STATEMENT.COMPONENT_ID := v_COMPONENT_ID;
+            v_BILLING_STATEMENT.STATEMENT_DATE := v_STATEMENT_DATE;
+            v_BILLING_STATEMENT.STATEMENT_END_DATE := v_END_DATE;
+            v_BILLING_STATEMENT.CHARGE_VIEW_TYPE := 'BILLING CHARGE'; -- default - override when we import details
+            v_BILLING_STATEMENT.CHARGE_QUANTITY := v_AMT;
+            v_BILLING_STATEMENT.CHARGE_RATE := 1;
+            v_BILLING_STATEMENT.CHARGE_AMOUNT := v_AMT;
+            v_BILLING_STATEMENT.BILL_QUANTITY := v_BILLING_STATEMENT.CHARGE_QUANTITY;
+            v_BILLING_STATEMENT.BILL_AMOUNT := v_BILLING_STATEMENT.CHARGE_AMOUNT;
+            PC.GET_CHARGE_ID(v_BILLING_STATEMENT);
+            PC.PUT_BILLING_STATEMENT(v_BILLING_STATEMENT);
+
+             -- fill schedule if non-shadowed charge
+            FILL_NON_SHADOWED_TXNS(v_PSE_ID, v_COMPONENT_ID, v_AMT, v_STATEMENT_DATE);
+
+            v_QTY_IDX := v_CHG_QUANTITIES.NEXT(v_QTY_IDX);
+        END LOOP;
+
+		v_IDX := p_RECORDS.NEXT(v_IDX);
+        v_TOTAL_SO_FAR := 0;
+	END LOOP;
+
+  IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+    COMMIT;
+  END IF;
+END IMPORT_MONTH_TO_DATE_BILL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SPOT_SUMMARY
+	(
+	p_STATUS OUT NUMBER
+	) AS
+v_DA_SPOT_CH_ID NUMBER(9);
+v_RT_SPOT_CH_ID NUMBER(9);
+v_DA_SPOT_CHG_COMP NUMBER(9);
+v_BAL_SPOT_CHG_COMP NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE;
+
+
+CURSOR p_SPOT IS
+    SELECT * FROM PJM_SPOT_MARKET_ENERGY_SUMMARY
+    ORDER BY CUT_DATE;
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+    v_DA_SPOT_CHG_COMP := GET_COMPONENT(g_DA_SPOT_COMP_NAME, g_DA_SPOT_CHG_COMP_IDENT, 0);
+    v_BAL_SPOT_CHG_COMP := GET_COMPONENT(g_BAL_SPOT_COMP_NAME, g_BAL_SPOT_CHG_COMP_IDENT, 0);
+
+    FOR v_SPOT IN p_SPOT LOOP
+
+        IF v_LAST_ORG_ID <> v_SPOT.Org_Nid
+            OR v_LAST_DATE <> TRUNC(FROM_CUT(v_SPOT.CUT_DATE , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400) THEN
+
+            v_LAST_ORG_ID := v_SPOT.Org_Nid;
+			v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+            v_LAST_DATE := TRUNC(FROM_CUT(v_SPOT.CUT_DATE , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+
+			-- get charge IDs
+			v_DA_SPOT_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_DA_SPOT_CHG_COMP,v_LAST_DATE,'Formula');
+			v_RT_SPOT_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_BAL_SPOT_CHG_COMP,v_LAST_DATE,'Formula');
+
+		END IF;
+
+		-- put the data
+        v_CHARGE_DATE := v_SPOT.CUT_DATE;
+
+        IF NOT v_SPOT.Da_Spot_Market_Energy_Charge IS NULL THEN
+
+            PUT_LMP_FORMULA_CHARGE(v_DA_SPOT_CH_ID,v_CHARGE_DATE,
+    							v_SPOT.Da_Spot_Market_Net_Interchange,
+    							v_SPOT.Da_Pjm_Energy_Price,
+    							v_SPOT.Da_Spot_Market_Energy_Charge, 1);
+		END IF;
+
+        IF NOT v_SPOT.Bal_Spot_Market_Energy_Charge IS NULL THEN
+
+            PUT_LMP_FORMULA_CHARGE(v_RT_SPOT_CH_ID,v_CHARGE_DATE,
+    							v_SPOT.Rt_Spot_Market_Net_Interchange - v_SPOT.Da_Spot_Market_Net_Interchange,
+    							v_SPOT.Rt_Pjm_Energy_Price,
+    							v_SPOT.Bal_Spot_Market_Energy_Charge, 1);
+		END IF;
+
+	END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+    DELETE FROM PJM_SPOT_MARKET_ENERGY_SUMMARY;
+    COMMIT;
+
+END IMPORT_SPOT_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_CONGESTION_SUMMARY
+	(
+	p_STATUS OUT NUMBER
+	) AS
+
+v_DA_CONG_CH_ID NUMBER(9);
+v_DA_CONG_CH_ID_IMP NUMBER(9);
+v_RT_CONG_CH_ID NUMBER(9);
+v_RT_CONG_CH_ID_IMP NUMBER(9);
+v_RT_SPOT_CH_ID NUMBER(9);
+v_CONG_CR_FTR_ID NUMBER(9);
+v_CONG_CR_ID NUMBER(9);
+v_CONG_CR_MISC_ID NUMBER(9);
+v_ALLOC_FACTOR_TX_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_DA_CONG_COMP NUMBER(9);
+v_BAL_CONG_COMP NUMBER(9);
+v_CONG_CRED_COMP NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_CONTRACT_ID NUMBER(9);
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_UTS_ALLOC_TX_ID NUMBER(9);
+v_MONTHLY_ALLOC_TX_ID NUMBER(9);
+v_CHARGE_RATE NUMBER;
+v_CHARGE_AMOUNT NUMBER;
+v_ALLOC_FACTOR NUMBER;
+v_PSE_NAME VARCHAR2(32);
+v_FTR_TARGET_ALLOC_TOTAL NUMBER := 0;
+v_FTR_CONG_CRED_TOTAL NUMBER := 0;
+v_CONG_FLAG_TXN NUMBER(9);
+v_TEST NUMBER;
+
+CURSOR p_CONG IS
+	SELECT * FROM PJM_CONGESTION_SUMMARY C
+    ORDER BY C.CUT_DATE;
+
+	PROCEDURE ROLL_UP_SPOT_CHARGE
+		(
+		p_CHARGE_CHARGE_ID IN NUMBER,
+		p_CREDIT_CHARGE_ID IN NUMBER,
+		p_RESULT_CHARGE_ID IN NUMBER
+		) IS
+		v_CHARGE_AMOUNT NUMBER;
+		v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+	--Roll the Spot Charge up to the monthly **Cong:Spot charge so that
+	--it can be used in the total Congestion Charge comparison.
+	BEGIN
+		SELECT SUM(A.CHARGE_AMOUNT)
+		INTO v_CHARGE_AMOUNT
+		FROM FORMULA_CHARGE A
+		WHERE A.CHARGE_ID IN (p_CHARGE_CHARGE_ID, p_CREDIT_CHARGE_ID)
+			AND A.ITERATOR_ID = 0;
+
+		v_FORMULA_CHARGE.CHARGE_ID := p_RESULT_CHARGE_ID;
+		v_FORMULA_CHARGE.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE.CHARGE_DATE := v_LAST_DATE;
+		v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_AMOUNT;
+		v_FORMULA_CHARGE.CHARGE_RATE := 1;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT := v_CHARGE_AMOUNT;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+	END ROLL_UP_SPOT_CHARGE;
+
+	PROCEDURE UPDATE_COMBINATION_CHARGES IS
+    v_COMPONENT NUMBER(9);
+	BEGIN
+		--for combination charges use old external identifier when getting the component_id
+		--for formula charges use the new PJM code when getting the component_id
+		--Roll everything all the values up the combination tree.
+		IF NOT v_DA_CONG_CH_ID IS NULL THEN
+			UPDATE_COMBINATION_CHARGE(v_DA_CONG_CH_ID,v_DA_CONG_CH_ID_IMP,'FORMULA',1, v_LAST_DATE, GET_COMPONENT(NULL, 'PJM:DATransCongChg:Imp', NULL));
+            --this was combination
+		END IF;
+
+		IF NOT v_RT_CONG_CH_ID IS NULL THEN
+			UPDATE_COMBINATION_CHARGE(v_RT_CONG_CH_ID,v_RT_CONG_CH_ID_IMP,'FORMULA', 1, v_LAST_DATE, GET_COMPONENT(NULL, 'PJM:BalTransCongChg:Imp', NULL));
+		END IF;
+
+		IF NOT v_CONG_CR_ID IS NULL THEN
+			UPDATE_COMBINATION_CHARGE(v_CONG_CR_ID, v_CONG_CR_MISC_ID, 'FORMULA',-1, v_LAST_DATE, GET_COMPONENT(NULL, 'PJM:TxCongCred:Misc', NULL));
+            --UPDATE FTR portion
+            IF v_FTR_TARGET_ALLOC_TOTAL <> 0 THEN
+                v_CHARGE_RATE := v_FTR_CONG_CRED_TOTAL / v_FTR_TARGET_ALLOC_TOTAL;
+            ELSE
+                v_CHARGE_RATE := 0;
+            END IF;
+
+            BEGIN
+                SELECT CHARGE_ID INTO v_TEST
+                FROM COMBINATION_CHARGE
+                WHERE CHARGE_ID = v_CONG_CR_ID
+                AND COMBINED_CHARGE_ID = v_CONG_CR_FTR_ID;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                v_COMPONENT := GET_COMPONENT(NULL, 'PJM:TransCongCred:FTR', NULL);
+                INSERT INTO COMBINATION_CHARGE (
+    			CHARGE_ID, COMPONENT_ID, BEGIN_DATE, END_DATE,
+    			COMBINED_CHARGE_ID, CHARGE_VIEW_TYPE, COEFFICIENT,
+    			CHARGE_FACTOR, ENTRY_DATE)
+    		VALUES (
+    			v_CONG_CR_ID, v_COMPONENT, v_LAST_DATE, v_LAST_DATE,
+    			v_CONG_CR_FTR_ID, 'FTR', 1.0,
+			    1.0, SYSDATE);
+        END;
+
+            UPDATE COMBINATION_CHARGE
+		    SET CHARGE_QUANTITY = v_FTR_TARGET_ALLOC_TOTAL,
+			CHARGE_RATE = v_CHARGE_RATE,
+			CHARGE_AMOUNT = -v_FTR_CONG_CRED_TOTAL
+		    WHERE CHARGE_ID = v_CONG_CR_ID
+			AND COMBINED_CHARGE_ID = v_CONG_CR_FTR_ID;
+		END IF;
+	END;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+	--get component_id for 'PJM:DATxCongChg' --1210
+    v_DA_CONG_COMP := GET_COMPONENT(g_DA_TX_CONG_COMP_NAME, g_DA_TX_CONG_CHG_COMP_IDENT, 0);
+    --get component_id for 'PJM:BalTxCongChg' --1215
+	v_BAL_CONG_COMP := GET_COMPONENT(g_BAL_TX_CONG_COMP_NAME, g_BAL_TX_CONG_CHG_COMP_IDENT, 0);
+	--get component_id for 'PJM:TxCongCr' --2210
+    v_CONG_CRED_COMP := GET_COMPONENT(g_TX_CONG_COMP_NAME, g_TX_CONG_CR_COMP_IDENT, 1);
+
+    FOR v_CONG IN p_CONG LOOP
+        --v_UPDATE := TRUE;
+        IF v_LAST_ORG_ID <> v_CONG.Org_Nid OR
+            v_LAST_DATE <> TRUNC(FROM_CUT(v_CONG.CUT_DATE , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400) THEN
+		    -- flush last month's charges to combination charge table
+			UPDATE_COMBINATION_CHARGES;
+
+            IF v_LAST_DATE <> LOW_DATE THEN
+                v_FTR_CONG_CRED_TOTAL := 0;
+                v_FTR_TARGET_ALLOC_TOTAL := 0;
+            END IF;
+		   	-- get charge IDs for this month and this PSE.  Build the combo tree if it does not exist.
+            v_LAST_ORG_ID := v_CONG.Org_Nid;
+			v_LAST_DATE := TRUNC(FROM_CUT(v_CONG.CUT_DATE , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+			v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+
+            SELECT PSE_ALIAS INTO v_PSE_NAME FROM PURCHASING_SELLING_ENTITY
+    		WHERE PSE_ID = v_PSE_ID;
+			v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+
+            v_CONG_FLAG_TXN := GET_TX_ID('PJMCongestionFlag:' || v_PSE_NAME, 'Congestion Flag',
+                                        'PJMCongestionFlag:' || v_PSE_NAME, 'Hour', 0, v_CONTRACT_ID);
+
+			v_DA_CONG_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_DA_CONG_COMP,v_LAST_DATE,'COMBINATION');
+			v_COMPONENT_ID := GET_COMPONENT(NULL, 'PJM:DATransCongChg:Imp', NULL);
+			v_DA_CONG_CH_ID_IMP := GET_COMBO_CHARGE_ID(v_DA_CONG_CH_ID,v_COMPONENT_ID,v_LAST_DATE,'Formula', TRUE);
+
+			v_RT_CONG_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_BAL_CONG_COMP,v_LAST_DATE,'COMBINATION');
+			v_COMPONENT_ID := GET_COMPONENT(NULL, 'PJM:BalTransCongChg:Imp', NULL);
+			v_RT_CONG_CH_ID_IMP := GET_COMBO_CHARGE_ID(v_RT_CONG_CH_ID,v_COMPONENT_ID,v_LAST_DATE,'Formula', TRUE);
+
+			v_CONG_CR_ID := GET_CHARGE_ID(v_PSE_ID, v_CONG_CRED_COMP, v_LAST_DATE, 'COMBINATION');
+			v_COMPONENT_ID := GET_COMPONENT(NULL, 'PJM:TxCongCred:Misc', NULL);
+			v_CONG_CR_MISC_ID := GET_COMBO_CHARGE_ID(v_CONG_CR_ID, v_COMPONENT_ID, v_LAST_DATE, 'Formula', TRUE);
+            v_COMPONENT_ID := GET_COMPONENT(NULL, 'PJM:TransCongCred:FTR', NULL);
+			v_CONG_CR_FTR_ID := GET_COMBO_CHARGE_ID(v_CONG_CR_ID, v_COMPONENT_ID, v_LAST_DATE, 'FTR', TRUE);
+
+			--Get the Transaction IDS to store internal results for the CREDIT.
+			v_UTS_ALLOC_TX_ID := GET_TX_ID(NULL, 'UTSAlloc', 'UTS Allocation', 'Hour', 0, v_CONTRACT_ID);
+			v_MONTHLY_ALLOC_TX_ID := GET_TX_ID(NULL, 'MonthlyAlloc', 'Monthly Excess Allocation', 'Hour', 0, v_CONTRACT_ID);
+
+		END IF;
+
+		-- put the Implicit Transmission Congestion Charges.
+        v_CHARGE_DATE := v_CONG.CUT_DATE;
+
+        PUT_SCHEDULE_VALUE(v_CONG_FLAG_TXN, v_CHARGE_DATE, 1);
+
+		--===========DAY-AHEAD=======================
+
+		--Put CHARGE_QUANTITY, RATE, AND AMOUNT for the Net Energy Bill Component.
+       --this should be for implicit now
+        PUT_LMP_FORMULA_CHARGE(v_DA_CONG_CH_ID_IMP, v_CHARGE_DATE,
+					v_CONG.Day_Ahead_Cong_Wd_Mwh-v_CONG.Day_Ahead_Cong_Inj_Mwh,
+					CASE
+						WHEN v_CONG.Day_Ahead_Cong_Wd_Mwh-v_CONG.Day_Ahead_Cong_Inj_Mwh = 0 THEN
+							NULL
+						ELSE
+							v_CONG.Day_Ahead_Imp_Cong_Charge /
+								(v_CONG.Day_Ahead_Cong_Wd_Mwh-v_CONG.Day_Ahead_Cong_Inj_Mwh)
+					END,
+					v_CONG.Day_Ahead_Imp_Cong_Charge, 1);
+
+ 		--Put DALoad and DAGen
+         --this should be for implicit now
+ 		PUT_LMP_FORMULA_CHARGE_VAR_DA(v_DA_CONG_CH_ID_IMP, v_CHARGE_DATE,
+					NULL, NULL, --ITERATORs not used because PJM does not provide that level of detail.
+ 					v_CONG.Day_Ahead_Cong_Wd_Mwh, -1 * v_CONG.Day_Ahead_Cong_Inj_Mwh,
+ 					NULL, NULL, NULL, NULL);
+
+		--===========REAL-TIME========================
+		--Put CHARGE_QUANTITY, RATE, AND AMOUNT.
+        PUT_LMP_FORMULA_CHARGE(v_RT_CONG_CH_ID_IMP, v_CHARGE_DATE,
+					v_CONG.Balancing_Cong_Wd_Dev_Mwh-v_CONG.Balancing_Cong_Inj_Dev_Mwh,
+					CASE
+						WHEN v_CONG.Balancing_Cong_Wd_Dev_Mwh-v_CONG.Balancing_Cong_Inj_Dev_Mwh = 0 THEN
+							NULL
+						ELSE
+							v_CONG.Balancing_Imp_Cong_Charge /
+								(v_CONG.Balancing_Cong_Wd_Dev_Mwh-v_CONG.Balancing_Cong_Inj_Dev_Mwh)
+					END,
+					v_CONG.Balancing_Imp_Cong_Charge, 1);
+
+		--Put DALoad, DAGen, RTLoad, and RTGen.
+		PUT_LMP_FORMULA_CHARGE_VAR(v_RT_CONG_CH_ID_IMP, v_CHARGE_DATE,
+					NULL, NULL, --ITERATORs not used because PJM does not provide that level of detail.
+					v_CONG.Day_Ahead_Cong_Wd_Mwh, -1 * v_CONG.Day_Ahead_Cong_Inj_Mwh,
+					NULL, NULL, NULL, NULL,
+					v_CONG.Day_Ahead_Cong_Wd_Mwh+v_CONG.Balancing_Cong_Wd_Dev_Mwh,
+					-1 * (v_CONG.Day_Ahead_Cong_Inj_Mwh+v_CONG.Balancing_Cong_Inj_Dev_Mwh),
+					NULL, NULL
+					);
+
+		-- put the rt gen+purch and rt load+sales into charges and credits, so we can
+		-- subtract out purch and sales once we import the rt daily txn report. Fix to bug 10900
+		PUT_LMP_FORMULA_CHARGE_VAR_RT(v_RT_SPOT_CH_ID, v_CHARGE_DATE, NULL, NULL,
+					v_CONG.Day_Ahead_Cong_Wd_Mwh+v_CONG.Balancing_Cong_Wd_Dev_Mwh,
+					-1 * (v_CONG.Day_Ahead_Cong_Inj_Mwh+v_CONG.Balancing_Cong_Inj_Dev_Mwh),
+					NULL, NULL);
+
+--===========CREDITS========================
+		--Put the Congestion Credit Misc Variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_CONG_CR_MISC_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'UTSAlloc';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := NVL(v_CONG.Credit_From_Uts, 0);
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		PUT_SCHEDULE_VALUE(v_UTS_ALLOC_TX_ID, v_CHARGE_DATE, NVL(v_CONG.Credit_From_Uts, 0), NULL, TRUE);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'MonthlyAlloc';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_CONG.Credit_For_Monthly_Excess;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		PUT_SCHEDULE_VALUE(v_MONTHLY_ALLOC_TX_ID, v_CHARGE_DATE, v_CONG.Credit_For_Monthly_Excess, NULL, TRUE);
+
+		--Put the Congestion Credit Misc Formula Charge.
+		v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.CHARGE_FACTOR := 1;
+		v_FORMULA_CHARGE.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE.CHARGE_ID := v_CONG_CR_MISC_ID;
+		v_FORMULA_CHARGE.CHARGE_RATE := 1;
+		v_FORMULA_CHARGE.CHARGE_QUANTITY := NVL(v_CONG.Credit_From_Uts, 0) + v_CONG.Credit_For_Monthly_Excess;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT := v_FORMULA_CHARGE.CHARGE_QUANTITY;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        --Congestion Credit FTR Charge
+        v_ALLOC_FACTOR_TX_ID := GET_TX_ID('FTR Alloc Factor: ' || v_PSE_NAME,
+        								'FTR Alloc Factor',
+                                        'FTR Alloc Factor',
+                                        'Hour',
+                                        0,
+                                        v_CONTRACT_ID,
+                                        0,
+                                        0,
+                                        0,
+                                        v_PSE_ID);
+
+        IF v_CONG.Ftr_Target_Allocation <> 0 THEN
+            v_ALLOC_FACTOR := v_CONG.Ftr_Cong_Credit / v_CONG.Ftr_Target_Allocation;
+        ELSE
+            v_ALLOC_FACTOR := 0;
+        END IF;
+        PUT_SCHEDULE_VALUE(v_ALLOC_FACTOR_TX_ID, v_CHARGE_DATE, v_ALLOC_FACTOR, NULL, TRUE);
+
+        v_FTR_CONG_CRED_TOTAL := v_FTR_CONG_CRED_TOTAL + v_CONG.Ftr_Cong_Credit;
+        v_FTR_TARGET_ALLOC_TOTAL := v_FTR_TARGET_ALLOC_TOTAL + v_CONG.Ftr_Target_Allocation;
+
+	END LOOP;
+
+    -- flush last month's charges to combination charge table
+	UPDATE_COMBINATION_CHARGES;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+    DELETE FROM PJM_CONGESTION_SUMMARY;
+    COMMIT;
+END IMPORT_CONGESTION_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_TRANS_LOSS_CHARGES
+	(
+	p_STATUS OUT NUMBER
+	) AS
+v_DA_LOSS_CH_ID NUMBER(9);
+v_DA_LOSS_CH_ID_IMP NUMBER(9);
+v_RT_LOSS_CH_ID NUMBER(9);
+v_RT_LOSS_CH_ID_IMP NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_DA_LOSS_COMP NUMBER(9);
+v_BAL_LOSS_COMP NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_CONTRACT_ID NUMBER(9);
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE;
+v_PSE_NAME VARCHAR2(32);
+
+CURSOR p_LOSS IS
+    SELECT * FROM PJM_TXN_LOSS_CHARGE_SUMMARY C
+    ORDER BY C.CUT_DATE;
+
+	PROCEDURE UPDATE_COMBINATION_CHARGES IS
+    --v_COMPONENT NUMBER(9);
+	BEGIN
+		--Roll everything all the values up the combination tree.
+		IF NOT v_DA_LOSS_CH_ID IS NULL THEN
+			UPDATE_COMBINATION_CHARGE(v_DA_LOSS_CH_ID,v_DA_LOSS_CH_ID_IMP,'FORMULA',1, v_LAST_DATE, GET_COMPONENT(NULL,'PJM:DATransLossChg:Imp', NULL));
+		END IF;
+		IF NOT v_RT_LOSS_CH_ID IS NULL THEN
+			UPDATE_COMBINATION_CHARGE(v_RT_LOSS_CH_ID,v_RT_LOSS_CH_ID_IMP,'FORMULA', 1, v_LAST_DATE, GET_COMPONENT(NULL,'PJM:BalTransLossChg:Imp',NULL));
+		END IF;
+	END;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+	--get component id for 'PJM:DATransLossChg'
+    v_DA_LOSS_COMP := GET_COMPONENT(g_DA_TX_LOSS_COMP_NAME, g_DA_TX_LOSS_CHG_COMP_IDENT, 0);
+	--get component id for 'PJM:BalTransLossChg
+    v_BAL_LOSS_COMP := GET_COMPONENT(g_BAL_TX_LOSS_COMP_NAME, g_BAL_TX_LOSS_CHG_COMP_IDENT, 0);
+
+    FOR v_LOSS IN p_LOSS LOOP
+        IF v_LAST_ORG_ID <> v_LOSS.Org_Nid OR
+            v_LAST_DATE <> TRUNC(FROM_CUT(v_LOSS.CUT_DATE , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400) THEN
+		    -- flush last month's charges to combination charge table
+			UPDATE_COMBINATION_CHARGES;
+
+		   	-- get charge IDs for this month and this PSE.  Build the combo tree if it does not exist.
+            v_LAST_ORG_ID := v_LOSS.Org_Nid;
+			v_LAST_DATE := TRUNC(FROM_CUT(v_LOSS.CUT_DATE , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+			v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+            --v_BILLING_STATEMENT_1.Entity_Id := v_PSE_ID;
+            --v_BILLING_STATEMENT_2.Entity_Id := v_PSE_ID;
+            SELECT PSE_ALIAS INTO v_PSE_NAME FROM PURCHASING_SELLING_ENTITY
+    		WHERE PSE_ID = v_PSE_ID;
+			v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+
+			v_DA_LOSS_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_DA_LOSS_COMP,v_LAST_DATE,'COMBINATION');
+			v_COMPONENT_ID := GET_COMPONENT(NULL,'PJM:DATransLossChg:Imp', NULL);
+			v_DA_LOSS_CH_ID_IMP := GET_COMBO_CHARGE_ID(v_DA_LOSS_CH_ID,v_COMPONENT_ID,v_LAST_DATE,'Formula', TRUE);
+
+			v_RT_LOSS_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_BAL_LOSS_COMP,v_LAST_DATE,'COMBINATION');
+			v_COMPONENT_ID := GET_COMPONENT(NULL,'PJM:BalTransLossChg:Imp',NULL);
+			v_RT_LOSS_CH_ID_IMP := GET_COMBO_CHARGE_ID(v_RT_LOSS_CH_ID,v_COMPONENT_ID,v_LAST_DATE,'Formula', TRUE);
+
+		END IF;
+
+		-- put the Implicit Transmission Congestion Charges.
+        v_CHARGE_DATE := v_LOSS.CUT_DATE;
+
+		--===========DAY-AHEAD=======================
+
+		--Put CHARGE_QUANTITY, RATE, AND AMOUNT for the DA Implicit Component.
+       PUT_LMP_FORMULA_CHARGE(v_DA_LOSS_CH_ID_IMP, v_CHARGE_DATE,
+					v_LOSS.Day_Ahead_Loss_Wd_Charge-v_LOSS.Day_Ahead_Loss_Inj_Credit,
+					1, v_LOSS.Day_Ahead_Imp_Loss_Charge, 1);
+
+		--===========REAL-TIME========================
+		--Put CHARGE_QUANTITY, RATE, AND AMOUNT.
+        PUT_LMP_FORMULA_CHARGE(v_RT_LOSS_CH_ID_IMP, v_CHARGE_DATE,
+					v_LOSS.Balancing_Loss_Wd_Charge-v_LOSS.Balancing_Loss_Inj_Credit,
+					1, v_LOSS.Balancing_Imp_Loss_Charge, 1);
+
+	END LOOP;
+
+    -- flush last month's charges to combination charge table
+	UPDATE_COMBINATION_CHARGES;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+    DELETE FROM PJM_TXN_LOSS_CHARGE_SUMMARY;
+    COMMIT;
+END IMPORT_TRANS_LOSS_CHARGES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SCHEDULE9_10_SUMMARY
+	(
+	p_RECORDS IN MEX_PJM_SCHED9_10_SUM_TBL_MSRS,
+	p_STATUS OUT NUMBER
+	) AS
+v_SSCD_CH_ID_CAA NUMBER(9);
+v_SSCD_CH_ID_FTR NUMBER(9);
+v_SSCD_CH_ID_FTR_BIDS NUMBER(9);
+v_SSCD_CH_ID_FTR_HELD NUMBER(9);
+v_SSCD_CH_ID_MKSP NUMBER(9);
+v_SSCD_CH_ID_MKSP_CNT NUMBER(9);
+v_SSCD_CH_ID_MKSP_VOL NUMBER(9);
+v_SSCD_CH_ID_REG NUMBER(9);
+v_SSCD_CH_ID_CAP NUMBER(9);
+v_FERC_ANNUAL_CHG_RECOV NUMBER(9);
+v_OPSI_CHARGE_ID NUMBER(9);
+v_NERC_CHARGE_ID NUMBER(9);
+v_RFC_CHARGE_ID NUMBER(9);
+v_CAA_COMP_ID NUMBER(9);
+v_FTR_COMP_ID NUMBER(9);
+v_MKT_SUPP_COMP_ID NUMBER(9);
+v_REG_MKT_COMP_ID NUMBER(9);
+v_CAP_RES_COMP_ID NUMBER(9);
+v_FTR_BIDS_COMP_ID NUMBER(9);
+v_FTR_HELD_COMP_ID NUMBER(9);
+v_MKT_SUPP_CNT_COMP_ID NUMBER(9);
+v_MKT_SUPP_VOL_COMP_ID NUMBER(9);
+v_FERC_COMP_ID NUMBER(9);
+v_OPSI_COMP_ID NUMBER(9);
+v_NERC_COMP_ID NUMBER(9);
+v_RFC_COMP_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_IDX BINARY_INTEGER;
+v_CHARGE_DATE DATE;
+v_LAST_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_CHARGE_QTY NUMBER := 0;
+v_CHARGE_AMT NUMBER := 0;
+v_COMMIT_CHARGE BOOLEAN;
+v_COMMIT_FTR BOOLEAN;
+v_MARKET_PRICE_ID MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+v_CONTR_AREA_PRICE MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+v_FTR_ADMIN_BID_PRICE MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+v_FTR_ADMIN_PRICE MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+v_MKT_SUPPORT_PRICE MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+v_BID_OFFER_PRICE MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+v_REG_FREQ_PRICE MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+v_CAP_RES_PRICE MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+v_FERC_PRICE MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+v_OPSI_PRICE MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+v_NERC_PRICE MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+v_RFC_PRICE MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+
+    v_CAA_COMP_ID := GET_COMPONENT(g_SSCD_CONT_AREA_ADMIN_NAME, g_SSCD_CONT_AREA_ADMIN_IDENT, 0);
+    v_FTR_COMP_ID := GET_COMPONENT(g_SSCD_FTR_ADMIN_COMP_NAME, g_SSCD_FTR_ADMIN_COMP_IDENT, 0);
+    v_MKT_SUPP_COMP_ID := GET_COMPONENT(g_SSCD_MKT_SUPP_COMP_NAME , g_SSCD_MKT_SUPP_COMP_IDENT, 0);
+    v_REG_MKT_COMP_ID := GET_COMPONENT(g_SSCD_REG_MKT_ADMIN_NAME, g_SSCD_REG_MKT_ADMIN_IDENT, 0);
+    v_CAP_RES_COMP_ID := GET_COMPONENT(g_SSCD_CAP_RES_OBLIG_NAME, g_SSCD_CAP_RES_OBLIG_IDENT, 0);
+
+    v_FTR_BIDS_COMP_ID := GET_COMPONENT(NULL, 'PJM:SSC&DChg:FTRAdmin:Bids', 0);
+    v_FTR_HELD_COMP_ID := GET_COMPONENT(NULL, 'PJM:SSC&DChg:FTRAdmin:Held', 0);
+
+    v_MKT_SUPP_CNT_COMP_ID := GET_COMPONENT(NULL, 'PJM:SSC&DChg:MktSupp:Count', 0);
+    v_MKT_SUPP_VOL_COMP_ID := GET_COMPONENT(NULL, 'PJM:SSC&DChg:MktSupp:Vol', 0);
+
+    v_FERC_COMP_ID := GET_COMPONENT(g_FERC_ANNUAL_RECOV_NAME, g_FERC_ANNUAL_RECOV_IDENT, 0);
+    v_OPSI_COMP_ID := GET_COMPONENT(g_OPSI_FUNDING_NAME, g_OPSI_FUNDING_IDENT, 0);
+    v_NERC_COMP_ID := GET_COMPONENT(g_NERC_CHARGE_NAME, g_NERC_CHARGE_IDENT, 0);
+    v_RFC_COMP_ID := GET_COMPONENT(g_RFC_CHARGE_NAME, g_RFC_CHARGE_IDENT, 0);
+
+    --get Market Prices
+    v_CONTR_AREA_PRICE := GET_MARKET_PRICE('PJM:ControlAreaAdminRate');
+    IF v_CONTR_AREA_PRICE IS NULL THEN
+        IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                            p_MARKET_PRICE_NAME     => 'PJM Control Area Admin Rate',
+                            p_MARKET_PRICE_ALIAS    => 'PJM Control Area Admin Rate',
+                            p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                            p_MARKET_PRICE_ID       => 0,
+                            p_MARKET_PRICE_TYPE     => 'Market Result',
+                            p_MARKET_PRICE_INTERVAL => 'Month',
+                            p_MARKET_TYPE           => '?',
+                            p_COMMODITY_ID          => 0,
+                            p_SERVICE_POINT_TYPE    => '?',
+                            p_EXTERNAL_IDENTIFIER   => 'PJM:ControlAreaAdminRate',
+                            p_EDC_ID                => 0,
+                            p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            p_POD_ID                => 0,
+                            p_ZOD_ID                => 0);
+        v_CONTR_AREA_PRICE := v_MARKET_PRICE_ID;
+        v_MARKET_PRICE_ID := NULL;
+    END IF;
+    v_FTR_ADMIN_PRICE := GET_MARKET_PRICE('PJM:FTRAdminRate');
+    IF v_FTR_ADMIN_PRICE IS NULL THEN
+        IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                            p_MARKET_PRICE_NAME     => 'PJM FTR Admin Rate',
+                            p_MARKET_PRICE_ALIAS    => 'PJM FTR Admin Rate',
+                            p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                            p_MARKET_PRICE_ID       => 0,
+                            p_MARKET_PRICE_TYPE     => 'Market Result',
+                            p_MARKET_PRICE_INTERVAL => 'Month',
+                            p_MARKET_TYPE           => '?',
+                            p_COMMODITY_ID          => 0,
+                            p_SERVICE_POINT_TYPE    => '?',
+                            p_EXTERNAL_IDENTIFIER   => 'PJM:FTRAdminRate',
+                            p_EDC_ID                => 0,
+                            p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            p_POD_ID                => 0,
+                            p_ZOD_ID                => 0);
+        v_FTR_ADMIN_PRICE := v_MARKET_PRICE_ID;
+        v_MARKET_PRICE_ID := NULL;
+    END IF;
+	v_FTR_ADMIN_BID_PRICE := GET_MARKET_PRICE('PJM:FTRAdminBidsRate');
+    IF v_FTR_ADMIN_BID_PRICE IS NULL THEN
+        IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                            p_MARKET_PRICE_NAME     => 'PJM FTR Admin Bids Rate',
+                            p_MARKET_PRICE_ALIAS    => 'PJM FTR Admin Bids Rate',
+                            p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                            p_MARKET_PRICE_ID       => 0,
+                            p_MARKET_PRICE_TYPE     => 'Market Result',
+                            p_MARKET_PRICE_INTERVAL => 'Month',
+                            p_MARKET_TYPE           => '?',
+                            p_COMMODITY_ID          => 0,
+                            p_SERVICE_POINT_TYPE    => '?',
+                            p_EXTERNAL_IDENTIFIER   => 'PJM:FTRAdminBidsRate',
+                            p_EDC_ID                => 0,
+                            p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            p_POD_ID                => 0,
+                            p_ZOD_ID                => 0);
+        v_FTR_ADMIN_BID_PRICE := v_MARKET_PRICE_ID;
+        v_MARKET_PRICE_ID := NULL;
+    END IF;
+    v_MKT_SUPPORT_PRICE := GET_MARKET_PRICE('PJM:MarketSupportRate');
+    IF v_MKT_SUPPORT_PRICE IS NULL THEN
+        IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                            p_MARKET_PRICE_NAME     => 'PJM Market Support Rate',
+                            p_MARKET_PRICE_ALIAS    => 'PJM Market Support Rate',
+                            p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                            p_MARKET_PRICE_ID       => 0,
+                            p_MARKET_PRICE_TYPE     => 'Market Result',
+                            p_MARKET_PRICE_INTERVAL => 'Month',
+                            p_MARKET_TYPE           => '?',
+                            p_COMMODITY_ID          => 0,
+                            p_SERVICE_POINT_TYPE    => '?',
+                            p_EXTERNAL_IDENTIFIER   => 'PJM:MarketSupportRate',
+                            p_EDC_ID                => 0,
+                            p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            p_POD_ID                => 0,
+                            p_ZOD_ID                => 0);
+        v_MKT_SUPPORT_PRICE := v_MARKET_PRICE_ID;
+        v_MARKET_PRICE_ID := NULL;
+    END IF;
+
+    v_BID_OFFER_PRICE := GET_MARKET_PRICE('PJM:BidOfferSegmentRate');
+    IF v_BID_OFFER_PRICE IS NULL THEN
+        IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                            p_MARKET_PRICE_NAME     => 'PJM Bid Offer Segment Rate',
+                            p_MARKET_PRICE_ALIAS    => 'PJM Bid Offer Segment Rate',
+                            p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                            p_MARKET_PRICE_ID       => 0,
+                            p_MARKET_PRICE_TYPE     => 'Market Result',
+                            p_MARKET_PRICE_INTERVAL => 'Month',
+                            p_MARKET_TYPE           => '?',
+                            p_COMMODITY_ID          => 0,
+                            p_SERVICE_POINT_TYPE    => '?',
+                            p_EXTERNAL_IDENTIFIER   => 'PJM:BidOfferSegmentRate',
+                            p_EDC_ID                => 0,
+                            p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            p_POD_ID                => 0,
+                            p_ZOD_ID                => 0);
+        v_BID_OFFER_PRICE := v_MARKET_PRICE_ID;
+        v_MARKET_PRICE_ID := NULL;
+    END IF;
+    v_REG_FREQ_PRICE := GET_MARKET_PRICE('PJM:RegulationFreqRespRate');
+    IF v_REG_FREQ_PRICE IS NULL THEN
+        IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                            p_MARKET_PRICE_NAME     => 'PJM Regulation Freq Response Rate',
+                            p_MARKET_PRICE_ALIAS    => 'PJM Regulation Freq Response Rate',
+                            p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                            p_MARKET_PRICE_ID       => 0,
+                            p_MARKET_PRICE_TYPE     => 'Market Result',
+                            p_MARKET_PRICE_INTERVAL => 'Month',
+                            p_MARKET_TYPE           => '?',
+                            p_COMMODITY_ID          => 0,
+                            p_SERVICE_POINT_TYPE    => '?',
+                            p_EXTERNAL_IDENTIFIER   => 'PJM:RegulationFreqRespRate',
+                            p_EDC_ID                => 0,
+                            p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            p_POD_ID                => 0,
+                            p_ZOD_ID                => 0);
+        v_REG_FREQ_PRICE := v_MARKET_PRICE_ID;
+        v_MARKET_PRICE_ID := NULL;
+    END IF;
+    v_CAP_RES_PRICE := GET_MARKET_PRICE('PJM:CapResOblMgmtRate');
+    IF v_CAP_RES_PRICE IS NULL THEN
+        IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                            p_MARKET_PRICE_NAME     => 'PJM Capacity Resource Obligation Mgt Rate',
+                            p_MARKET_PRICE_ALIAS    => 'PJM Capacity Resource Obligation Mgt Rate',
+                            p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                            p_MARKET_PRICE_ID       => 0,
+                            p_MARKET_PRICE_TYPE     => 'Market Result',
+                            p_MARKET_PRICE_INTERVAL => 'Month',
+                            p_MARKET_TYPE           => '?',
+                            p_COMMODITY_ID          => 0,
+                            p_SERVICE_POINT_TYPE    => '?',
+                            p_EXTERNAL_IDENTIFIER   => 'PJM:CapResOblMgmtRate',
+                            p_EDC_ID                => 0,
+                            p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            p_POD_ID                => 0,
+                            p_ZOD_ID                => 0);
+        v_CAP_RES_PRICE := v_MARKET_PRICE_ID;
+        v_MARKET_PRICE_ID := NULL;
+    END IF;
+    v_FERC_PRICE := GET_MARKET_PRICE('PJM:FERCAnnualRecoveryRate');
+    IF v_FERC_PRICE IS NULL THEN
+        IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                            p_MARKET_PRICE_NAME     => 'PJM FERC Annual Charge Recovery Rate',
+                            p_MARKET_PRICE_ALIAS    => 'PJM FERC Annual Charge Recovery Rate',
+                            p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                            p_MARKET_PRICE_ID       => 0,
+                            p_MARKET_PRICE_TYPE     => 'Market Result',
+                            p_MARKET_PRICE_INTERVAL => 'Month',
+                            p_MARKET_TYPE           => '?',
+                            p_COMMODITY_ID          => 0,
+                            p_SERVICE_POINT_TYPE    => '?',
+                            p_EXTERNAL_IDENTIFIER   => 'PJM:FERCAnnualRecoveryRate',
+                            p_EDC_ID                => 0,
+                            p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            p_POD_ID                => 0,
+                            p_ZOD_ID                => 0);
+        v_FERC_PRICE := v_MARKET_PRICE_ID;
+        v_MARKET_PRICE_ID := NULL;
+    END IF;
+    v_OPSI_PRICE := GET_MARKET_PRICE('PJM:OPSIFundingRate');
+    IF v_OPSI_PRICE IS NULL THEN
+        IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                            p_MARKET_PRICE_NAME     => 'PJM OPSI Funding Rate',
+                            p_MARKET_PRICE_ALIAS    => 'PJM OPSI Funding Rate',
+                            p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                            p_MARKET_PRICE_ID       => 0,
+                            p_MARKET_PRICE_TYPE     => 'Market Result',
+                            p_MARKET_PRICE_INTERVAL => 'Month',
+                            p_MARKET_TYPE           => '?',
+                            p_COMMODITY_ID          => 0,
+                            p_SERVICE_POINT_TYPE    => '?',
+                            p_EXTERNAL_IDENTIFIER   => 'PJM:OPSIFundingRate',
+                            p_EDC_ID                => 0,
+                            p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            p_POD_ID                => 0,
+                            p_ZOD_ID                => 0);
+        v_OPSI_PRICE := v_MARKET_PRICE_ID;
+        v_MARKET_PRICE_ID := NULL;
+    END IF;
+    v_NERC_PRICE := GET_MARKET_PRICE('PJM:NERCRate');
+    IF v_NERC_PRICE IS NULL THEN
+        IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                            p_MARKET_PRICE_NAME     => 'PJM NERC Rate',
+                            p_MARKET_PRICE_ALIAS    => 'PJM NERC Rate',
+                            p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                            p_MARKET_PRICE_ID       => 0,
+                            p_MARKET_PRICE_TYPE     => 'Market Result',
+                            p_MARKET_PRICE_INTERVAL => 'Month',
+                            p_MARKET_TYPE           => '?',
+                            p_COMMODITY_ID          => 0,
+                            p_SERVICE_POINT_TYPE    => '?',
+                            p_EXTERNAL_IDENTIFIER   => 'PJM:NERCRate',
+                            p_EDC_ID                => 0,
+                            p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            p_POD_ID                => 0,
+                            p_ZOD_ID                => 0);
+        v_NERC_PRICE := v_MARKET_PRICE_ID;
+        v_MARKET_PRICE_ID := NULL;
+    END IF;
+    v_RFC_PRICE := GET_MARKET_PRICE('PJM:RFCRate');
+    IF v_RFC_PRICE IS NULL THEN
+        IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                            p_MARKET_PRICE_NAME     => 'PJM RFC Rate',
+                            p_MARKET_PRICE_ALIAS    => 'PJM RFC Rate',
+                            p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                            p_MARKET_PRICE_ID       => 0,
+                            p_MARKET_PRICE_TYPE     => 'Market Result',
+                            p_MARKET_PRICE_INTERVAL => 'Month',
+                            p_MARKET_TYPE           => '?',
+                            p_COMMODITY_ID          => 0,
+                            p_SERVICE_POINT_TYPE    => '?',
+                            p_EXTERNAL_IDENTIFIER   => 'PJM:RFCRate',
+                            p_EDC_ID                => 0,
+                            p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            p_POD_ID                => 0,
+                            p_ZOD_ID                => 0);
+        v_RFC_PRICE := v_MARKET_PRICE_ID;
+    END IF;
+
+	v_IDX := p_RECORDS.FIRST;
+    WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+   		IF v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).DAY) OR
+            v_LAST_DATE = LOW_DATE THEN
+
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).DAY);
+            v_PSE_ID := GET_PSE(p_RECORDS(v_IDX).ORG_ID, p_RECORDS(v_IDX).ORG_NAME);
+            v_SSCD_CH_ID_CAA := GET_CHARGE_ID(v_PSE_ID, v_CAA_COMP_ID, v_LAST_DATE, 'FORMULA');
+            v_SSCD_CH_ID_REG := GET_CHARGE_ID(v_PSE_ID, v_REG_MKT_COMP_ID, v_LAST_DATE, 'FORMULA');
+            v_SSCD_CH_ID_CAP := GET_CHARGE_ID(v_PSE_ID, v_CAP_RES_COMP_ID, v_LAST_DATE, 'FORMULA');
+
+            v_SSCD_CH_ID_FTR := GET_CHARGE_ID(v_PSE_ID, v_FTR_COMP_ID, v_LAST_DATE, 'COMBINATION');
+            v_SSCD_CH_ID_FTR_BIDS := GET_COMBO_CHARGE_ID(v_SSCD_CH_ID_FTR,v_FTR_BIDS_COMP_ID,v_LAST_DATE,'FORMULA');
+            v_SSCD_CH_ID_FTR_HELD := GET_COMBO_CHARGE_ID(v_SSCD_CH_ID_FTR,v_FTR_HELD_COMP_ID,v_LAST_DATE,'FORMULA');
+
+            v_SSCD_CH_ID_MKSP := GET_CHARGE_ID(v_PSE_ID, v_MKT_SUPP_COMP_ID, v_LAST_DATE, 'COMBINATION');
+            v_SSCD_CH_ID_MKSP_CNT := GET_COMBO_CHARGE_ID(v_SSCD_CH_ID_MKSP,v_MKT_SUPP_CNT_COMP_ID,v_LAST_DATE,'FORMULA');
+            v_SSCD_CH_ID_MKSP_VOL := GET_COMBO_CHARGE_ID(v_SSCD_CH_ID_MKSP,v_MKT_SUPP_VOL_COMP_ID,v_LAST_DATE,'FORMULA');
+
+            v_FERC_ANNUAL_CHG_RECOV := GET_CHARGE_ID(v_PSE_ID, v_FERC_COMP_ID, v_LAST_DATE, 'FORMULA');
+            v_OPSI_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID, v_OPSI_COMP_ID, v_LAST_DATE, 'FORMULA');
+            v_NERC_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID, v_NERC_COMP_ID, v_LAST_DATE, 'FORMULA');
+            v_RFC_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID, v_RFC_COMP_ID, v_LAST_DATE, 'FORMULA');
+
+        END IF;
+        v_CHARGE_DATE := TRUNC(p_RECORDS(v_IDX).DAY) + 1/86400;
+
+        CASE p_RECORDS(v_IDX).SCHEDULE
+
+        WHEN '9-1: Control Area Administration' THEN
+            v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_CAA;
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_CAA;
+            v_FORMULA_CHARGE.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_RATE := 1;
+
+            IF p_RECORDS(v_IDX).DETERMINANT = 'RT Load with Losses (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTLoad_with_Losses';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := p_RECORDS(v_IDX).DAILY_USE;
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'RT PTP Transmission Use (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RT_PTP_Transmission_Use';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                --Charge Quantity = RtLoad_with_Losses + RT_PTP_Transmission_Use
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RATE;
+                v_FORMULA_CHARGE.CHARGE_AMOUNT := v_CHARGE_QTY * p_RECORDS(v_IDX).RATE;
+                PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+                v_COMMIT_CHARGE := TRUE;
+                PUT_MARKET_PRICE_VALUE(v_CONTR_AREA_PRICE, TRUNC(v_CHARGE_DATE, 'MM'), p_RECORDS(v_IDX).RATE);
+            END IF;
+        WHEN '9-2: Financial Transmission Rights' THEN
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+
+            IF p_RECORDS(v_IDX).DETERMINANT = 'Financial Transmission Rights (MW)' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_FTR_HELD;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'FinancialTransRightsMW';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_FTR_HELD;
+                v_CHARGE_QTY := p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RATE;
+                v_FORMULA_CHARGE.CHARGE_AMOUNT := v_CHARGE_QTY * p_RECORDS(v_IDX).RATE;
+                PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+                PUT_MARKET_PRICE_VALUE(v_FTR_ADMIN_PRICE, TRUNC(v_CHARGE_DATE, 'MM'), p_RECORDS(v_IDX).RATE);
+                v_COMMIT_CHARGE := TRUE;
+                v_COMMIT_FTR := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'FTR Bid Obligations' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_FTR_BIDS;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'FTRBidObligation';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := p_RECORDS(v_IDX).DAILY_USE;
+                v_COMMIT_CHARGE := FALSE;
+                v_COMMIT_FTR := FALSE;
+            ELSIF UPPER(p_RECORDS(v_IDX).DETERMINANT) = UPPER('FTR Bid Options x5') THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_FTR_BIDS;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'FTRBidOptions';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                --Charge Quantity = FTR Bid Obligations + FTR Bid Options
+                v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_FTR_BIDS;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RATE;
+                v_FORMULA_CHARGE.CHARGE_AMOUNT := v_CHARGE_QTY * p_RECORDS(v_IDX).RATE;
+                PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+                PUT_MARKET_PRICE_VALUE(v_FTR_ADMIN_BID_PRICE, TRUNC(v_CHARGE_DATE, 'MM'), p_RECORDS(v_IDX).RATE);
+                v_COMMIT_CHARGE := TRUE;
+                v_COMMIT_FTR := TRUE;
+            END IF;
+        WHEN '9-3: Market Support' THEN
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+            IF p_RECORDS(v_IDX).DETERMINANT = 'DA Cleared Increment Offers (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_MKSP_CNT;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'DayAheadIncOffers';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_MKSP_CNT;
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'DA Cleared Decrement Bids (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_MKSP_CNT;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'DayAheadDecBids';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_MKSP_CNT;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'DA Cleared Up To Congestion Energy (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_MKSP_CNT;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'DayAheadUpToCong';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_MKSP_CNT;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RATE;
+                v_FORMULA_CHARGE.CHARGE_AMOUNT := v_CHARGE_QTY * p_RECORDS(v_IDX).RATE;
+                PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+                v_COMMIT_CHARGE := TRUE;
+                v_COMMIT_FTR := TRUE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'RT Generation (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTGen';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_CHARGE_AMT := p_RECORDS(v_IDX).DAILY_USE * p_RECORDS(v_IDX).RATE;
+                PUT_MARKET_PRICE_VALUE(v_MKT_SUPPORT_PRICE, TRUNC(v_CHARGE_DATE, 'MM'), p_RECORDS(v_IDX).RATE);
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'RT Load with Losses (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTLoadWithLosses';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_CHARGE_AMT := v_CHARGE_AMT + (p_RECORDS(v_IDX).DAILY_USE * p_RECORDS(v_IDX).RATE);
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'RT Network Import Use (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTNetworkImports';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_CHARGE_AMT := v_CHARGE_AMT + (p_RECORDS(v_IDX).DAILY_USE * p_RECORDS(v_IDX).RATE);
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'RT Network Import Use (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTNetworkImports';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_CHARGE_AMT := v_CHARGE_AMT + (p_RECORDS(v_IDX).DAILY_USE * p_RECORDS(v_IDX).RATE);
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'RT Spot Import Use (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTSpotImports';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_CHARGE_AMT := v_CHARGE_AMT + (p_RECORDS(v_IDX).DAILY_USE * p_RECORDS(v_IDX).RATE);
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'RT PTP Transmission Use Excluding Wheel-Throughs (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTPTPTransUse';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_CHARGE_AMT := v_CHARGE_AMT + (p_RECORDS(v_IDX).DAILY_USE * p_RECORDS(v_IDX).RATE);
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'Generation Offer Segments' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'GenOfferSegments';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_CHARGE_AMT := v_CHARGE_AMT + (p_RECORDS(v_IDX).DAILY_USE * p_RECORDS(v_IDX).RATE);
+                PUT_MARKET_PRICE_VALUE(v_BID_OFFER_PRICE, TRUNC(v_CHARGE_DATE, 'MM'), p_RECORDS(v_IDX).RATE);
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'DA Market Bid/Offer Segments' THEN
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_MKSP_VOL;
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'DAMktBidOfferSegments';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_FORMULA_CHARGE.CHARGE_AMOUNT :=  v_CHARGE_AMT + (p_RECORDS(v_IDX).DAILY_USE * p_RECORDS(v_IDX).RATE);
+                IF v_FORMULA_CHARGE.CHARGE_QUANTITY <> 0 THEN
+                    v_FORMULA_CHARGE.CHARGE_RATE := v_FORMULA_CHARGE.CHARGE_AMOUNT / v_FORMULA_CHARGE.CHARGE_QUANTITY;
+                ELSE
+                    v_FORMULA_CHARGE.CHARGE_RATE := 0;
+                END IF;
+                PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+                v_COMMIT_CHARGE := TRUE;
+                v_COMMIT_FTR := TRUE;
+            END IF;
+        WHEN '9-4: Regulation and Frequency Response' THEN
+            v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_REG ;
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_REG ;
+            v_FORMULA_CHARGE.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_RATE := 1;
+            IF p_RECORDS(v_IDX).DETERMINANT = 'Regulation Assigned (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Regulation_Assigned';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY :=  p_RECORDS(v_IDX).DAILY_USE;
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'Regulation Obligation (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Regulation_Obligation';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL :=  p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                --Charge Quantity = Regulation_Assigned + Regulation_Obligation
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RATE;
+                v_FORMULA_CHARGE.CHARGE_AMOUNT := v_CHARGE_QTY * p_RECORDS(v_IDX).RATE;
+                PUT_MARKET_PRICE_VALUE(v_REG_FREQ_PRICE, TRUNC(v_CHARGE_DATE, 'MM'), p_RECORDS(v_IDX).RATE);
+                PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+                v_COMMIT_CHARGE := TRUE;
+            END IF;
+        WHEN '9-5: Capacity Resource and Obligation Management' THEN
+            v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_CH_ID_CAP;
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_CH_ID_CAP;
+            v_FORMULA_CHARGE.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_RATE := 1;
+            IF p_RECORDS(v_IDX).DETERMINANT = 'Unforced Capacity including FRR (MW)' THEN
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := ' Unforced_Capacity';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := p_RECORDS(v_IDX).DAILY_USE;
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'UCAP Obligation (MW)' THEN
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'UCAP_Obligation';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                --Charge Quantity = Unforced Capacity + UCAP Obligation
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RATE;
+                v_FORMULA_CHARGE.CHARGE_AMOUNT := v_CHARGE_QTY * p_RECORDS(v_IDX).RATE;
+                PUT_MARKET_PRICE_VALUE(v_CAP_RES_PRICE, TRUNC(v_CHARGE_DATE, 'MM'), p_RECORDS(v_IDX).RATE);
+                PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+                v_COMMIT_CHARGE := TRUE;
+            END IF;
+        WHEN '9-FERC: FERC Annual Charge Recovery' THEN
+            v_FORMULA_CHARGE_VAR.CHARGE_ID := v_FERC_ANNUAL_CHG_RECOV;
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_ID := v_FERC_ANNUAL_CHG_RECOV;
+            v_FORMULA_CHARGE.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+            IF p_RECORDS(v_IDX).DETERMINANT = 'RT Load with Losses (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := ' RTLoadWithLosses';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY :=  p_RECORDS(v_IDX).DAILY_USE;
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'RT PTP Transmission Use (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTP2PTransUse';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL :=  p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                --Charge Quantity = RT Load with Losses + RT P2P Trans Use
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RATE;
+                v_FORMULA_CHARGE.CHARGE_AMOUNT := v_CHARGE_QTY * p_RECORDS(v_IDX).RATE;
+                PUT_MARKET_PRICE_VALUE(v_FERC_PRICE, TRUNC(v_CHARGE_DATE, 'MM'), p_RECORDS(v_IDX).RATE);
+                PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+                v_COMMIT_CHARGE := TRUE;
+            END IF;
+        WHEN '9-OPSI: Organization of PJM States, Inc Funding' THEN
+            v_FORMULA_CHARGE_VAR.CHARGE_ID := v_OPSI_CHARGE_ID;
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_ID := v_OPSI_CHARGE_ID;
+            v_FORMULA_CHARGE.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+            IF p_RECORDS(v_IDX).DETERMINANT = 'RT Load with Losses (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := ' RTLoadWithLosses';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                v_CHARGE_QTY := p_RECORDS(v_IDX).DAILY_USE;
+                v_COMMIT_CHARGE := FALSE;
+            ELSIF p_RECORDS(v_IDX).DETERMINANT = 'RT PTP Transmission Use (MWh)' THEN
+                v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTP2PTransUse';
+                v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DAILY_USE;
+                PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+                --Charge Quantity = RT Load with Losses + RT P2P Trans Use
+                v_CHARGE_QTY := v_CHARGE_QTY + p_RECORDS(v_IDX).DAILY_USE;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RATE;
+                v_FORMULA_CHARGE.CHARGE_AMOUNT := v_CHARGE_QTY * p_RECORDS(v_IDX).RATE;
+                PUT_MARKET_PRICE_VALUE(v_OPSI_PRICE, TRUNC(v_CHARGE_DATE, 'MM'), p_RECORDS(v_IDX).RATE);
+                PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+                v_COMMIT_CHARGE := TRUE;
+            END IF;
+        WHEN '10-NERC: North American Electric Reliability Corporation Charge' THEN
+            v_FORMULA_CHARGE_VAR.CHARGE_ID := v_NERC_CHARGE_ID;
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_ID := v_NERC_CHARGE_ID;
+            v_FORMULA_CHARGE.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTRFCLoadWithLosses';
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := NVL(p_RECORDS(v_IDX).DAILY_USE,0);
+            PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+            v_FORMULA_CHARGE.CHARGE_QUANTITY := NVL(p_RECORDS(v_IDX).DAILY_USE,0);
+            v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RATE;
+            v_FORMULA_CHARGE.CHARGE_AMOUNT := v_FORMULA_CHARGE.CHARGE_QUANTITY * p_RECORDS(v_IDX).RATE;
+            PUT_MARKET_PRICE_VALUE(v_NERC_PRICE, TRUNC(v_CHARGE_DATE, 'MM'), p_RECORDS(v_IDX).RATE);
+            PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+            v_COMMIT_CHARGE := TRUE;
+        WHEN '10-RFC: Reliability First Corporation Charge' THEN
+            v_FORMULA_CHARGE_VAR.CHARGE_ID := v_RFC_CHARGE_ID;
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_ID := v_RFC_CHARGE_ID;
+            v_FORMULA_CHARGE.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+            v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTRFCLoadWithLosses';
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := NVL(p_RECORDS(v_IDX).DAILY_USE,0);
+            PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+            v_FORMULA_CHARGE.CHARGE_QUANTITY := NVL(p_RECORDS(v_IDX).DAILY_USE,0);
+            v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RATE;
+            v_FORMULA_CHARGE.CHARGE_AMOUNT := v_FORMULA_CHARGE.CHARGE_QUANTITY * p_RECORDS(v_IDX).RATE;
+            PUT_MARKET_PRICE_VALUE(v_RFC_PRICE, TRUNC(v_CHARGE_DATE, 'MM'), p_RECORDS(v_IDX).RATE);
+            PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+            v_COMMIT_CHARGE := TRUE;
+        ELSE
+            NULL;
+        END CASE;
+        IF v_COMMIT_CHARGE THEN
+            v_CHARGE_QTY := 0;
+            v_CHARGE_AMT := 0;
+            v_COMMIT_CHARGE := FALSE;
+        END IF;
+        IF v_COMMIT_FTR THEN
+            UPDATE_COMBINATION_CHARGE(v_SSCD_CH_ID_FTR, v_SSCD_CH_ID_FTR_BIDS, 'FORMULA');
+            UPDATE_COMBINATION_CHARGE(v_SSCD_CH_ID_FTR, v_SSCD_CH_ID_FTR_HELD, 'FORMULA');
+            UPDATE_COMBINATION_CHARGE(v_SSCD_CH_ID_MKSP, v_SSCD_CH_ID_MKSP_CNT, 'FORMULA');
+            UPDATE_COMBINATION_CHARGE(v_SSCD_CH_ID_MKSP, v_SSCD_CH_ID_MKSP_VOL, 'FORMULA');
+            v_COMMIT_FTR := FALSE;
+        END IF;
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+    END LOOP;
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        COMMIT;
+    END IF;
+END IMPORT_SCHEDULE9_10_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NITS_CREDIT_SUMMARY
+(
+    p_RECORDS IN MEX_PJM_NITS_SUMMARY_TBL,
+    p_ISO_ACCT_NAME IN VARCHAR2,
+    p_STATUS  OUT NUMBER,
+    p_FROM_CLOB IN NUMBER := 0
+) AS
+    TYPE MKT_PRICE_ID_MAP IS TABLE OF NUMBER(9) INDEX BY VARCHAR2(32);
+    TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+
+    v_NITS_REV_ID_MAP    MKT_PRICE_ID_MAP;
+    v_ITERATOR_ID_MAP    ITERATOR_ID_MAP;
+    v_MARKET_PRICE_ID    NUMBER(9);
+    v_NITS_CR_ID         NUMBER(9);
+    v_ZONE               VARCHAR2(32);
+    v_ZONE_ID            NUMBER(9);
+    v_ITERATOR_ID        NUMBER(3) := 0;
+    v_CREDIT_AMOUNT      NUMBER;
+    v_CREDIT_RATE        NUMBER;
+    v_CREDIT_QTY         NUMBER;
+    v_NITS_CR_COMP       NUMBER(9);
+    v_PSE_ID             NUMBER(9);
+    v_COMMODITY_ID       IT_COMMODITY.COMMODITY_ID%TYPE;
+    v_IDX                BINARY_INTEGER;
+    v_LAST_DATE          DATE := LOW_DATE;
+    v_CHARGE_DATE        DATE := LOW_DATE;
+    v_FORMULA_CHARGE     FORMULA_CHARGE%ROWTYPE;
+    v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+    v_ITERATOR_NAME      FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+    v_ITERATOR           FORMULA_CHARGE_ITERATOR%ROWTYPE;
+
+BEGIN
+
+	---------------------------------------------------------------------------
+	--TO DO: update the MM side for a daily charge rather than a monthly charge
+	---------------------------------------------------------------------------
+
+    p_STATUS := GA.SUCCESS;
+
+    IF p_RECORDS.COUNT = 0 THEN
+        RETURN;
+    END IF; -- nothing to do
+
+    v_IDX                  := p_RECORDS.FIRST;
+    v_ITERATOR.ITERATOR_ID := 0;
+    ID.ID_FOR_COMMODITY('Transmission', FALSE, v_COMMODITY_ID);
+
+     IF p_FROM_CLOB = 0 THEN
+        --get billing entity from external credential because ord_id / org_name in report does not always
+        --reflect the billing entity
+        SELECT BILLING_ENTITY_ID INTO v_PSE_ID
+        FROM INTERCHANGE_CONTRACT
+        WHERE CONTRACT_ALIAS = p_ISO_ACCT_NAME;
+    ELSE
+        v_PSE_ID := GET_PSE(p_RECORDS(1).ORG_ID, p_RECORDS(1).ORG_NAME);
+    END IF;
+
+    --get component id for 'PJM:NITSCred'
+	v_NITS_CR_COMP := GET_COMPONENT(g_NITS_COMP_NAME, g_NITS_CR_COMP_IDENT, 1);
+
+    WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        -- flush charge to formula charge
+        IF NOT v_NITS_CR_ID IS NULL THEN
+            v_FORMULA_CHARGE.CHARGE_ID       := v_NITS_CR_ID;
+            v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CREDIT_QTY;
+            v_FORMULA_CHARGE.CHARGE_RATE     := v_CREDIT_RATE;
+            v_FORMULA_CHARGE.CHARGE_AMOUNT   := -v_CREDIT_AMOUNT;
+            PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+        END IF;
+        v_CHARGE_DATE   := TRUNC(p_RECORDS(v_IDX).DAY) + 1 / 86400;
+
+        IF v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).DAY, 'DD') THEN
+            -- get charge IDs
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).DAY, 'DD');
+            v_NITS_CR_ID  := GET_CHARGE_ID(v_PSE_ID, v_NITS_CR_COMP, v_LAST_DATE,'FORMULA');
+        END IF;
+
+        v_ZONE := REPLACE(p_RECORDS(v_IDX).ZONE, ' ', '');
+
+        --get zone id
+        v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_ZONE);
+
+        -- first update the market price - get IDs from cache
+        IF v_NITS_REV_ID_MAP.EXISTS(v_ZONE) THEN
+            v_MARKET_PRICE_ID := v_NITS_REV_ID_MAP(v_ZONE);
+        ELSE
+            v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:' || v_ZONE || ':NITSTotal');
+            IF v_MARKET_PRICE_ID IS NULL THEN
+                IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                                    p_MARKET_PRICE_NAME     => 'PJM NITS Total Rev - ' || v_ZONE,
+                                    p_MARKET_PRICE_ALIAS    => 'PJM NITS Total Rev - ' || v_ZONE,
+                                    p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                                    p_MARKET_PRICE_ID       => 0,
+                                    p_MARKET_PRICE_TYPE     => 'PJM Total NITS Revenue',
+                                    p_MARKET_PRICE_INTERVAL => 'Day',
+                                    p_MARKET_TYPE           => '?',
+                                    p_COMMODITY_ID          => v_COMMODITY_ID,
+                                    p_SERVICE_POINT_TYPE    => '?',
+                                    p_EXTERNAL_IDENTIFIER   => 'PJM:' || v_ZONE || ':NITSTotal',
+                                    p_EDC_ID                => 0,
+                                    p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                    p_POD_ID                => 0,
+                                    p_ZOD_ID                => v_ZONE_ID);
+            END IF;
+            v_NITS_REV_ID_MAP(v_ZONE) := v_MARKET_PRICE_ID;
+        END IF;
+        PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE), p_RECORDS(v_IDX).TOTAL_REVENUES);
+
+
+        -- next, update formula variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE_VAR.CHARGE_ID   := v_NITS_CR_ID;
+
+		v_ITERATOR_NAME.CHARGE_ID      := v_NITS_CR_ID;
+        v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+        v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+        PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        v_ITERATOR.CHARGE_ID           := v_NITS_CR_ID;
+		IF v_ITERATOR_ID_MAP.EXISTS(v_ZONE) THEN
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ZONE);
+        ELSE
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+
+		v_ITERATOR.ITERATOR1 := v_ZONE;
+        v_ITERATOR.ITERATOR2 := NULL;
+        v_ITERATOR.ITERATOR3 := NULL;
+        v_ITERATOR.ITERATOR4 := NULL;
+        v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+		v_FORMULA_CHARGE.ITERATOR_ID     := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ZoneRevRqtShare';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).REVENUE_REQ_SHARE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'TotalZoneNetwokServChg';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOTAL_REVENUES;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_CREDIT_QTY := p_RECORDS(v_IDX).TOTAL_REVENUES;
+		v_CREDIT_RATE := p_RECORDS(v_IDX).REVENUE_REQ_SHARE;
+        v_CREDIT_AMOUNT := p_RECORDS(v_IDX).CREDIT;
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+    END LOOP;
+
+    -- flush charge to formula charge
+    IF NOT v_NITS_CR_ID IS NULL THEN
+        v_FORMULA_CHARGE.CHARGE_ID       := v_NITS_CR_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CREDIT_QTY;
+        v_FORMULA_CHARGE.CHARGE_RATE     := v_CREDIT_RATE;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := -v_CREDIT_AMOUNT;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+    END IF;
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        COMMIT;
+    END IF;
+
+
+END IMPORT_NITS_CREDIT_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NITS_CHARGE_SUMMARY
+(
+    p_RECORDS IN MEX_PJM_NITS_SUMMARY_TBL,
+    p_ISO_ACCT_NAME IN VARCHAR2,
+    p_STATUS  OUT NUMBER,
+    p_FROM_CLOB IN NUMBER := 0
+) AS
+    TYPE MKT_PRICE_ID_MAP IS TABLE OF NUMBER(9) INDEX BY VARCHAR2(32);
+    TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+    v_NITS_RATE_ID_MAP   MKT_PRICE_ID_MAP;
+    v_ITERATOR_ID_MAP    ITERATOR_ID_MAP;
+    v_MARKET_PRICE_ID    NUMBER(9);
+    v_NITS_CH_ID         NUMBER(9);
+    v_ZONE               VARCHAR2(32);
+    v_ZONE_ID            NUMBER(9);
+    v_ITERATOR_ID        NUMBER(3) := 0;
+    v_CHARGE_AMOUNT      NUMBER;
+    v_CHARGE_RATE       NUMBER;
+    v_CHARGE_QTY        NUMBER;
+    v_NITS_CH_COMP       NUMBER(9);
+    v_PSE_ID             NUMBER(9);
+    v_COMMODITY_ID       IT_COMMODITY.COMMODITY_ID%TYPE;
+    v_IDX                BINARY_INTEGER;
+    v_LAST_DATE          DATE := LOW_DATE;
+    v_CHARGE_DATE        DATE := LOW_DATE;
+    v_FORMULA_CHARGE     FORMULA_CHARGE%ROWTYPE;
+    v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+    v_ITERATOR_NAME      FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+    v_ITERATOR           FORMULA_CHARGE_ITERATOR%ROWTYPE;
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+    IF p_RECORDS.COUNT = 0 THEN
+        RETURN;
+    END IF; -- nothing to do
+
+    v_IDX                  := p_RECORDS.FIRST;
+    v_ITERATOR.ITERATOR_ID := 0;
+    ID.ID_FOR_COMMODITY('Transmission', FALSE, v_COMMODITY_ID);
+    v_NITS_CH_COMP := GET_COMPONENT(g_NITS_COMP_NAME, g_NITS_CHG_COMP_IDENT, 0);
+
+    IF p_FROM_CLOB = 0 THEN
+        --get billing entity from external credential because ord_id / org_name in report does not always
+        --reflect the billing entity
+        SELECT BILLING_ENTITY_ID INTO v_PSE_ID
+        FROM INTERCHANGE_CONTRACT
+        WHERE CONTRACT_ALIAS = p_ISO_ACCT_NAME;
+    ELSE
+        v_PSE_ID := GET_PSE(p_RECORDS(1).ORG_ID, p_RECORDS(1).ORG_NAME);
+    END IF;
+
+    WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        -- flush charge to formula charge
+        IF NOT v_NITS_CH_ID IS NULL THEN
+            v_FORMULA_CHARGE.CHARGE_ID       := v_NITS_CH_ID;
+            v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+            v_FORMULA_CHARGE.CHARGE_RATE     := v_CHARGE_RATE;
+            v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+            PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+        END IF;
+
+        v_CHARGE_DATE   := TRUNC(p_RECORDS(v_IDX).DAY) + 1 / 86400;
+
+        IF v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).DAY, 'DD') THEN
+            -- get NITS_CAHRGE ID
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).DAY, 'DD');
+            v_NITS_CH_ID  := GET_CHARGE_ID(v_PSE_ID, v_NITS_CH_COMP, v_LAST_DATE, 'FORMULA');
+        END IF;
+
+        v_ZONE := REPLACE(p_RECORDS(v_IDX).ZONE, ' ', '');
+
+        --get zone id
+        v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_ZONE);
+
+        -- first update the market price - get IDs from cache
+        IF v_NITS_RATE_ID_MAP.EXISTS(v_ZONE) THEN
+            v_MARKET_PRICE_ID := v_NITS_RATE_ID_MAP(v_ZONE);
+        ELSE
+            v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:' || v_ZONE || ':NITSRate');
+            IF v_MARKET_PRICE_ID IS NULL THEN
+                IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                                    p_MARKET_PRICE_NAME     => 'PJM NITS Charge Rate - ' || v_ZONE,
+                                    p_MARKET_PRICE_ALIAS    => 'PJM NITS Charge Rate - ' || v_ZONE,
+                                    p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                                    p_MARKET_PRICE_ID       => 0,
+                                    p_MARKET_PRICE_TYPE     => 'PJM NITS Charge',
+                                    p_MARKET_PRICE_INTERVAL => 'Day',
+                                    p_MARKET_TYPE           => '?',
+                                    p_COMMODITY_ID          => v_COMMODITY_ID,
+                                    p_SERVICE_POINT_TYPE    => '?',
+                                    p_EXTERNAL_IDENTIFIER   => 'PJM:' || v_ZONE || ':NITSRate',
+                                    p_EDC_ID                => 0,
+                                    p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                    p_POD_ID                => 0,
+                                    p_ZOD_ID                => v_ZONE_ID);
+            END IF;
+            v_NITS_RATE_ID_MAP(v_ZONE) := v_MARKET_PRICE_ID;
+        END IF;
+        PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE), p_RECORDS(v_IDX).NETWORK_RATE);
+
+        -- next, update formula variables
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE_VAR.CHARGE_ID   := v_NITS_CH_ID;
+
+        v_ITERATOR_NAME.CHARGE_ID      := v_NITS_CH_ID;
+        v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+        v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+        PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        v_ITERATOR.CHARGE_ID := v_NITS_CH_ID;
+        IF v_ITERATOR_ID_MAP.EXISTS(v_ZONE) THEN
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ZONE);
+        ELSE
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+
+        v_ITERATOR.ITERATOR1 := v_ZONE;
+        v_ITERATOR.ITERATOR2 := NULL;
+        v_ITERATOR.ITERATOR3 := NULL;
+        v_ITERATOR.ITERATOR4 := NULL;
+        v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID     := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'NITSRate';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).NETWORK_RATE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ZoneDemand';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).PEAK_LOAD;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_CHARGE_QTY := p_RECORDS(v_IDX).PEAK_LOAD;
+        v_CHARGE_RATE := p_RECORDS(v_IDX).NETWORK_RATE;
+        v_CHARGE_AMOUNT := p_RECORDS(v_IDX).CHARGE;
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+    END LOOP;
+    -- flush charge to formula charge
+    IF NOT v_NITS_CH_ID IS NULL THEN
+        v_FORMULA_CHARGE.CHARGE_ID       := v_NITS_CH_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+        v_FORMULA_CHARGE.CHARGE_RATE     := v_CHARGE_RATE;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+    END IF;
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        COMMIT;
+    END IF;
+
+END IMPORT_NITS_CHARGE_SUMMARY;
+-------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NITS_OFFSET_SUMMARY
+(
+    p_RECORDS IN MEX_PJM_TRANS_OFFSET_CHG_TBL,
+    p_ISO_ACCT_NAME IN VARCHAR2,
+    p_STATUS  OUT NUMBER,
+    p_FROM_CLOB IN NUMBER := 0
+) AS
+    TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+    v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+    v_MARKET_PRICE_ID NUMBER(9);
+    v_CH_ID NUMBER(9);
+    v_ZONE_ID NUMBER(9);
+    v_ITERATOR_ID NUMBER(3) := 0;
+    v_CHARGE_AMOUNT NUMBER;
+    v_CHARGE_QTY NUMBER;
+    v_CHARGE_RATE NUMBER;
+    v_COMPONENT_ID NUMBER(9);
+    v_PSE_ID NUMBER(9);
+    v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+    v_IDX BINARY_INTEGER;
+    v_LAST_DATE DATE := LOW_DATE;
+    v_CHARGE_DATE DATE := LOW_DATE;
+    v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+    v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+    v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+    v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+    v_RATE_TYPE VARCHAR2(16);
+    v_UPDATE_MKT_PRICE BOOLEAN;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+    IF p_RECORDS.COUNT = 0 THEN
+        RETURN;
+    END IF; -- nothing to do
+
+    v_IDX := p_RECORDS.FIRST;
+    v_ITERATOR.ITERATOR_ID := 0;
+    ID.ID_FOR_COMMODITY('Transmission', FALSE, v_COMMODITY_ID);
+    v_COMPONENT_ID := GET_COMPONENT(g_NITS_OFFSET_COMP_NAME,g_NITS_OFFSET_CHG_COMP_IDENT, 0);
+
+    IF p_FROM_CLOB = 0 THEN
+        --get billing entity from external credential because ord_id / org_name in report does not always
+        --reflect the billing entity
+        SELECT BILLING_ENTITY_ID INTO v_PSE_ID
+        FROM INTERCHANGE_CONTRACT
+        WHERE CONTRACT_ALIAS = p_ISO_ACCT_NAME;
+    ELSE
+        v_PSE_ID := GET_PSE(p_RECORDS(1).ORG_ID, p_RECORDS(1).ORG_NAME);
+    END IF;
+
+    WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+
+        IF v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).DAY, 'DD') THEN
+            IF NOT v_CH_ID IS NULL THEN
+                v_FORMULA_CHARGE.CHARGE_ID       := v_CH_ID;
+                v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+                v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+                v_FORMULA_CHARGE.CHARGE_RATE     := v_CHARGE_RATE;
+                v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+                PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+            END IF;
+            -- get CHARGE ID
+            v_CHARGE_DATE   := TRUNC(p_RECORDS(v_IDX).DAY) + 1 / 86400;
+            v_LAST_DATE := TRUNC(p_RECORDS(v_IDX).DAY, 'DD');
+            v_CH_ID := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE, 'FORMULA');
+        END IF;
+
+        --get zone id
+        v_ZONE_ID := ID_FOR_SERVICE_ZONE(p_RECORDS(v_IDX).ZONE);
+        v_UPDATE_MKT_PRICE := TRUE;
+        IF p_RECORDS(v_IDX).RETAIL_OFFSET_RATE <> 0 THEN
+            v_RATE_TYPE := 'Retail';
+            v_CHARGE_RATE := p_RECORDS(v_IDX).RETAIL_OFFSET_RATE;
+            v_CHARGE_QTY := p_RECORDS(v_IDX).RETAIL_PEAK_LOAD;
+            v_CHARGE_AMOUNT := p_RECORDS(v_IDX).RETAIL_OFFSET_CHARGE;
+        ELSIF p_RECORDS(v_IDX).WHOLESALE_OFFSET_RATE <> 0 THEN
+            v_RATE_TYPE := 'Wholesale';
+            v_CHARGE_RATE := p_RECORDS(v_IDX).WHOLESALE_OFFSET_RATE;
+            v_CHARGE_QTY := p_RECORDS(v_IDX).WHOLESALE_PEAK_LOAD;
+            v_CHARGE_AMOUNT := p_RECORDS(v_IDX).WHOLESALE_OFFSET_CHARGE;
+        ELSE
+            v_UPDATE_MKT_PRICE := FALSE;
+            v_CHARGE_RATE := 0;
+            v_CHARGE_QTY := 0;
+            v_CHARGE_AMOUNT := 0;
+        END IF;
+
+        IF v_UPDATE_MKT_PRICE = TRUE THEN
+
+            -- first update the market price - get IDs from cache
+            v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:' || p_RECORDS(v_IDX).ZONE || ':NetworkLdRate:' || v_RATE_TYPE);
+            IF v_MARKET_PRICE_ID IS NULL THEN
+                IO.PUT_MARKET_PRICE(o_OID                   => v_MARKET_PRICE_ID,
+                                    p_MARKET_PRICE_NAME     => 'PJM AP Network Load Rate:' || v_RATE_TYPE,
+                                    p_MARKET_PRICE_ALIAS    => 'PJM AP Network Load Rate',
+                                    p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                                    p_MARKET_PRICE_ID       => 0,
+                                    p_MARKET_PRICE_TYPE     => 'Network Load Rate',
+                                    p_MARKET_PRICE_INTERVAL => 'Month',
+                                    p_MARKET_TYPE           => '?',
+                                    p_COMMODITY_ID          => v_COMMODITY_ID,
+                                    p_SERVICE_POINT_TYPE    => '?',
+                                    p_EXTERNAL_IDENTIFIER   => 'PJM:' || p_RECORDS(v_IDX).ZONE || ':NetworkLdRate' || v_RATE_TYPE,
+                                    p_EDC_ID                => 0,
+                                    p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                    p_POD_ID                => 0,
+                                    p_ZOD_ID                => v_ZONE_ID);
+            END IF;
+
+            PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID,
+                                   TRUNC(v_CHARGE_DATE,'MM'),
+                                   v_CHARGE_RATE);
+        END IF;
+
+        -- next, update formula variables
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE_VAR.CHARGE_ID   := v_CH_ID;
+
+        v_ITERATOR_NAME.CHARGE_ID      := v_CH_ID;
+        v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+        v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+        PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        v_ITERATOR.CHARGE_ID := v_CH_ID;
+        IF v_ITERATOR_ID_MAP.EXISTS(p_RECORDS(v_IDX).ZONE) THEN
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(p_RECORDS(v_IDX).ZONE);
+        ELSE
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(p_RECORDS(v_IDX).ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+
+        v_ITERATOR.ITERATOR1 := p_RECORDS(v_IDX).ZONE;
+        v_ITERATOR.ITERATOR2 := NULL;
+        v_ITERATOR.ITERATOR3 := NULL;
+        v_ITERATOR.ITERATOR4 := NULL;
+        v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID     := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'NetworkLoadRate';
+        v_FORMULA_CHARGE_VAR.Variable_Val  := v_CHARGE_RATE;
+        v_FORMULA_CHARGE_VAR.Iterator_Id   := v_ITERATOR_ID;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'ZoneUsage';
+        v_FORMULA_CHARGE_VAR.Variable_Val  := v_CHARGE_QTY;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+    END LOOP;
+    -- flush charge to formula charge
+    IF NOT v_CH_ID IS NULL THEN
+        v_FORMULA_CHARGE.CHARGE_ID := v_CH_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+        v_FORMULA_CHARGE.CHARGE_RATE     := v_CHARGE_RATE;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+    END IF;
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        COMMIT;
+    END IF;
+
+END IMPORT_NITS_OFFSET_SUMMARY;
+-------------------------------------------------------------------------------------
+PROCEDURE IMPORT_EXPANSION_COST_SUMMARY
+    (
+    p_RECORDS IN MEX_PJM_NITS_SUMMARY_TBL,
+    p_STATUS  OUT NUMBER
+    ) AS
+TYPE MKT_PRICE_ID_MAP IS TABLE OF NUMBER(9) INDEX BY VARCHAR2(32);
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ID_MAP   MKT_PRICE_ID_MAP;
+v_ITERATOR_ID_MAP		 ITERATOR_ID_MAP;
+v_MARKET_PRICE_ID    NUMBER(9);
+v_EXP_COST_CH_ID NUMBER(9);
+v_ZONE VARCHAR2(32);
+v_ZONE_ID			 NUMBER(9);
+v_ITERATOR_ID	 NUMBER(3) := 0;
+v_CHARGE_AMOUNT NUMBER;
+v_CHARGE_RATE NUMBER;
+v_CHARGE_QTY NUMBER;
+v_COMPONENT_ID       NUMBER(9);
+v_PSE_ID             NUMBER(9);
+v_IDX                BINARY_INTEGER;
+v_LAST_ORG_ID        VARCHAR2(16) := '?';
+v_LAST_DATE          DATE := LOW_DATE;
+v_CHARGE_DATE        DATE := LOW_DATE;
+v_FORMULA_CHARGE     FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+    v_ITERATOR.ITERATOR_ID := 0;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+			-- flush charge to formula charge
+        IF NOT v_EXP_COST_CH_ID IS NULL THEN
+            v_FORMULA_CHARGE.CHARGE_ID       := v_EXP_COST_CH_ID;
+            v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+            v_FORMULA_CHARGE.CHARGE_RATE     := v_CHARGE_RATE;
+            v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+            PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+        END IF;
+
+        v_CHARGE_DATE   := TRUNC(p_RECORDS(v_IDX).DAY, 'DD') + 1/86400;
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).DAY, 'DD') THEN
+			-- get charge IDs
+			v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+			v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).DAY, 'DD');
+			v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+
+			v_COMPONENT_ID := GET_COMPONENT(g_EXPANSION_COST_RECOV_NAME,g_EXP_CST_RECOV_CHG_COMP_IDENT,0);
+			v_EXP_COST_CH_ID   := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE,
+																			'FORMULA');
+		END IF;
+
+		v_ZONE := REPLACE(p_RECORDS(v_IDX).ZONE, ' ', '');
+        --get zone id
+		v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_ZONE);
+
+		-- first update the market prices - get IDs from cache
+		IF v_ID_MAP.EXISTS(v_ZONE) THEN
+			v_MARKET_PRICE_ID := v_ID_MAP(v_ZONE);
+		ELSE
+			v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:' || v_ZONE || ':ExpCostRecovery');
+			IF v_MARKET_PRICE_ID IS NULL THEN
+				IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+          							p_MARKET_PRICE_NAME => 'PJM Expansion Cost Recovery Rate - ' || v_ZONE,
+									p_MARKET_PRICE_ALIAS =>'PJM Expansion Cost Recovery Rate - ' || v_ZONE,
+                            		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+									p_MARKET_PRICE_ID => 0,
+                            		p_MARKET_PRICE_TYPE => 'PJM Expansion Cost Recovery',
+									p_MARKET_PRICE_INTERVAL => 'Month',
+                            		p_MARKET_TYPE => '?',
+									p_COMMODITY_ID => 0,
+									p_SERVICE_POINT_TYPE => '?',
+                            		p_EXTERNAL_IDENTIFIER => 'PJM:' || v_ZONE || ':ExpCostRecovery',
+									p_EDC_ID => 0,
+									p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            		p_POD_ID => 0,
+									p_ZOD_ID => v_ZONE_ID);
+			END IF;
+			v_ID_MAP(v_ZONE) := v_MARKET_PRICE_ID;
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE),
+													 p_RECORDS(v_IDX).NETWORK_RATE);
+
+		-- next, update formula variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_EXP_COST_CH_ID;
+
+        v_ITERATOR_NAME.CHARGE_ID := v_EXP_COST_CH_ID;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+		v_ITERATOR.CHARGE_ID := v_EXP_COST_CH_ID;
+       	IF v_ITERATOR_ID_MAP.EXISTS(v_ZONE) THEN
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ZONE);
+		ELSE
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+
+		v_ITERATOR.ITERATOR1 := v_ZONE;
+		v_ITERATOR.ITERATOR2 := NULL;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Zone_Avg_Peak_Use';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).PEAK_LOAD;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Expansion_Cost_Recovery_Rate';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).NETWORK_RATE;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_CHARGE_QTY := p_RECORDS(v_IDX).PEAK_LOAD;
+        v_CHARGE_RATE := p_RECORDS(v_IDX).NETWORK_RATE;
+	    v_CHARGE_AMOUNT := p_RECORDS(v_IDX).CHARGE;
+
+		v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+	-- flush charge to formula charge
+	IF NOT v_EXP_COST_CH_ID IS NULL THEN
+		v_FORMULA_CHARGE.CHARGE_ID       := v_EXP_COST_CH_ID;
+		v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+		v_FORMULA_CHARGE.CHARGE_RATE     := v_CHARGE_RATE;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+	END IF;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_EXPANSION_COST_SUMMARY;
+-------------------------------------------------------------------------------------
+PROCEDURE IMPORT_RTO_STARTUP_COST_SUMM
+    (
+    p_RECORDS IN MEX_PJM_NITS_SUMMARY_TBL,
+    p_STATUS  OUT NUMBER
+    ) AS
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP		 ITERATOR_ID_MAP;
+v_MARKET_PRICE_ID    NUMBER(9);
+v_RTO_COST_CH_ID NUMBER(9);
+v_ZONE VARCHAR2(32);
+v_ZONE_ID			 NUMBER(9);
+v_ITERATOR_ID	 NUMBER(3) := 0;
+v_CHARGE_AMOUNT NUMBER;
+v_CHARGE_RATE NUMBER;
+v_CHARGE_QTY NUMBER;
+v_COMPONENT_ID       NUMBER(9);
+v_PSE_ID             NUMBER(9);
+v_IDX                BINARY_INTEGER;
+v_LAST_ORG_ID        VARCHAR2(16) := '?';
+v_LAST_DATE          DATE := LOW_DATE;
+v_CHARGE_DATE        DATE := LOW_DATE;
+v_FORMULA_CHARGE     FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+    v_ITERATOR.ITERATOR_ID := 0;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+			-- flush charge to formula charge
+        IF NOT v_RTO_COST_CH_ID IS NULL THEN
+            v_FORMULA_CHARGE.CHARGE_ID       := v_RTO_COST_CH_ID;
+            v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+            v_FORMULA_CHARGE.CHARGE_RATE     := v_CHARGE_RATE;
+            v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+            PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+        END IF;
+
+        v_CHARGE_DATE   := TRUNC(p_RECORDS(v_IDX).DAY, 'DD') + 1/86400;
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX).ORG_ID OR
+            v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).DAY, 'DD') THEN
+			-- get charge IDs
+			v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+			v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).DAY, 'DD');
+			v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+
+            v_COMPONENT_ID := GET_COMPONENT(g_RTO_STARTUP_COST_COMP_NAME,g_RTO_STARTUP_CHG_COMP_IDENT,0);
+			v_RTO_COST_CH_ID := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE,
+																			'FORMULA');
+		END IF;
+
+		v_ZONE := REPLACE(p_RECORDS(v_IDX).ZONE, ' ', '');
+        --get zone id
+		v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_ZONE);
+
+		-- first update the market prices - get IDs from cache
+		 --create market price
+        v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:' || v_ZONE|| ':StartUpCostRecoverRate:');
+    	IF v_MARKET_PRICE_ID IS NULL THEN
+
+            IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+              							p_MARKET_PRICE_NAME => 'PJM AEP StartUp Cost Recovery Rate' ,
+    									p_MARKET_PRICE_ALIAS =>'PJM AEP StartUp Cost Recovery Rate',
+                                		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+    									p_MARKET_PRICE_ID => 0,
+                                		p_MARKET_PRICE_TYPE => 'StartUp Cost Recovery',
+    									p_MARKET_PRICE_INTERVAL => 'Month',
+                                		p_MARKET_TYPE => '?',
+    									p_COMMODITY_ID => 0,
+    									p_SERVICE_POINT_TYPE => '?',
+                                		p_EXTERNAL_IDENTIFIER => 'PJM:' || v_ZONE || ':StartUpCostRecoverRate:',
+    									p_EDC_ID => 0,
+    									p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                		p_POD_ID => 0,
+    									p_ZOD_ID => v_ZONE_ID);
+        END IF;
+
+    	PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE,'MM'), v_CHARGE_RATE);
+
+		-- next, update formula variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_RTO_COST_CH_ID;
+
+        v_ITERATOR_NAME.CHARGE_ID := v_RTO_COST_CH_ID;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+		v_ITERATOR.CHARGE_ID := v_RTO_COST_CH_ID;
+       	IF v_ITERATOR_ID_MAP.EXISTS(v_ZONE) THEN
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ZONE);
+		ELSE
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+
+		v_ITERATOR.ITERATOR1 := v_ZONE;
+		v_ITERATOR.ITERATOR2 := NULL;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ZoneLoad';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).PEAK_LOAD;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'StartUpCostRecoveryRate';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).NETWORK_RATE;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_CHARGE_QTY := p_RECORDS(v_IDX).PEAK_LOAD;
+        v_CHARGE_RATE := p_RECORDS(v_IDX).NETWORK_RATE;
+	    v_CHARGE_AMOUNT := p_RECORDS(v_IDX).CHARGE;
+
+		v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+	-- flush charge to formula charge
+	IF NOT v_RTO_COST_CH_ID IS NULL THEN
+		v_FORMULA_CHARGE.CHARGE_ID       := v_RTO_COST_CH_ID;
+		v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_QTY;
+		v_FORMULA_CHARGE.CHARGE_RATE     := v_CHARGE_RATE;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+	END IF;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_RTO_STARTUP_COST_SUMM;
+-------------------------------------------------------------------------------------
+PROCEDURE IMPORT_OP_RES_CHG_SUMMARY_NEW
+	(
+	p_RECORDS IN MEX_PJM_OPER_RES_SUMM_MSRS_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+v_OR_DA_MKT_PR_ID NUMBER(9);
+v_OR_DA_CH_ID NUMBER(9);
+v_OR_BAL_CH_ID NUMBER(9);
+v_DA_LOAD_TX_ID NUMBER(9);
+v_OR_DA_COMP NUMBER(9);
+v_OR_BAL_COMP NUMBER(9);
+v_CONTRACT_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE := LOW_DATE;
+v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+
+BEGIN
+  p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+
+	ID.ID_FOR_COMMODITY('DayAhead Energy',FALSE, v_COMMODITY_ID);
+    v_OR_DA_COMP := GET_COMPONENT(g_DA_OP_RES_COMP_NAME,g_DA_OP_RES_CHG_COMP_IDENT,0);
+    v_OR_BAL_COMP := GET_COMPONENT(g_BAL_OP_RES_COMP_NAME,g_BAL_OP_RES_CHG_COMP_IDENT,0);
+
+	--Retrieve market price id
+	v_OR_DA_MKT_PR_ID := GET_MARKET_PRICE('PJM:ORTotal-DayAhead');
+	IF v_OR_DA_MKT_PR_ID IS NULL THEN
+		IO.PUT_MARKET_PRICE(o_OID =>v_OR_DA_MKT_PR_ID,
+							p_MARKET_PRICE_NAME => 'PJM:OpResTotal-DayAhead',
+							p_MARKET_PRICE_ALIAS =>'PJM:OpResTotal-DayAhead',
+							p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+							p_MARKET_PRICE_ID => 0,
+							p_MARKET_PRICE_TYPE => 'User Defined',
+							p_MARKET_PRICE_INTERVAL => 'Day',
+							p_MARKET_TYPE => MM_PJM_UTIL.g_DAYAHEAD,
+							p_COMMODITY_ID => 0,
+							p_SERVICE_POINT_TYPE => '?',
+							p_EXTERNAL_IDENTIFIER => 'PJM:ORTotal-DayAhead',
+							p_EDC_ID => 0,
+							p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+							p_POD_ID => 0,
+							p_ZOD_ID => 0);
+	END IF;
+
+	 --Retrive transaction id
+	v_DA_LOAD_TX_ID := GET_TX_ID('PJM:TotalDALoad+Exports',
+								  'Load',
+								  'PJM:TotalDALoad+Exports',
+								  'Day',
+								  v_COMMODITY_ID);
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_CHARGE_DATE := TRUNC(p_RECORDS(v_IDX).DAY) + 1/86400;
+        IF v_LAST_ORG_ID <> p_RECORDS(v_IDX).ORG_ID OR
+		   v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).DAY,'DD') THEN
+		   	-- get charge IDs
+			v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+			v_LAST_DATE := TRUNC(v_CHARGE_DATE,'DD');
+			v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+            v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+			v_OR_DA_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_OR_DA_COMP,v_LAST_DATE,'FORMULA');
+			v_OR_BAL_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_OR_BAL_COMP,v_LAST_DATE,'FORMULA');
+
+		END IF;
+
+        --update market prices
+		PUT_MARKET_PRICE_VALUE(v_OR_DA_MKT_PR_ID, TRUNC(v_CHARGE_DATE), p_RECORDS(v_IDX).Total_DA_Credits);
+
+        --update schedule
+        PUT_SCHEDULE_VALUE(v_DA_LOAD_TX_ID, v_CHARGE_DATE, p_RECORDS(v_IDX).TOTAL_DA_LOAD_PLUS_EXPORTS);
+
+		-- next, update formula charges and variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+
+		-- day ahead charge first
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_OR_DA_CH_ID;
+		v_FORMULA_CHARGE.CHARGE_ID := v_OR_DA_CH_ID;
+
+		-- put variables
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJMTotalDACredits';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).Total_DA_Credits;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'DALoadPlusExports';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DA_Load_Plus_Exports;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'TotalDALoadPlusExports';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).Total_DA_Load_Plus_Exports;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		-- put charge
+		v_FORMULA_CHARGE.CHARGE_QUANTITY :=
+        	CASE WHEN p_RECORDS(v_IDX).Total_DA_Load_Plus_Exports = 0 THEN 0 ELSE p_RECORDS(v_IDX).DA_Load_Plus_Exports/p_RECORDS(v_IDX).Total_DA_Load_Plus_Exports END;
+		v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).Total_DA_Credits;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).DA_Charge;
+	    PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+		-- balancing charges next
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_OR_BAL_CH_ID;
+		v_FORMULA_CHARGE.CHARGE_ID := v_OR_BAL_CH_ID;
+
+		-- put new variables
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'BalOpResReliabChg';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := NVL(p_RECORDS(v_IDX).Bal_Reliability_Charge,0);
+
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'BalOpResDeviationsChg';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := NVL(p_RECORDS(v_IDX).Bal_Deviation_Charge,0);
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		-- put charge
+		v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).Bal_Reliability_Charge + p_RECORDS(v_IDX).Bal_Deviation_Charge;
+		v_FORMULA_CHARGE.CHARGE_RATE := 1;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).Bal_Charge;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+
+		v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+  IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+    COMMIT;
+  END IF;
+END IMPORT_OP_RES_CHG_SUMMARY_NEW;
+-------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REG_OPER_RES_CHG_SUMM
+	(
+	p_RECORDS IN MEX_PJM_REG_OPER_RES_SUMM_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+v_CONTRACT_ID INTERCHANGE_CONTRACT.CONTRACT_ID%TYPE;
+v_RTO_BAL_REL_ID NUMBER(9);
+v_EAST_BAL_REL_ID NUMBER(9);
+v_WEST_BAL_REL_ID NUMBER(9);
+v_RTO_BAL_DEV_ID NUMBER(9);
+v_WEST_BAL_DEV_ID NUMBER(9);
+v_EAST_BAL_DEV_ID NUMBER(9);
+v_OR_BAL_CH_ID NUMBER(9);
+v_OR_BAL_COMP NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_IDX BINARY_INTEGER;
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+	
+    v_OR_BAL_COMP := GET_COMPONENT(g_BAL_OP_RES_COMP_NAME,g_BAL_OP_RES_CHG_COMP_IDENT,0);
+    v_PSE_ID := GET_PSE(p_RECORDS(v_IDX).ORG_ID, NULL); 
+    v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+    
+    v_RTO_BAL_REL_ID := GET_TX_ID(p_RECORDS(v_IDX).ORG_NAME || ':PJM:RTOBalOpResRel',
+                                      'RTO BalOpRes Rel',
+                                      p_RECORDS(v_IDX).ORG_NAME || ':PJM:RTO Bal OpRes for Reliability Charge',
+                                      'Day',
+                                      0,
+                                      v_CONTRACT_ID);
+                                      
+    v_EAST_BAL_REL_ID := GET_TX_ID(p_RECORDS(v_IDX).ORG_NAME || ':PJM:EastBalOpResRel',
+                                      'Est BalOpRes Rel',
+                                      p_RECORDS(v_IDX).ORG_NAME || ':PJM:East Bal OpRes for Reliability Charge',
+                                      'Day',
+                                      0,
+                                      v_CONTRACT_ID);  
+                                      
+    v_WEST_BAL_REL_ID := GET_TX_ID(p_RECORDS(v_IDX).ORG_NAME || ':PJM:WestBalOpResRel',
+                                      'Wst BalOpRes Rel',
+                                      p_RECORDS(v_IDX).ORG_NAME || ':PJM:West Bal OpRes for Reliability Charge',
+                                      'Day',
+                                      0,
+                                      v_CONTRACT_ID); 
+                                      
+    v_RTO_BAL_DEV_ID := GET_TX_ID(p_RECORDS(v_IDX).ORG_NAME || ':PJM:RTOBalOpResDev',
+                                      'RTO BalOpRes Dev',
+                                      p_RECORDS(v_IDX).ORG_NAME || ':PJM:RTO Bal OpRes for Deviations Charge',
+                                      'Day',
+                                      0,
+                                      v_CONTRACT_ID);  
+                                      
+    v_EAST_BAL_DEV_ID := GET_TX_ID(p_RECORDS(v_IDX).ORG_NAME || ':PJM:EastBalOpResDev',
+                                      'Est BalOpRes Dev',
+                                      p_RECORDS(v_IDX).ORG_NAME || ':PJM:East Bal OpRes for Deviations Charge',
+                                      'Day',
+                                      0,
+                                      v_CONTRACT_ID);  
+                                      
+    v_WEST_BAL_DEV_ID := GET_TX_ID(p_RECORDS(v_IDX).ORG_NAME || ':PJM:WestBalOpResDev',
+                                      'Wst BalOpRes Dev',
+                                      p_RECORDS(v_IDX).ORG_NAME || ':PJM:West Bal OpRes for Deviations Charge',
+                                      'Day',
+                                      0,
+                                      v_CONTRACT_ID);                                                                                                                                                                                            
+
+        
+    
+
+
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_CHARGE_DATE := TRUNC(p_RECORDS(v_IDX).OPER_DAY) + 1/86400;
+        IF v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).OPER_DAY,'DD') THEN
+		   	-- get charge IDs			
+			v_LAST_DATE := TRUNC(v_CHARGE_DATE,'DD');
+			--v_PSE_ID := GET_PSE(p_RECORDS(v_IDX).ORG_ID, NULL);            			
+			v_OR_BAL_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_OR_BAL_COMP,v_LAST_DATE,'FORMULA');
+		END IF;
+
+        --update transactions
+        PUT_SCHEDULE_VALUE(v_RTO_BAL_REL_ID,
+                           v_CHARGE_DATE,
+                           p_RECORDS(v_IDX).RTO_BAL_RELIABILITY_CHG);
+                           
+        PUT_SCHEDULE_VALUE(v_EAST_BAL_REL_ID,
+                           v_CHARGE_DATE,
+                           p_RECORDS(v_IDX).EAST_BAL_RELIABILITY_CHG);
+                           
+        PUT_SCHEDULE_VALUE(v_WEST_BAL_REL_ID,
+                           v_CHARGE_DATE,
+                           p_RECORDS(v_IDX).WEST_BAL_RELIABILITY_CHG);
+                           
+        PUT_SCHEDULE_VALUE(v_RTO_BAL_DEV_ID,
+                           v_CHARGE_DATE,
+                           p_RECORDS(v_IDX).RTO_BAL_DEVIATIONS_CHG);
+                           
+        PUT_SCHEDULE_VALUE(v_EAST_BAL_DEV_ID,
+                           v_CHARGE_DATE,
+                           p_RECORDS(v_IDX).EAST_BAL_DEVIATIONS_CHG);
+                           
+        PUT_SCHEDULE_VALUE(v_WEST_BAL_DEV_ID,
+                           v_CHARGE_DATE,
+                           p_RECORDS(v_IDX).WEST_BAL_DEVIATIONS_CHG);                                                                                                                                   
+  
+
+		-- put variables
+        v_FORMULA_CHARGE_VAR.Charge_Id := v_OR_BAL_CH_ID;
+        v_FORMULA_CHARGE_VAR.Iterator_Id := 0;
+        v_FORMULA_CHARGE_VAR.Charge_Date := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTOBalOpResReliabilityCharge';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).RTO_BAL_RELIABILITY_CHG;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'EastBalOpResReliabilityCharge';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).EAST_BAL_RELIABILITY_CHG;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'WestBalOpResReliabilityCharge';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).WEST_BAL_RELIABILITY_CHG;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RTOBalOpResDeviationsCharge';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).RTO_BAL_DEVIATIONS_CHG;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'EastBalOpResDeviationsCharge';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).EAST_BAL_DEVIATIONS_CHG;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'WestBalOpResDeviationsCharge';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).WEST_BAL_DEVIATIONS_CHG;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+  IF p_STATUS >= 0 THEN
+    COMMIT;
+  END IF;
+END IMPORT_REG_OPER_RES_CHG_SUMM;
+-------------------------------------------------------------------------------------
+PROCEDURE IMPORT_OP_RES_CHG_SUMMARY
+	(
+	p_RECORDS IN MEX_PJM_OPER_RES_SUMMARY_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+v_OR_DA_MKT_PR_ID NUMBER(9);
+v_OR_BAL_MKT_PR_ID NUMBER(9);
+v_OR_DA_CH_ID NUMBER(9);
+v_OR_BAL_CH_ID NUMBER(9);
+v_DA_LOAD_TX_ID NUMBER(9);
+v_DEVIATION_TX_ID NUMBER(9);
+v_OR_DA_COMP NUMBER(9);
+v_OR_BAL_COMP NUMBER(9);
+v_CONTRACT_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE := LOW_DATE;
+v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+BEGIN
+  p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+
+	ID.ID_FOR_COMMODITY('DayAhead Energy',FALSE, v_COMMODITY_ID);
+    v_OR_DA_COMP := GET_COMPONENT(g_DA_OP_RES_COMP_NAME,g_DA_OP_RES_CHG_COMP_IDENT,0);
+    v_OR_BAL_COMP := GET_COMPONENT(g_BAL_OP_RES_COMP_NAME,g_BAL_OP_RES_CHG_COMP_IDENT,0);
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_CHARGE_DATE := TRUNC(p_RECORDS(v_IDX).DAY) + 1/86400;
+        IF v_LAST_ORG_ID <> p_RECORDS(v_IDX).ORG_ID OR
+		   v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).DAY,'DD') THEN
+		   	-- get charge IDs
+			v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+			v_LAST_DATE := TRUNC(v_CHARGE_DATE,'DD');
+			v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+            v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+			v_OR_DA_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_OR_DA_COMP,v_LAST_DATE,'FORMULA');
+			v_OR_BAL_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_OR_BAL_COMP,v_LAST_DATE,'FORMULA');
+
+		END IF;
+
+        --update market prices
+		v_OR_DA_MKT_PR_ID := GET_MARKET_PRICE('PJM:ORTotal-DayAhead');
+		IF v_OR_DA_MKT_PR_ID IS NULL THEN
+			IO.PUT_MARKET_PRICE(o_OID =>v_OR_DA_MKT_PR_ID,
+      							p_MARKET_PRICE_NAME => 'PJM:OpResTotal-DayAhead',
+								p_MARKET_PRICE_ALIAS =>'PJM:OpResTotal-DayAhead',
+                        		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+								p_MARKET_PRICE_ID => 0,
+                        		p_MARKET_PRICE_TYPE => 'User Defined',
+								p_MARKET_PRICE_INTERVAL => 'Day',
+                        		p_MARKET_TYPE => MM_PJM_UTIL.g_DAYAHEAD,
+								p_COMMODITY_ID => 0,
+								p_SERVICE_POINT_TYPE => '?',
+                        		p_EXTERNAL_IDENTIFIER => 'PJM:ORTotal-DayAhead',
+								p_EDC_ID => 0,
+								p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                        		p_POD_ID => 0,
+								p_ZOD_ID => 0);
+		END IF;
+		v_OR_BAL_MKT_PR_ID := GET_MARKET_PRICE('PJM:ORTotal-Balancing');
+		IF v_OR_BAL_MKT_PR_ID IS NULL THEN
+			IO.PUT_MARKET_PRICE(o_OID =>v_OR_BAL_MKT_PR_ID,
+      							p_MARKET_PRICE_NAME => 'PJM:OpResTotal-Balancing',
+								p_MARKET_PRICE_ALIAS =>'PJM:OpResTotal-Balancing',
+                        		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+								p_MARKET_PRICE_ID => 0,
+                        		p_MARKET_PRICE_TYPE => 'User Defined',
+								p_MARKET_PRICE_INTERVAL => 'Day',
+                        		p_MARKET_TYPE => MM_PJM_UTIL.g_DAYAHEAD,
+								p_COMMODITY_ID => 0,
+								p_SERVICE_POINT_TYPE => '?',
+                        		p_EXTERNAL_IDENTIFIER => 'PJM:ORTotal-Balancing',
+								p_EDC_ID => 0,
+								p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                        		p_POD_ID => 0,
+								p_ZOD_ID => 0);
+		END IF;
+
+		PUT_MARKET_PRICE_VALUE(v_OR_DA_MKT_PR_ID, TRUNC(v_CHARGE_DATE), p_RECORDS(v_IDX).Total_DA_Credits);
+		PUT_MARKET_PRICE_VALUE(v_OR_BAL_MKT_PR_ID, TRUNC(v_CHARGE_DATE), p_RECORDS(v_IDX).Total_Bal_Credits);
+
+        --get transaction ids, update schedule
+        v_DA_LOAD_TX_ID := GET_TX_ID('PJM:TotalDALoad+Exports',
+                                      'Load',
+                                      'PJM:TotalDALoad+Exports',
+                                      'Day',
+                                      v_COMMODITY_ID);
+
+        PUT_SCHEDULE_VALUE(v_DA_LOAD_TX_ID,
+                           v_CHARGE_DATE,
+                           p_RECORDS(v_IDX).TOTAL_DA_LOAD_PLUS_EXPORTS);
+
+        v_DEVIATION_TX_ID := GET_TX_ID('PJM:TotalDeviation',
+                                      'Load',
+                                      'PJM:TotalDeviation',
+                                      'Day',
+                                      v_COMMODITY_ID);
+
+        PUT_SCHEDULE_VALUE(v_DEVIATION_TX_ID,
+                           v_CHARGE_DATE,
+                           p_RECORDS(v_IDX).TOTAL_DEVIATION);
+
+		-- next, update formula charges and variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+
+		-- day ahead charge first
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_OR_DA_CH_ID;
+		v_FORMULA_CHARGE.CHARGE_ID := v_OR_DA_CH_ID;
+
+		-- put variables
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJMTotalDACredits';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).Total_DA_Credits;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'DALoadPlusExports';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).DA_Load_Plus_Exports;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'TotalDALoadPlusExports';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).Total_DA_Load_Plus_Exports;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		-- put charge
+		v_FORMULA_CHARGE.CHARGE_QUANTITY :=
+        	CASE WHEN p_RECORDS(v_IDX).Total_DA_Load_Plus_Exports = 0 THEN 0 ELSE p_RECORDS(v_IDX).DA_Load_Plus_Exports/p_RECORDS(v_IDX).Total_DA_Load_Plus_Exports END;
+		v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).Total_DA_Credits;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).DA_Charge;
+	    PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+		-- balancing charges next
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_OR_BAL_CH_ID;
+		v_FORMULA_CHARGE.CHARGE_ID := v_OR_BAL_CH_ID;
+
+		-- put variables
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJMDeviation';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).Total_Deviation;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'GenerationDeviation';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).Generation_Deviation;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'OtherDeviation';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).Injection_Deviation +
+        						p_RECORDS(v_IDX).Withdrawal_Deviation;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		-- put charge
+		v_FORMULA_CHARGE.CHARGE_QUANTITY :=
+				CASE WHEN p_RECORDS(v_IDX).Total_Deviation = 0 THEN 0 ELSE
+ 				(p_RECORDS(v_IDX).Generation_Deviation+p_RECORDS(v_IDX).Injection_Deviation +
+ 				p_RECORDS(v_IDX).Withdrawal_Deviation)/p_RECORDS(v_IDX).Total_Deviation END;
+		v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).Total_Bal_Credits;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).Bal_Charge;
+	    PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+		v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+  IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+    COMMIT;
+  END IF;
+END IMPORT_OP_RES_CHG_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_OP_RES_LOST_OPP_COST
+    (
+    p_RECORDS IN MEX_PJM_OP_RES_LOC_MSRS_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(64);
+v_IDX BINARY_INTEGER;
+v_CHARGE_DATE DATE;
+v_LAST_DATE DATE := LOW_DATE;
+v_PSE_ID NUMBER(9);
+v_BAL_OP_COMP NUMBER(9);
+v_BAL_OP_LOC_COMP NUMBER(9);
+v_BAL_OPRES_CR_ID NUMBER(9);
+v_BAL_OPRES_CR_LOC_ID NUMBER(9);
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_ID VARCHAR2(64);
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+v_ITERATOR_ID NUMBER(9) := 0;
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+    v_ITERATOR.ITERATOR_ID := 0;
+	v_IDX := p_RECORDS.FIRST;
+
+	--get component id for 'PJM:BalOpResCred'
+    v_BAL_OP_COMP := GET_COMPONENT(g_BAL_OP_RES_COMP_NAME,g_BAL_OP_RES_CR_COMP_IDENT ,1);
+    v_BAL_OP_LOC_COMP := GET_COMPONENT('Balancing Operating Reserves Credit: Lost Opportunity Cost','PJM:BalOpResCredLOC',1);
+
+    WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_CHARGE_DATE := p_RECORDS(v_IDX).CUT_DATE;
+		v_PSE_ID := GET_PSE(p_RECORDS(v_IDX).ORG_ID, p_RECORDS(v_IDX).ORG_NAME);
+        IF v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).CUT_DATE,'DD') THEN
+            IF v_LAST_DATE <> LOW_DATE THEN
+                UPDATE_COMBINATION_CHARGE(v_BAL_OPRES_CR_ID, v_BAL_OPRES_CR_LOC_ID, 'FORMULA',-1,v_LAST_DATE, v_BAL_OP_LOC_COMP);
+
+        END IF;
+            v_LAST_DATE := TRUNC(v_CHARGE_DATE, 'DD');
+    		v_BAL_OPRES_CR_ID := GET_CHARGE_ID(v_PSE_ID, v_BAL_OP_COMP, v_LAST_DATE, 'FORMULA');
+            v_BAL_OPRES_CR_LOC_ID := GET_COMBO_CHARGE_ID(v_BAL_OPRES_CR_ID,v_BAL_OP_LOC_COMP,v_LAST_DATE,'FORMULA', TRUE);
+        END IF;
+
+        v_FORMULA_CHARGE.Charge_Date := v_CHARGE_DATE;
+        v_FORMULA_CHARGE_VAR.Charge_Date := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.Charge_Id := v_BAL_OPRES_CR_LOC_ID;
+		v_FORMULA_CHARGE_VAR.Charge_Id := v_BAL_OPRES_CR_LOC_ID;
+
+        v_ITERATOR_NAME.CHARGE_ID := v_BAL_OPRES_CR_LOC_ID;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Generator_ID';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        v_ITERATOR.CHARGE_ID := v_BAL_OPRES_CR_LOC_ID;
+        v_ID := p_RECORDS(v_IDX).UNIT_ID;
+       	IF v_ITERATOR_ID_MAP.EXISTS(v_ID) THEN
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ID);
+		ELSE
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_ID) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+
+        v_ITERATOR.ITERATOR1 := v_ID;
+		v_ITERATOR.ITERATOR2 := NULL;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'DayAheadMW';
+        v_FORMULA_CHARGE_VAR.Variable_Val := p_RECORDS(v_IDX).DA_MW;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'OfferAtDayAheadMW';
+        v_FORMULA_CHARGE_VAR.Variable_Val := p_RECORDS(v_IDX).OFFER_DA_MW;
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'DALMP';
+        v_FORMULA_CHARGE_VAR.Variable_Val := p_RECORDS(v_IDX).DA_LMP;
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'RealTimeMW';
+        v_FORMULA_CHARGE_VAR.Variable_Val := p_RECORDS(v_IDX).RT_MW;
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'OfferAtRealTimeMW';
+        v_FORMULA_CHARGE_VAR.Variable_Val := p_RECORDS(v_IDX).OFFER_RT_MW;
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'RTLMP';
+        v_FORMULA_CHARGE_VAR.Variable_Val := p_RECORDS(v_IDX).RT_LMP;
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'RTDesiredMW';
+        v_FORMULA_CHARGE_VAR.Variable_Val := p_RECORDS(v_IDX).RT_DESIRED_MW;
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'MWHReduced';
+        v_FORMULA_CHARGE_VAR.Variable_Val := p_RECORDS(v_IDX).MWH_REDUCED;
+		--MSRS publishes two more variables 'Regulation MWh Adjustment'
+		--and 'Synchronized Reserve MWh Adjustment'
+		v_FORMULA_CHARGE_VAR.Variable_Name := 'RegulationMWAdj';
+        v_FORMULA_CHARGE_VAR.Variable_Val := p_RECORDS(v_IDX).REG_MWH_ADJ;
+		v_FORMULA_CHARGE_VAR.Variable_Name := 'SyncResMWAdj';
+		v_FORMULA_CHARGE_VAR.Variable_Val := p_RECORDS(v_IDX).SYNC_RES_MWH_ADJ;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        IF NVL(p_RECORDS(v_IDX).MWH_REDUCED,0) > 0 THEN
+            v_FORMULA_CHARGE.Charge_Quantity := p_RECORDS(v_IDX).MWH_REDUCED;
+            v_FORMULA_CHARGE.Charge_Rate := p_RECORDS(v_IDX).RT_LMP - p_RECORDS(v_IDX).OFFER_RT_MW;
+            v_FORMULA_CHARGE.Charge_Amount := p_RECORDS(v_IDX).LOC_CREDIT;
+        ELSIF (p_RECORDS(v_IDX).RT_LMP - p_RECORDS(v_IDX).DA_LMP) >
+                    (p_RECORDS(v_IDX).RT_LMP - p_RECORDS(v_IDX).OFFER_DA_MW) THEN
+            v_FORMULA_CHARGE.Charge_Quantity := (p_RECORDS(v_IDX).RT_LMP - p_RECORDS(v_IDX).DA_LMP);
+            v_FORMULA_CHARGE.Charge_Rate := p_RECORDS(v_IDX).DA_MW;
+        ELSE
+            v_FORMULA_CHARGE.Charge_Quantity := (p_RECORDS(v_IDX).RT_LMP - p_RECORDS(v_IDX).OFFER_DA_MW);
+            v_FORMULA_CHARGE.Charge_Rate := p_RECORDS(v_IDX).DA_MW;
+        END IF;
+
+        v_FORMULA_CHARGE.Charge_Amount := p_RECORDS(v_IDX).LOC_CREDIT;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+    END LOOP;
+    UPDATE_COMBINATION_CHARGE(v_BAL_OPRES_CR_ID, v_BAL_OPRES_CR_LOC_ID, 'FORMULA',-1,v_LAST_DATE, v_BAL_OP_LOC_COMP);
+
+    COMMIT;
+END IMPORT_OP_RES_LOST_OPP_COST;
+--------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_OP_RES_GEN_CR_DETAILS
+	(
+	p_STATUS OUT NUMBER
+	) AS
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(64);
+v_CHARGE_DATE DATE;
+v_LAST_DATE DATE := LOW_DATE;
+v_PSE_ID NUMBER(9);
+v_DA_OP_COMP NUMBER(9);
+v_DA_GEN_COMP NUMBER(9);
+v_BAL_OP_COMP NUMBER(9);
+v_BAL_GEN_COMP NUMBER(9);
+v_DA_OPRES_CR_ID NUMBER(9);
+v_BAL_OPRES_CR_ID NUMBER(9);
+ v_DA_OPRES_GEN_CR_ID NUMBER(9);
+v_BAL_OPRES_CR_EXCESS_ID NUMBER(9);
+v_ID VARCHAR2(64);
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+v_ITERATOR_ID NUMBER(9) := 0;
+v_FORMULA_CHARGE     FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_UPDATE BOOLEAN := FALSE;
+
+CURSOR p_GEN_CREDITS IS
+	SELECT * FROM PJM_OPRES_GEN_CREDITS T
+	ORDER BY T.ORG_ID, T.DAY, T.UNIT_ID;
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+	v_ITERATOR.ITERATOR_ID := 0;
+
+	v_DA_OP_COMP := GET_COMPONENT(g_DA_OP_RES_COMP_NAME,g_DA_OP_RES_CR_COMP_IDENT,1);
+    v_DA_GEN_COMP := GET_COMPONENT('Day Ahead Op Reserves Generator Credit','PJMDAOpResGenCredit',1);
+
+    v_BAL_OP_COMP := GET_COMPONENT(g_BAL_OP_RES_COMP_NAME,g_BAL_OP_RES_CR_COMP_IDENT,1);
+    v_BAL_GEN_COMP := GET_COMPONENT('Balancing Operating Reserves Generator Credit','PJM:BalOpResCredExcess',1);
+
+	FOR v_GEN_CREDIT IN p_GEN_CREDITS LOOP
+        v_UPDATE := TRUE;
+       	v_CHARGE_DATE   := TRUNC(v_GEN_CREDIT.DAY);
+		v_PSE_ID      := GET_PSE(v_GEN_CREDIT.ORG_ID, v_GEN_CREDIT.ORG_NAME);
+
+        IF v_LAST_DATE <> TRUNC(v_GEN_CREDIT.DAY) THEN
+            --put billing statement for previous day
+            IF v_LAST_DATE <> LOW_DATE THEN
+                UPDATE_COMBINATION_CHARGE(v_DA_OPRES_CR_ID,v_DA_OPRES_GEN_CR_ID,'FORMULA',-1, v_LAST_DATE, v_DA_GEN_COMP);
+                UPDATE_COMBINATION_CHARGE(v_BAL_OPRES_CR_ID,v_BAL_OPRES_CR_EXCESS_ID,'FORMULA',-1, v_LAST_DATE, v_BAL_GEN_COMP);
+
+            END IF;
+
+            v_LAST_DATE := TRUNC(v_CHARGE_DATE, 'DD');
+
+    		v_DA_OPRES_CR_ID := GET_CHARGE_ID(v_PSE_ID, v_DA_OP_COMP, v_LAST_DATE, 'FORMULA');
+            v_DA_OPRES_GEN_CR_ID := GET_COMBO_CHARGE_ID(v_DA_OPRES_CR_ID,v_DA_GEN_COMP,v_LAST_DATE,'FORMULA',TRUE);
+
+    		v_BAL_OPRES_CR_ID := GET_CHARGE_ID(v_PSE_ID, v_BAL_OP_COMP, v_LAST_DATE, 'FORMULA');
+            v_BAL_OPRES_CR_EXCESS_ID := GET_COMBO_CHARGE_ID(v_BAL_OPRES_CR_ID,v_BAL_GEN_COMP,v_LAST_DATE,'FORMULA',TRUE);
+
+        END IF;
+
+        v_FORMULA_CHARGE.Charge_Date := v_CHARGE_DATE;
+        v_FORMULA_CHARGE_VAR.Charge_Date := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.Charge_Id := v_DA_OPRES_GEN_CR_ID;
+		v_FORMULA_CHARGE_VAR.Charge_Id := v_DA_OPRES_GEN_CR_ID;
+
+        v_ITERATOR_NAME.CHARGE_ID := v_DA_OPRES_GEN_CR_ID;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Generator_ID';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+		v_ITERATOR.CHARGE_ID := v_DA_OPRES_GEN_CR_ID;
+        v_ID := v_GEN_CREDIT.UNIT_ID;
+       	IF v_ITERATOR_ID_MAP.EXISTS(v_ID) THEN
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ID);
+		ELSE
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_ID) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+
+        v_ITERATOR.ITERATOR1 := v_ID;
+		v_ITERATOR.ITERATOR2 := NULL;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'DayAheadOffer';
+        v_FORMULA_CHARGE_VAR.Variable_Val := v_GEN_CREDIT.DA_OFFER;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'DayAheadMarketValue';
+        v_FORMULA_CHARGE_VAR.Variable_Val := v_GEN_CREDIT.DA_VALUE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.Charge_Quantity := NVL(v_GEN_CREDIT.DA_CREDIT,0);
+        v_FORMULA_CHARGE.Charge_Rate := 1;
+        v_FORMULA_CHARGE.Charge_Amount := NVL(v_GEN_CREDIT.DA_CREDIT,0);
+
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        v_FORMULA_CHARGE.Charge_Id := v_BAL_OPRES_CR_EXCESS_ID;
+		v_FORMULA_CHARGE_VAR.Charge_Id := v_BAL_OPRES_CR_EXCESS_ID;
+
+        v_ITERATOR_NAME.CHARGE_ID := v_BAL_OPRES_CR_EXCESS_ID;
+        PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        v_ITERATOR.CHARGE_ID := v_BAL_OPRES_CR_EXCESS_ID;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'BalEnergyMktValue';
+        v_FORMULA_CHARGE_VAR.Variable_Val := v_GEN_CREDIT.BAL_VALUE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'RTOfferAmount';
+        v_FORMULA_CHARGE_VAR.Variable_Val := v_GEN_CREDIT.RT_OFFER;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'DAOpResCredit';
+        v_FORMULA_CHARGE_VAR.Variable_Val := v_GEN_CREDIT.DA_CREDIT;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'RegMktRevenue';
+        v_FORMULA_CHARGE_VAR.Variable_Val := v_GEN_CREDIT.REGULATION_REVENUE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'SpinReserveRevenue';
+        v_FORMULA_CHARGE_VAR.Variable_Val := v_GEN_CREDIT.SPIN_RES_REVENUE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'ReactiveServRevenue';
+        v_FORMULA_CHARGE_VAR.Variable_Val := v_GEN_CREDIT.REACT_SERV_REVENUE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.Charge_Quantity := NVL(v_GEN_CREDIT.BAL_CREDIT,0);
+        v_FORMULA_CHARGE.Charge_Rate := 1;
+        v_FORMULA_CHARGE.Charge_Amount := NVL(v_GEN_CREDIT.BAL_CREDIT,0);
+
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+    END LOOP;
+
+    IF v_UPDATE THEN
+        UPDATE_COMBINATION_CHARGE(v_BAL_OPRES_CR_ID,v_BAL_OPRES_CR_EXCESS_ID,'FORMULA',-1, v_LAST_DATE, v_BAL_GEN_COMP);
+    END IF;
+        DELETE FROM PJM_OPRES_GEN_CREDITS;
+    COMMIT;
+END IMPORT_OP_RES_GEN_CR_DETAILS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNCH_CONDENS_SUMMARY
+	(
+	p_RECORDS IN MEX_PJM_SYNCH_CONDENS_MSRS_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+v_COND_MKT_PR_ID NUMBER(9);
+v_SYNC_COND_CH_ID NUMBER(9);
+v_RT_LOAD_TX_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_CONTRACT_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE := LOW_DATE;
+v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+BEGIN
+  p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+	ID.ID_FOR_COMMODITY('RealTime Energy',FALSE, v_COMMODITY_ID);
+	--get component id for 'PJM:SyncCondensChg' (this is a new component, due to formula changes)
+    v_COMPONENT_ID := GET_COMPONENT(g_SYNCH_CONDENS_COMP_NAME,g_SYNCH_CONDENS_CHG_COMP_IDENT,0);
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_CHARGE_DATE := TRUNC(p_RECORDS(v_IDX).DAY) + 1/86400;
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX).ORG_ID OR
+		   v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).DAY,'DD') THEN
+		   	-- get charge IDs
+			v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+			v_LAST_DATE := TRUNC(v_CHARGE_DATE,'DD');
+			v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+            v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+
+			v_SYNC_COND_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+            IF v_SYNC_COND_CH_ID IS NULL THEN
+            	LOGS.LOG_WARN('PJM:SyncCondChg Charge ID not found for PSE_ID:' || v_PSE_ID
+                                    || ' during IMPORT_SYNCH_CONDENS_SUMMARY');
+                RETURN;
+            END IF;
+
+		END IF;
+
+        --update market prices
+		v_COND_MKT_PR_ID := GET_MARKET_PRICE('PJM:CondCrTotal');
+		IF v_COND_MKT_PR_ID IS NULL THEN
+			IO.PUT_MARKET_PRICE(o_OID =>v_COND_MKT_PR_ID,
+      							p_MARKET_PRICE_NAME => 'PJM:CondenserCrTotal',
+								p_MARKET_PRICE_ALIAS =>'PJM:CondenserCrTotal',
+                        		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+								p_MARKET_PRICE_ID => 0,
+                        		p_MARKET_PRICE_TYPE => 'User Defined',
+								p_MARKET_PRICE_INTERVAL => 'Day',
+                        		p_MARKET_TYPE => MM_PJM_UTIL.g_REALTIME,
+								p_COMMODITY_ID => 0,
+								p_SERVICE_POINT_TYPE => '?',
+                        		p_EXTERNAL_IDENTIFIER => 'PJM:CondCrTotal',
+								p_EDC_ID => 0,
+								p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                        		p_POD_ID => 0,
+								p_ZOD_ID => 0);
+		END IF;
+
+		PUT_MARKET_PRICE_VALUE(v_COND_MKT_PR_ID, TRUNC(v_CHARGE_DATE), p_RECORDS(v_IDX).PJM_Total_Cond_Cr);
+
+        --get transaction ids, update schedule
+        v_RT_LOAD_TX_ID := GET_TX_ID('PJM:TotalRTLoad+Exports',
+                                      'Load',
+                                      'PJM:TotalRTLoad+Exports',
+                                      'Day',
+                                      v_COMMODITY_ID);
+
+        PUT_SCHEDULE_VALUE(v_RT_LOAD_TX_ID,
+                           v_CHARGE_DATE,
+                           p_RECORDS(v_IDX).PJM_RT_LOAD_PLUS_EXP);
+
+
+		-- next, update formula charges and variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+
+		-- day ahead charge first
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SYNC_COND_CH_ID;
+		v_FORMULA_CHARGE.CHARGE_ID := v_SYNC_COND_CH_ID;
+
+		-- put variables
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJMTotalCondenserCredits';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).PJM_Total_Cond_Cr;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RealTimeLoad';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).RT_Load;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RealTimeExports';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).RT_Exports;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'TotalRTLoadPlusExports';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := p_RECORDS(v_IDX).PJM_RT_LOAD_PLUS_EXP;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        -- put charge
+		v_FORMULA_CHARGE.CHARGE_QUANTITY :=
+        	CASE WHEN p_RECORDS(v_IDX).PJM_RT_LOAD_PLUS_EXP = 0 THEN 0
+            ELSE (p_RECORDS(v_IDX).RT_Load + p_RECORDS(v_IDX).RT_Exports)
+                  /(p_RECORDS(v_IDX).PJM_RT_LOAD_PLUS_EXP) END;
+		v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).PJM_Total_Cond_Cr;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).Charge;
+	    PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+		v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+  IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+    COMMIT;
+  END IF;
+END IMPORT_SYNCH_CONDENS_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_TRANS_LOSS_CREDITS
+    (
+	p_STATUS OUT NUMBER
+	) AS
+v_TRANS_LOSS_COMP NUMBER(9);
+v_TRANS_LOSS_CR_ID NUMBER(9);
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_PSE_ID NUMBER(9);
+v_CONTRACT_ID NUMBER(9);
+v_TRANSM_COMM IT_COMMODITY.COMMODITY_ID%TYPE;
+v_RT_ENG_COMM IT_COMMODITY.COMMODITY_ID%TYPE;
+v_CHG_QTY NUMBER;
+v_MARKET_PRICE_ID NUMBER(9);
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_TRANSACTION_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+
+CURSOR p_LOSS IS
+    SELECT * FROM PJM_TXN_LOSS_CREDIT_SUMMARY C
+    ORDER BY C.CUT_DATE;
+
+BEGIN
+     p_STATUS := GA.SUCCESS;
+     ID.ID_FOR_COMMODITY('Transmission',FALSE, v_TRANSM_COMM);
+     ID.ID_FOR_COMMODITY('RealTime Energy',FALSE, v_RT_ENG_COMM);
+
+	--get component id for 'PJM:TransLossCred'
+    v_TRANS_LOSS_COMP := GET_COMPONENT(g_DA_TX_LOSS_COMP_NAME, g_DA_TX_LOSS_CR_COMP_IDENT, 1);
+
+    FOR v_LOSS IN p_LOSS LOOP
+        IF v_LAST_ORG_ID <> v_LOSS.Org_Nid
+            OR v_LAST_DATE <> TRUNC(FROM_CUT(v_LOSS.CUT_DATE , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400) THEN
+
+            v_LAST_ORG_ID := v_LOSS.Org_Nid;
+			v_LAST_DATE := TRUNC(FROM_CUT(v_LOSS.CUT_DATE , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+			v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+
+			v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+
+			v_TRANS_LOSS_CR_ID := GET_CHARGE_ID(v_PSE_ID,v_TRANS_LOSS_COMP,v_LAST_DATE,'FORMULA');
+
+        END IF;
+
+        v_CHARGE_DATE := v_LOSS.CUT_DATE;
+
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_TRANS_LOSS_CR_ID;
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RealTimeLoad';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_LOSS.Real_Time_Load;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RealTimeExports';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_LOSS.Real_Time_Exports;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJMTotalLoadPlusExports';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_LOSS.Total_Pjm_Rt_Ld_Plus_Exports;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJMTotalLossRevenues';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_LOSS.Total_Pjm_Loss_Revenues;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        IF v_LOSS.Total_Pjm_Rt_Ld_Plus_Exports <> 0 THEN
+            v_CHG_QTY := (NVL(v_LOSS.Real_Time_Load,0) + NVL(v_LOSS.Real_Time_Exports,0))/
+                            v_LOSS.Total_Pjm_Rt_Ld_Plus_Exports;
+        ELSE
+            v_CHG_QTY := 0;
+        END IF;
+
+        v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.CHARGE_FACTOR := 1;
+		v_FORMULA_CHARGE.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE.CHARGE_ID := v_TRANS_LOSS_CR_ID;
+		v_FORMULA_CHARGE.CHARGE_RATE := v_LOSS.Total_Pjm_Loss_Revenues;
+		v_FORMULA_CHARGE.CHARGE_QUANTITY := -v_CHG_QTY;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT := -v_LOSS.Transmission_Loss_Credit;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:TotalLossRevenues');
+		IF v_MARKET_PRICE_ID IS NULL THEN
+			IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+      							p_MARKET_PRICE_NAME => 'PJM Total Loss Revenues',
+								p_MARKET_PRICE_ALIAS => 'PJM Total Loss Revenues',
+                        		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+								p_MARKET_PRICE_ID => 0,
+                        		p_MARKET_PRICE_TYPE => 'Market Result',
+								p_MARKET_PRICE_INTERVAL => 'Hour',
+                        		p_MARKET_TYPE => '?',
+								p_COMMODITY_ID => v_TRANSM_COMM,
+								p_SERVICE_POINT_TYPE => '?',
+                        		p_EXTERNAL_IDENTIFIER => 'PJM:TotalLossRevenues',
+								p_EDC_ID => 0,
+								p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                        		p_POD_ID => 0,
+								p_ZOD_ID => 0);
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, v_CHARGE_DATE, v_LOSS.Total_Pjm_Loss_Revenues);
+
+        v_TRANSACTION_ID := GET_TX_ID('PJM:TotalLoadPlusExports',
+                                      'Market Result',
+                                      'PJM Total Load Plus Exports',
+                                      'Hour',
+                                      v_RT_ENG_COMM);
+
+        PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_CHARGE_DATE,
+                           v_LOSS.Total_Pjm_Rt_Ld_Plus_Exports);
+
+
+    END LOOP;
+
+    DELETE FROM PJM_TXN_LOSS_CREDIT_SUMMARY;
+    COMMIT;
+
+END IMPORT_TRANS_LOSS_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_INADVERTENT_INTERCHANGE
+    (
+	p_STATUS OUT NUMBER
+	) AS
+
+v_INADV_COMP NUMBER(9);
+v_INADV_CH_ID NUMBER(9);
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_PSE_ID NUMBER(9);
+v_CONTRACT_ID NUMBER(9);
+v_RT_ENG_COMM IT_COMMODITY.COMMODITY_ID%TYPE;
+v_CHG_QTY NUMBER;
+v_MARKET_PRICE_ID NUMBER(9);
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_TRANSACTION_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+
+CURSOR p_INADV IS
+    SELECT * FROM PJM_INADV_INTERCHG_CHARGE_SUM C
+    ORDER BY C.DAY, C.HOUR;
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    ID.ID_FOR_COMMODITY('RealTime Energy',FALSE, v_RT_ENG_COMM);
+
+    v_INADV_COMP := GET_COMPONENT(g_INADV_INTERCH_COMP_NAME,g_INADV_INTERCH_CHG_COMP_IDENT,0);
+
+    FOR v_INADV IN p_INADV LOOP
+        IF v_LAST_ORG_ID <> v_INADV.Org_Nid
+            OR v_LAST_DATE <> TRUNC(FROM_CUT(v_INADV.Cut_Date , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400) THEN
+
+            v_LAST_ORG_ID := v_INADV.Org_Nid;
+            v_LAST_DATE := TRUNC(FROM_CUT(v_INADV.Cut_Date , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+			v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+			v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+			v_INADV_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_INADV_COMP,v_LAST_DATE,'FORMULA');
+
+        END IF;
+
+        v_CHARGE_DATE := v_INADV.CUT_DATE;
+
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_INADV_CH_ID;
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RealTimeLoad';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_INADV.Customer_Rt_Load;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJMTotalRTLoad';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_INADV.Total_Pjm_Rt_Load;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJMTotaInadvInt';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_INADV.Total_Pjm_Inadv_Interchange;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        IF v_INADV.Total_Pjm_Rt_Load <> 0 THEN
+            v_CHG_QTY := NVL(v_INADV.Customer_Rt_Load,0) / v_INADV.Total_Pjm_Rt_Load;
+        ELSE
+            v_CHG_QTY := 0;
+        END IF;
+
+        v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.CHARGE_FACTOR := 1;
+		v_FORMULA_CHARGE.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE.CHARGE_ID := v_INADV_CH_ID;
+		v_FORMULA_CHARGE.CHARGE_RATE := 1;
+		v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHG_QTY;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT := NVL(v_INADV.Customer_Inadv_Energy_Charge,0) + NVL(v_INADV.Customer_Inadv_Cong_Charge,0) + NVL(v_INADV.Customer_Inadv_Loss_Charge,0);
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:TotalInadvertInt');
+		IF v_MARKET_PRICE_ID IS NULL THEN
+			IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+      							p_MARKET_PRICE_NAME => 'PJM Total Inadvertent Interchange',
+								p_MARKET_PRICE_ALIAS => 'PJM Total Inadvertent Interchange',
+                        		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+								p_MARKET_PRICE_ID => 0,
+                        		p_MARKET_PRICE_TYPE => 'Market Result',
+								p_MARKET_PRICE_INTERVAL => 'Hour',
+                        		p_MARKET_TYPE => '?',
+								p_COMMODITY_ID => 0,
+								p_SERVICE_POINT_TYPE => '?',
+                        		p_EXTERNAL_IDENTIFIER => 'PJM:TotalInadvertInt',
+								p_EDC_ID => 0,
+								p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                        		p_POD_ID => 0,
+								p_ZOD_ID => 0);
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, v_CHARGE_DATE, v_INADV.Total_Pjm_Inadv_Interchange);
+
+        v_TRANSACTION_ID := GET_TX_ID('PJM:TotalLoad',
+                                      'Market Result',
+                                      'PJM Total System Load',
+                                      'Hour',
+                                      v_RT_ENG_COMM);
+
+        PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_CHARGE_DATE,
+                           v_INADV.Total_Pjm_Rt_Load);
+
+
+    END LOOP;
+
+    DELETE FROM PJM_INADV_INTERCHG_CHARGE_SUM;
+    COMMIT;
+
+END IMPORT_INADVERTENT_INTERCHANGE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_FTR_AUCTION
+	(
+	p_RECORDS IN MEX_PJM_FTR_AUCTION_TBL_MSRS,
+	p_STATUS OUT NUMBER
+	) AS
+
+v_TX_ID NUMBER(9);
+v_TX_TYPE VARCHAR2(32);
+v_FTR_CH_ID NUMBER(9);
+v_FTR_CR_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_CONTRACT_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_LAST_DATE DATE := LOW_DATE;
+v_IDX BINARY_INTEGER;
+v_CHARGE_DATE DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_LOC NUMBER;
+v_SINK VARCHAR2(32);
+v_MONTH VARCHAR2(2);
+v_YEAR VARCHAR2(4);
+v_MON NUMBER(2);
+v_YR NUMBER(4);
+v_CLEARINGPRICE_ATTRIBUTE_ID NUMBER(9);
+v_STATUS NUMBER;
+v_SOURCE_ID NUMBER(9);
+v_SINK_ID NUMBER(9);
+v_VAL NUMBER;
+
+CURSOR C_TRANS(v_CONTRACT IN NUMBER, v_TYPE IN VARCHAR2,
+				v_SOURCE IN NUMBER, v_SINK IN NUMBER,
+                v_CLASS_TYPE IN VARCHAR2, v_DATE IN DATE,
+                v_YEAR IN NUMBER, v_MW IN NUMBER) IS
+	SELECT DISTINCT TRANSACTION_ID
+    FROM INTERCHANGE_TRANSACTION I, TEMPORAL_ENTITY_ATTRIBUTE T
+    WHERE i.CONTRACT_ID = v_CONTRACT
+    AND I.AGREEMENT_TYPE LIKE '%FTR%'
+    AND I.TRANSACTION_TYPE = v_TYPE
+    AND I.SOURCE_ID = v_SOURCE
+    AND I.SINK_ID = v_SINK
+    AND INSTR(UPPER(I.AGREEMENT_TYPE), UPPER(v_CLASS_TYPE)) > 0
+    AND (I.BEGIN_DATE =  TO_DATE('01-JUN-' || v_YEAR,'DD-MON-YYYY')
+    	OR I.BEGIN_DATE = v_DATE)
+    AND T.ATTRIBUTE_ID = (SELECT ATTRIBUTE_ID FROM ENTITY_ATTRIBUTE WHERE
+    						ATTRIBUTE_NAME = 'ClearedMW')
+    AND T.ATTRIBUTE_VAL = TO_CHAR(v_MW)
+    AND I.TRANSACTION_ID = T.OWNER_ENTITY_ID;
+
+
+BEGIN
+
+    p_STATUS := GA.SUCCESS;
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+
+    ID.ID_FOR_ENTITY_ATTRIBUTE('ClearingPrice', 'TRANSACTION', 'Number',
+         						TRUE, v_CLEARINGPRICE_ATTRIBUTE_ID);
+
+	v_IDX := p_RECORDS.FIRST;
+    IF p_RECORDS.EXISTS(v_IDX) THEN
+        v_PSE_ID := GET_PSE(p_RECORDS(v_IDX).Org_ID, NULL);
+        v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+        --delete any clearing prices if this import has already been run for some reason
+        DELETE FROM TEMPORAL_ENTITY_ATTRIBUTE T WHERE
+        T.ATTRIBUTE_ID = v_CLEARINGPRICE_ATTRIBUTE_ID
+        AND T.BEGIN_DATE = TRUNC(p_RECORDS(v_IDX).DAY, 'MM')
+        AND T.OWNER_ENTITY_ID IN(SELECT TRANSACTION_ID FROM INTERCHANGE_TRANSACTION
+        WHERE CONTRACT_ID = v_CONTRACT_ID);
+    END IF;
+
+
+    v_ITERATOR.ITERATOR_ID := 0;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+		IF v_LAST_DATE <> p_RECORDS(v_IDX).DAY THEN
+			v_LAST_DATE := p_RECORDS(v_IDX).DAY;
+			v_PSE_ID := GET_PSE(p_RECORDS(v_IDX).ORG_ID, NULL);
+            v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+
+            v_COMPONENT_ID := GET_COMPONENT(g_FTR_AUCTION_COMP_NAME, g_FTR_AUCTION_CHG_COMP_IDENT,0);
+            v_FTR_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,TRUNC(v_LAST_DATE),'TRANSMISSION');
+            v_COMPONENT_ID := GET_COMPONENT(g_FTR_AUCTION_COMP_NAME, g_FTR_AUCTION_CR_COMP_IDENT,1);
+            v_FTR_CR_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,TRUNC(v_LAST_DATE),'TRANSMISSION');
+		END IF;
+		IF p_RECORDS(v_IDX).Charge <> 0 THEN
+            --cannot assume negative mw_cleared, which is a sale, will be a credit
+			IF p_RECORDS(v_IDX).CLEARED_MW < 0 THEN
+                v_TX_TYPE := 'Sale';
+            ELSE
+                v_TX_TYPE := 'Purchase';
+            END IF;
+            v_FORMULA_CHARGE.CHARGE_ID := v_FTR_CH_ID;
+		ELSIF p_RECORDS(v_IDX).Credit <> 0 THEN
+			v_TX_TYPE := 'Sale';
+            v_FORMULA_CHARGE.CHARGE_ID := v_FTR_CR_ID;
+		ELSE
+			v_TX_TYPE := NULL;
+		END IF;
+		-- get the transaction ID for the record
+		IF NOT v_TX_TYPE IS NULL THEN
+        	v_LOC := INSTR(UPPER(p_RECORDS(v_IDX).SINK), '_ZONE');
+            IF v_LOC > 0 THEN
+            	v_SINK := SUBSTR(p_RECORDS(v_IDX).SINK, 1, v_LOC-1);
+            ELSE
+          		v_SINK := p_RECORDS(v_IDX).SINK;
+            END IF;
+
+            v_MONTH := TO_CHAR(p_RECORDS(v_IDX).DAY, 'MM');
+            v_YEAR := TO_CHAR(p_RECORDS(v_IDX).DAY, 'YYYY');
+            v_MON := TO_NUMBER(v_MONTH);
+        	v_YR := TO_NUMBER(v_YEAR);
+
+        	IF v_MON BETWEEN 1 AND 5 THEN
+        		v_YR := v_YR - 1;
+        	END IF;
+
+            v_SOURCE_ID := MM_PJM_EFTR.ID_FOR_SERVICE_POINT_NAME(p_RECORDS(v_IDX).SOURCE);
+            v_SINK_ID := MM_PJM_EFTR.ID_FOR_SERVICE_POINT_NAME(v_SINK);
+
+
+            --FIND THE TXN ID
+            FOR v_TRANS IN c_TRANS(v_CONTRACT_ID, v_TX_TYPE,
+            						v_SOURCE_ID, v_SINK_ID,
+            						p_RECORDS(v_IDX).CLASS_TYPE,
+                                    TRUNC(p_RECORDS(v_IDX).DAY,'MM'),
+                                    v_YR, p_RECORDS(v_IDX).CLEARED_MW) LOOP
+
+           		v_TX_ID := v_TRANS.TRANSACTION_ID;
+                BEGIN
+                	SELECT T.ATTRIBUTE_VAL INTO v_VAL
+                    FROM TEMPORAL_ENTITY_ATTRIBUTE T
+                    WHERE T.OWNER_ENTITY_ID = v_TX_ID
+                    AND T.ATTRIBUTE_ID = (SELECT ATTRIBUTE_ID FROM ENTITY_ATTRIBUTE WHERE
+                						ATTRIBUTE_NAME = 'ClearingPrice')
+                    AND T.BEGIN_DATE = TRUNC(p_RECORDS(v_IDX).DAY,'MM');
+
+
+              	EXCEPTION
+                	WHEN NO_DATA_FOUND THEN
+                    	SP.PUT_TEMPORAL_ENTITY_ATTRIBUTE(v_TX_ID, v_CLEARINGPRICE_ATTRIBUTE_ID,
+        									TRUNC(p_RECORDS(v_IDX).DAY,'MM'), NULL, p_RECORDS(v_IDX).PRICE,
+                                            v_TX_ID, v_CLEARINGPRICE_ATTRIBUTE_ID,
+                                            TRUNC(p_RECORDS(v_IDX).DAY,'MM'), v_STATUS);
+                     	COMMIT;
+                        EXIT;
+               END;
+
+            END LOOP;
+
+          IF v_TX_ID > 0 THEN
+        	v_ITERATOR_NAME.CHARGE_ID := v_FORMULA_CHARGE.CHARGE_ID;
+            v_ITERATOR_NAME.ITERATOR_NAME1 := 'PeakClass';
+    		v_ITERATOR_NAME.ITERATOR_NAME2 := 'Source';
+    		v_ITERATOR_NAME.ITERATOR_NAME3 := 'Sink';
+    		v_ITERATOR_NAME.ITERATOR_NAME4 := 'TransactionID';
+    		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+    		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+            v_ITERATOR.CHARGE_ID := v_FORMULA_CHARGE.CHARGE_ID;
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID + 1;
+
+            v_ITERATOR.ITERATOR1 := p_RECORDS(v_IDX).CLASS_TYPE;
+    		v_ITERATOR.ITERATOR2 := p_RECORDS(v_IDX).SOURCE;
+    		v_ITERATOR.ITERATOR3 := p_RECORDS(v_IDX).SINK;
+    		v_ITERATOR.ITERATOR4 := v_TX_ID;
+    		v_ITERATOR.ITERATOR5 := NULL;
+            PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+            v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+            v_CHARGE_DATE := p_RECORDS(v_IDX).DAY + 1 / 86400;
+
+            v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+        	v_FORMULA_CHARGE_VAR.CHARGE_ID := v_FORMULA_CHARGE.CHARGE_ID;
+
+			v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ClearedMW';
+    		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).CLEARED_MW;
+    		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        	v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ClearingPrice';
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).PRICE;
+        	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+    		v_FORMULA_CHARGE.CHARGE_ID       := v_FORMULA_CHARGE.CHARGE_ID;
+			v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+			v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).CLEARED_MW;
+			v_FORMULA_CHARGE.CHARGE_RATE     := p_RECORDS(v_IDX).PRICE;
+			v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_FORMULA_CHARGE.CHARGE_QUANTITY * v_FORMULA_CHARGE.CHARGE_RATE;
+			PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+            v_TX_ID :=0;
+        	END IF;
+		END IF;
+
+		v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+  IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+    COMMIT;
+  END IF;
+END IMPORT_FTR_AUCTION;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NON_FM_TRANS_SV_CREDITS
+	(
+	p_RECORDS IN MEX_PJM_NON_FIRM_TRAN_CRED_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+v_NETWORK_TX_SERV_MKT_PR_ID NUMBER(9);
+v_NONFIRM_TX_SERV_MKT_PR_ID NUMBER(9);
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_CHARGE_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_IDX BINARY_INTEGER;
+v_CHARGE_DATE DATE;
+v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF;
+
+	v_IDX := p_RECORDS.FIRST;
+    ID.ID_FOR_COMMODITY('Transmission', FALSE, v_COMMODITY_ID);
+
+    v_PSE_ID := GET_PSE(p_RECORDS(v_IDX).ORG_ID, p_RECORDS(v_IDX).ORG_NAME);
+	v_CHARGE_DATE := TRUNC(p_RECORDS(v_IDX).MONTH, 'MM') + 1/86400;
+
+    v_COMPONENT_ID := GET_COMPONENT(g_NON_FIRM_P2P_COMP_NAME,g_NON_FIRM_P2P_CR_COMP_IDENT,1);
+    v_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,TRUNC(v_CHARGE_DATE),'FORMULA');
+
+	-- and market price IDs
+	v_NETWORK_TX_SERV_MKT_PR_ID := GET_MARKET_PRICE('PJM:NetworkTxServiceTotal');
+    IF v_NETWORK_TX_SERV_MKT_PR_ID IS NULL THEN
+                IO.PUT_MARKET_PRICE(o_OID                   => v_NETWORK_TX_SERV_MKT_PR_ID,
+                                    p_MARKET_PRICE_NAME     => 'PJM Total Network Transmission Service Charges',
+                                    p_MARKET_PRICE_ALIAS    => 'PJM Total Network Trans Svg Chg',
+                                    p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                                    p_MARKET_PRICE_ID       => 0,
+                                    p_MARKET_PRICE_TYPE     => 'User Defined',
+                                    p_MARKET_PRICE_INTERVAL => 'Month',
+                                    p_MARKET_TYPE           => '?',
+                                    p_COMMODITY_ID          => v_COMMODITY_ID,
+                                    p_SERVICE_POINT_TYPE    => '?',
+                                    p_EXTERNAL_IDENTIFIER   => 'PJM:NetworkTxServiceTotal',
+                                    p_EDC_ID                => 0,
+                                    p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                    p_POD_ID                => 0,
+                                    p_ZOD_ID                => 0);
+    END IF;
+
+    v_NONFIRM_TX_SERV_MKT_PR_ID := GET_MARKET_PRICE('PJM:NonFirmTxServiceTotal');
+    IF v_NONFIRM_TX_SERV_MKT_PR_ID IS NULL THEN
+                IO.PUT_MARKET_PRICE(o_OID                   => v_NONFIRM_TX_SERV_MKT_PR_ID,
+                                    p_MARKET_PRICE_NAME     => 'PJM Total Non-Firm Point-to-Point Transmission Service Charges',
+                                    p_MARKET_PRICE_ALIAS    => 'PJM Total NFirm P2P Trans_Serv',
+                                    p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                                    p_MARKET_PRICE_ID       => 0,
+                                    p_MARKET_PRICE_TYPE     => 'User Defined',
+                                    p_MARKET_PRICE_INTERVAL => 'Month',
+                                    p_MARKET_TYPE           => '?',
+                                    p_COMMODITY_ID          => v_COMMODITY_ID,
+                                    p_SERVICE_POINT_TYPE    => '?',
+                                    p_EXTERNAL_IDENTIFIER   => 'PJM:NonFirmTxServiceTotal',
+                                    p_EDC_ID                => 0,
+                                    p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                    p_POD_ID                => 0,
+                                    p_ZOD_ID                => 0);
+    END IF;
+
+
+    v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+    v_FORMULA_CHARGE.ITERATOR_ID := 0;
+    v_FORMULA_CHARGE.CHARGE_ID := v_CHARGE_ID;
+    v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+    v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+    v_FORMULA_CHARGE_VAR.CHARGE_ID := v_CHARGE_ID;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'TotalPJM_NonFirmCharges';
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := p_RECORDS(v_IDX).TOTAL_PJM_NON_FIRM_CHARGE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'NetworkFirmDemandCharge';
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := p_RECORDS(v_IDX).NETWK_FIRM_DMD_CHG;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.Variable_Name := 'TotalPJMNetworkFirmDemandCharge';
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := p_RECORDS(v_IDX).TOTAL_NETWK_FIRM_DMD_CHG;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).TOTAL_PJM_NON_FIRM_CHARGE;
+        IF p_RECORDS(v_IDX).TOTAL_NETWK_FIRM_DMD_CHG <> 0 THEN
+            v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).NETWK_FIRM_DMD_CHG / p_RECORDS(v_IDX).TOTAL_NETWK_FIRM_DMD_CHG;
+        ELSE
+            v_FORMULA_CHARGE.CHARGE_RATE := 0;
+        END IF;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).NON_FIRM_CREDIT;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        PUT_MARKET_PRICE_VALUE(v_NETWORK_TX_SERV_MKT_PR_ID, TRUNC(v_CHARGE_DATE), p_RECORDS(v_IDX).TOTAL_NETWK_FIRM_DMD_CHG);
+        PUT_MARKET_PRICE_VALUE(v_NONFIRM_TX_SERV_MKT_PR_ID, TRUNC(v_CHARGE_DATE), p_RECORDS(v_IDX).TOTAL_PJM_NON_FIRM_CHARGE);
+
+		v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        COMMIT;
+    END IF;
+END IMPORT_NON_FM_TRANS_SV_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_ARR_SUMMARY
+	(
+	p_RECORDS IN MEX_PJM_ARR_SUMMARY_TBL_MSRS,
+	p_STATUS OUT NUMBER
+	) AS
+v_IDX BINARY_INTEGER;
+v_CHARGE_DATE DATE;
+v_PSE_ID NUMBER(9);
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ARR_CREDIT_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_LAST_DATE DATE := LOW_DATE;
+v_ARR_MW NUMBER(9) := 0;
+v_ARR_CREDIT NUMBER(9) := 0;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+    IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+    v_IDX := p_RECORDS.FIRST;
+    v_COMPONENT_ID := GET_COMPONENT(g_ARR_AUCTION_COMP_NAME,g_ARR_AUCTION_CR_COMP_IDENT,1);
+
+    WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_CHARGE_DATE := p_RECORDS(v_IDX).BEGIN_DATE + 1/86400;
+        v_PSE_ID := GET_PSE(p_RECORDS(v_IDX).ORG_ID, p_RECORDS(v_IDX).ORG_NAME);
+        v_ARR_CREDIT_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,TRUNC(v_CHARGE_DATE, 'DD'),'FORMULA');
+        
+        IF v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).BEGIN_DATE, 'DD') AND
+            v_LAST_DATE <> LOW_DATE THEN
+            v_FORMULA_CHARGE_VAR.Variable_Name := 'ARR_MW';
+            v_FORMULA_CHARGE_VAR.Variable_Val := v_ARR_MW;
+            PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+            
+            v_FORMULA_CHARGE.Charge_Quantity := v_ARR_MW;
+            IF v_ARR_MW <> 0 THEN
+                v_FORMULA_CHARGE.Charge_Rate := v_ARR_CREDIT / v_ARR_MW;
+            ELSE
+                v_FORMULA_CHARGE.Charge_Rate := 0;
+            END IF;                             
+            v_FORMULA_CHARGE.Charge_Amount := v_ARR_CREDIT;
+            PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+            
+            v_ARR_CREDIT := 0;
+            v_ARR_MW := 0;          
+        END IF;
+
+        v_LAST_DATE := TRUNC(v_CHARGE_DATE,'DD'); 
+         
+        v_ARR_MW := v_ARR_MW + p_RECORDS(v_IDX).ARR_MW;
+        v_ARR_CREDIT := v_ARR_CREDIT + p_RECORDS(v_IDX).TOTAL_TARGET_CREDIT;        
+
+        v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+	    v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.Charge_Id := v_ARR_CREDIT_ID;
+        v_FORMULA_CHARGE_VAR.Charge_Id := v_ARR_CREDIT_ID;
+
+        v_FORMULA_CHARGE_VAR.Iterator_Id := 0;
+        v_FORMULA_CHARGE.Iterator_Id := 0;
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+  IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+    COMMIT;
+  END IF;
+END IMPORT_ARR_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REACTIVE_SUMMARY
+	(
+	p_RECORDS IN MEX_PJM_REACTIVE_SUMMARY_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+TYPE MKT_PRICE_ID_MAP IS TABLE OF NUMBER(9) INDEX BY VARCHAR2(32);
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_REACTIVE_REV_ID_MAP    MKT_PRICE_ID_MAP;
+v_ITERATOR_ID_MAP		 	 ITERATOR_ID_MAP;
+v_MARKET_PRICE_ID    	 NUMBER(9);
+v_REACTIVE_CH_ID         NUMBER(9);
+v_ZONE               VARCHAR2(32);
+v_CHARGE_AMOUNT      NUMBER;
+v_COMPONENT_ID       NUMBER(9);
+v_PSE_ID             NUMBER(9);
+v_ZONE_ID			 SERVICE_ZONE.SERVICE_ZONE_ID%TYPE;
+v_PSE_NAME           VARCHAR2(64);
+v_CONTRACT_ID        NUMBER(9);
+v_ITERATOR_ID	 NUMBER(3) := 0;
+v_TRANSACTION_ID     INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_IDX                BINARY_INTEGER;
+v_LAST_ORG_ID        VARCHAR2(16) := '?';
+v_LAST_DATE          DATE := LOW_DATE;
+v_CHARGE_DATE        DATE := LOW_DATE;
+v_FORMULA_CHARGE     FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+  	v_ITERATOR.ITERATOR_ID := 0;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+			-- flush charge to formula charge
+			IF NOT v_REACTIVE_CH_ID IS NULL THEN
+				v_FORMULA_CHARGE.CHARGE_ID       := v_REACTIVE_CH_ID;
+				v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+				v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_AMOUNT;
+				v_FORMULA_CHARGE.CHARGE_RATE     := 1;
+				v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+				PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+			END IF;
+
+        v_CHARGE_DATE   := TRUNC(p_RECORDS(v_IDX).BEGIN_DATE) + 1 / 86400;
+		v_CHARGE_AMOUNT := 0;
+
+        v_ZONE := REPLACE(p_RECORDS(v_IDX).CONTROL_AREA, ' ', '');
+        --get zone id
+        v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_ZONE);
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).BEGIN_DATE, 'MM') THEN
+            -- get charge IDs
+            v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).BEGIN_DATE, 'MM');
+            v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+
+            --get PSE Name
+            BEGIN
+            	SELECT PSE_NAME
+            	INTO v_PSE_NAME
+            	FROM PURCHASING_SELLING_ENTITY
+            	WHERE PSE_ID = v_PSE_ID;
+            EXCEPTION
+               	WHEN NO_DATA_FOUND THEN
+               		v_PSE_NAME := '?';
+            END;
+
+            --get contract id
+            v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+
+            ID.ID_FOR_COMMODITY('Transmission',FALSE, v_COMMODITY_ID);
+
+			v_COMPONENT_ID := GET_COMPONENT(g_RSVCFG_SERV_COMP_NAME, g_RSVCFG_SERV_CHG_COMP_IDENT, 0);
+			v_REACTIVE_CH_ID   := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE,
+																			'FORMULA');
+		END IF;
+
+   		v_ITERATOR_NAME.CHARGE_ID := v_REACTIVE_CH_ID;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+		v_ITERATOR.CHARGE_ID := v_REACTIVE_CH_ID;
+       	IF v_ITERATOR_ID_MAP.EXISTS(v_ZONE) THEN
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ZONE);
+		ELSE
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+		v_ITERATOR.ITERATOR1 := v_ZONE;
+		v_ITERATOR.ITERATOR2 := NULL;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+		-- first update the market prices - get IDs from cache
+		IF v_REACTIVE_REV_ID_MAP.EXISTS(v_ZONE) THEN
+			v_MARKET_PRICE_ID := v_REACTIVE_REV_ID_MAP(v_ZONE);
+		ELSE
+			v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:' || v_ZONE || ':ReactiveTotal');
+			IF v_MARKET_PRICE_ID IS NULL THEN
+				IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+          							p_MARKET_PRICE_NAME => 'PJM Reactive Rev Req - ' || v_ZONE,
+									p_MARKET_PRICE_ALIAS =>'PJM Reactive Rev Req - ' || v_ZONE,
+                            		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+									p_MARKET_PRICE_ID => 0,
+                            		p_MARKET_PRICE_TYPE => 'PJM Reactive Rev Req',
+									p_MARKET_PRICE_INTERVAL => 'Month',
+                            		p_MARKET_TYPE => '?',
+									p_COMMODITY_ID => v_COMMODITY_ID, --transmission
+									p_SERVICE_POINT_TYPE => '?',
+                            		p_EXTERNAL_IDENTIFIER => 'PJM:' || v_ZONE || ':ReactiveTotal',
+									p_EDC_ID => 0,
+									p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            		p_POD_ID => 0,
+									p_ZOD_ID => v_ZONE_ID);
+			END IF;
+			v_REACTIVE_REV_ID_MAP(v_ZONE) := v_MARKET_PRICE_ID;
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE),
+													 p_RECORDS(v_IDX).TOTAL_ZONAL_REACTIVE_REV_REQ);
+
+		-- next, update formula variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_REACTIVE_CH_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ZonePeakUse';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOTAL_ZONE_PK_TRANS_USE;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        --cn get transaction id, update schedule
+        v_TRANSACTION_ID := GET_TX_ID('PJM:' || v_ZONE || ':ZnPk',
+                                      'Zonal Peak Use',
+                                      'PJM Zonal Peak Use: '|| v_ZONE,
+                                      'Month',
+                                      v_COMMODITY_ID,
+                                      0,
+                                      v_ZONE_ID);
+
+        PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_FORMULA_CHARGE_VAR.CHARGE_DATE,
+                           p_RECORDS(v_IDX).TOTAL_ZONE_PK_TRANS_USE);
+
+
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ZoneReactiveRevReq';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOTAL_ZONAL_REACTIVE_REV_REQ;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJMTotalNonZonePeakUse';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOTAL_PJM_NONZONE_PK_TRANS_USE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        --cn get transaction id, update schedule
+        v_TRANSACTION_ID := GET_TX_ID('PJMNonZonePeak',
+                                      'TtlNZon Peak Use',
+                                      'PJM TotNonZonalPeak',
+                                      'Month',
+                                      v_COMMODITY_ID);
+
+
+        PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_FORMULA_CHARGE_VAR.CHARGE_DATE,
+                           p_RECORDS(v_IDX).TOTAL_PJM_NONZONE_PK_TRANS_USE);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJMTotalZonalPeakUse';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOTAL_PJM_ZONE_PK_TRANS_USE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        --cn get transaction id, update schedule
+        v_TRANSACTION_ID := GET_TX_ID('PJMZonePeak',
+                                      'TtlZone Peak Use',
+                                      v_zone || 'PJM TotZonalPeak',
+                                      'Month',
+                                      v_COMMODITY_ID,
+                                      0,
+                                      v_ZONE_ID);
+
+        PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_FORMULA_CHARGE_VAR.CHARGE_DATE,
+                           p_RECORDS(v_IDX).TOTAL_PJM_ZONE_PK_TRANS_USE);
+
+
+        -- intermediate variables for the charge component
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'MonthlyZoneTransUse';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).MEMBER_ZONE_PK_TRANS_USE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'MonthlyNonZoneTransUse';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).MEMBER_NONZONE_PK_TRANS_USE;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'AdjustmentFactor';
+        IF (p_RECORDS(v_IDX).TOTAL_PJM_ZONE_PK_TRANS_USE+p_RECORDS(v_IDX).TOTAL_PJM_NONZONE_PK_TRANS_USE) = 0 THEN
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := 0;
+        ELSE
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOTAL_PJM_ZONE_PK_TRANS_USE/
+        									(p_RECORDS(v_IDX).TOTAL_PJM_ZONE_PK_TRANS_USE+p_RECORDS(v_IDX).TOTAL_PJM_NONZONE_PK_TRANS_USE);
+        END IF;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'MonthlyZoneCharge';
+        IF p_RECORDS(v_IDX).TOTAL_ZONE_PK_TRANS_USE = 0 THEN
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := 0;
+        ELSE
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).MEMBER_ZONE_PK_TRANS_USE*p_RECORDS(v_IDX).TOTAL_ZONAL_REACTIVE_REV_REQ*
+        									(p_RECORDS(v_IDX).TOTAL_PJM_ZONE_PK_TRANS_USE/
+        									(p_RECORDS(v_IDX).TOTAL_PJM_ZONE_PK_TRANS_USE+p_RECORDS(v_IDX).TOTAL_PJM_NONZONE_PK_TRANS_USE))/
+                                            p_RECORDS(v_IDX).TOTAL_ZONE_PK_TRANS_USE;
+        END IF;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'MonthlynNonZoneCharge';
+        IF (p_RECORDS(v_IDX).TOTAL_PJM_ZONE_PK_TRANS_USE+p_RECORDS(v_IDX).TOTAL_PJM_NONZONE_PK_TRANS_USE) = 0 THEN
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := 0;
+        ELSE
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).MEMBER_NONZONE_PK_TRANS_USE/
+            									 (p_RECORDS(v_IDX).TOTAL_PJM_ZONE_PK_TRANS_USE+p_RECORDS(v_IDX).TOTAL_PJM_NONZONE_PK_TRANS_USE)*
+        									p_RECORDS(v_IDX).TOTAL_ZONAL_REACTIVE_REV_REQ;
+        END IF;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'MemberCharge';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).CHARGE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_CHARGE_AMOUNT := v_CHARGE_AMOUNT + p_RECORDS(v_IDX).CHARGE;
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+	-- flush charge to formula charge
+	IF NOT v_REACTIVE_CH_ID IS NULL THEN
+		v_FORMULA_CHARGE.CHARGE_ID       := v_REACTIVE_CH_ID;
+		v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_AMOUNT;
+		v_FORMULA_CHARGE.CHARGE_RATE     := 1;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+	END IF;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+END IMPORT_REACTIVE_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REACTIVE_SERV_SUMMARY
+	(
+	p_RECORDS IN MEX_PJM_REACTIVE_SERV_SUMM_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+v_IDX BINARY_INTEGER;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_CHARGE_DATE DATE;
+v_PSE_ID NUMBER(9);
+v_ZONE_ID NUMBER(9);
+v_ZONE VARCHAR2(16);
+v_LAST_ZONE VARCHAR2(16);
+v_COMPONENT_ID NUMBER(9);
+v_REACT_SERV_CHG_ID NUMBER(9);
+v_RT_LOAD NUMBER := 0;
+v_ZONE_RT_LOAD NUMBER := 0;
+v_TOTAL_REACT_CREDIT NUMBER := 0;
+v_ITERATOR_ID NUMBER(9);
+v_MARKET_PRICE_ID NUMBER(9);
+v_TRANSACTION_ID NUMBER(9);
+v_COMMODITY_ID NUMBER(9);
+v_POD_ID NUMBER(9);
+BEGIN
+    p_STATUS := GA.SUCCESS;
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+    v_ITERATOR.ITERATOR_ID := 0;
+    ID.ID_FOR_COMMODITY('RealTime Energy', FALSE, v_COMMODITY_ID);
+
+    WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+
+        v_CHARGE_DATE := TRUNC(p_RECORDS(v_IDX).DAY,'DD') + 1/86400;
+	    v_PSE_ID := GET_PSE(p_RECORDS(v_IDX).ORG_ID, NULL);
+        v_ZONE := p_RECORDS(v_IDX).ZONE;
+        v_POD_ID := GET_SERVICE_POINT(v_ZONE);
+        IF v_LAST_ZONE IS NULL THEN
+            v_LAST_ZONE := v_ZONE;
+        END IF;
+
+        v_COMPONENT_ID := GET_COMPONENT(g_REACTIVE_SERV_COMP_NAME, g_REACTIVE_SERV_CHG_COMP_IDENT,0);
+        v_REACT_SERV_CHG_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,TRUNC(v_CHARGE_DATE),'FORMULA');
+
+        v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+	    v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.Charge_Id := v_REACT_SERV_CHG_ID;
+        v_FORMULA_CHARGE_VAR.Charge_Id := v_REACT_SERV_CHG_ID;
+
+        IF v_ZONE <> v_LAST_ZONE THEN
+            v_ZONE := v_LAST_ZONE;
+            v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_LAST_ZONE);
+            v_ITERATOR_NAME.CHARGE_ID := v_REACT_SERV_CHG_ID;
+        	v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+        	v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+        	v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+        	v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+        	v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+        	PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+    	    v_ITERATOR.CHARGE_ID := v_REACT_SERV_CHG_ID;
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID + 1;
+            v_ITERATOR_ID := v_ITERATOR.Iterator_Id;
+            v_ITERATOR.ITERATOR1 := v_LAST_ZONE;
+    	    v_ITERATOR.ITERATOR2 := NULL;
+    	    v_ITERATOR.ITERATOR3 := NULL;
+    	    v_ITERATOR.ITERATOR4 := NULL;
+    	    v_ITERATOR.ITERATOR5 := NULL;
+            PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+            v_FORMULA_CHARGE_VAR.Iterator_Id := v_ITERATOR_ID;
+            v_FORMULA_CHARGE_VAR.Variable_Name := 'RealTimeLoad';
+            v_FORMULA_CHARGE_VAR.Variable_Val := v_RT_LOAD;
+            PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+            v_FORMULA_CHARGE_VAR.Iterator_Id := v_ITERATOR_ID;
+            v_FORMULA_CHARGE_VAR.Variable_Name := 'TotalZoneRTLoad';
+            v_FORMULA_CHARGE_VAR.Variable_Val := v_ZONE_RT_LOAD;
+            PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+            v_FORMULA_CHARGE.Iterator_Id := v_ITERATOR_ID;
+            IF v_ZONE_RT_LOAD <> 0 THEN
+                v_FORMULA_CHARGE.Charge_Quantity := v_RT_LOAD/v_ZONE_RT_LOAD;
+            ELSE
+                v_FORMULA_CHARGE.Charge_Quantity := 0;
+            END IF;
+            v_FORMULA_CHARGE.Charge_Rate := v_TOTAL_REACT_CREDIT;
+            v_FORMULA_CHARGE.Charge_Amount := v_FORMULA_CHARGE.Charge_Quantity * v_TOTAL_REACT_CREDIT;
+            PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+            v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:' || v_LAST_ZONE || ':TotalReactServCred:' );
+    	    IF v_MARKET_PRICE_ID IS NULL THEN
+                IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+              							p_MARKET_PRICE_NAME => 'PJM Total Reactive Services Credit:' || v_LAST_ZONE ,
+    									p_MARKET_PRICE_ALIAS =>'PJM Total React Serv Credit' || v_LAST_ZONE,
+                                		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+    									p_MARKET_PRICE_ID => 0,
+                                		p_MARKET_PRICE_TYPE => 'Reactive Services Credit',
+    									p_MARKET_PRICE_INTERVAL => 'Month',
+                                		p_MARKET_TYPE => '?',
+    									p_COMMODITY_ID => 0,
+    									p_SERVICE_POINT_TYPE => '?',
+                                		p_EXTERNAL_IDENTIFIER => 'PJM:' || v_LAST_ZONE || ':TotalReactServCred:',
+    									p_EDC_ID => 0,
+    									p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                		p_POD_ID => v_POD_ID,
+    									p_ZOD_ID => v_ZONE_ID);
+            END IF;
+
+    	    PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE), v_TOTAL_REACT_CREDIT);
+
+            v_TRANSACTION_ID := GET_TX_ID('PJM:TotalLoad:' || v_LAST_ZONE,
+                                      'Market Result',
+                                      'PJM:TotalLoad:' || v_LAST_ZONE,
+                                      'Month',
+                                      v_COMMODITY_ID,
+                                      0, v_ZONE_ID, v_POD_ID);
+
+            PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_CHARGE_DATE,
+                            v_ZONE_RT_LOAD);
+
+
+            v_RT_LOAD := 0;
+            v_ZONE_RT_LOAD := 0;
+            v_TOTAL_REACT_CREDIT := 0;
+
+
+        END IF;
+        v_LAST_ZONE := v_ZONE;
+        v_RT_LOAD := v_RT_LOAD + p_RECORDS(v_IDX).PARTICIPANT_REAL_TIME_LOAD;
+        v_ZONE_RT_LOAD := v_ZONE_RT_LOAD + p_RECORDS(v_IDX).TOTAL_ZONE_REAL_TIME_LOAD;
+        v_TOTAL_REACT_CREDIT := v_TOTAL_REACT_CREDIT + p_RECORDS(v_IDX).TOTAL_ZONE_REACTIVE_SERV_CRED;
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+    END LOOP;
+
+
+    v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_LAST_ZONE);
+    v_ITERATOR_NAME.CHARGE_ID := v_REACT_SERV_CHG_ID;
+	v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+	v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+	v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+	v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+	v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+	PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+    v_ITERATOR.CHARGE_ID := v_REACT_SERV_CHG_ID;
+    v_ITERATOR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID + 1;
+    v_ITERATOR_ID := v_ITERATOR.Iterator_Id;
+    v_ITERATOR.ITERATOR1 := v_LAST_ZONE;
+    v_ITERATOR.ITERATOR2 := NULL;
+    v_ITERATOR.ITERATOR3 := NULL;
+    v_ITERATOR.ITERATOR4 := NULL;
+    v_ITERATOR.ITERATOR5 := NULL;
+    PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+    v_FORMULA_CHARGE_VAR.Iterator_Id := v_ITERATOR_ID;
+    v_FORMULA_CHARGE_VAR.Variable_Name := 'RealTimeLoad';
+    v_FORMULA_CHARGE_VAR.Variable_Val := v_RT_LOAD;
+    PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+    v_FORMULA_CHARGE_VAR.Iterator_Id := v_ITERATOR_ID;
+    v_FORMULA_CHARGE_VAR.Variable_Name := 'TotalZoneRTLoad';
+    v_FORMULA_CHARGE_VAR.Variable_Val := v_ZONE_RT_LOAD;
+    PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+    v_FORMULA_CHARGE.Iterator_Id := v_ITERATOR_ID;
+    IF v_ZONE_RT_LOAD <> 0 THEN
+        v_FORMULA_CHARGE.Charge_Quantity := v_RT_LOAD/v_ZONE_RT_LOAD;
+    ELSE
+        v_FORMULA_CHARGE.Charge_Quantity := 0;
+    END IF;
+    v_FORMULA_CHARGE.Charge_Rate := v_TOTAL_REACT_CREDIT;
+    v_FORMULA_CHARGE.Charge_Amount := v_FORMULA_CHARGE.Charge_Quantity * v_TOTAL_REACT_CREDIT;
+    PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+    v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:' || v_LAST_ZONE || ':TotalReactServCred:' );
+    IF v_MARKET_PRICE_ID IS NULL THEN
+        IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+          							p_MARKET_PRICE_NAME => 'PJM Total Reactive Services Credit:' || v_LAST_ZONE ,
+    					            p_MARKET_PRICE_ALIAS =>'PJM Total React Serv Credit' || v_LAST_ZONE,
+                            		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+    					            p_MARKET_PRICE_ID => 0,
+                            		p_MARKET_PRICE_TYPE => 'Reactive Services Credit',
+    					            p_MARKET_PRICE_INTERVAL => 'Month',
+                            		p_MARKET_TYPE => '?',
+    				            	p_COMMODITY_ID => 0,
+    					            p_SERVICE_POINT_TYPE => '?',
+                            		p_EXTERNAL_IDENTIFIER => 'PJM:' || v_LAST_ZONE || ':TotalReactServCred:',
+    					            p_EDC_ID => 0,
+    					            p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            		p_POD_ID => v_POD_ID,
+    					            p_ZOD_ID => v_ZONE_ID);
+    END IF;
+
+    PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE), v_TOTAL_REACT_CREDIT);
+
+    v_TRANSACTION_ID := GET_TX_ID('PJM:TotalLoad:' || v_LAST_ZONE,
+                              'Market Result',
+                              'PJM:TotalLoad:' || v_LAST_ZONE,
+                              'Month',
+                              v_COMMODITY_ID,
+                              0, v_ZONE_ID,
+                              v_POD_ID);
+
+    PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                   v_CHARGE_DATE,
+                    v_ZONE_RT_LOAD);
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_REACTIVE_SERV_SUMMARY;
+-----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REGULATION_SUMMARY
+	(
+	p_RECORDS IN MEX_PJM_REGL_SUMMARY_MSRS_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+
+v_CONTRACT_ID NUMBER(9);
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_CHARGE_DATE DATE;
+v_CHARGE_AMOUNT NUMBER;
+v_PSE_ID NUMBER(9);
+v_MARKET_PRICE_ID NUMBER(9);
+v_TRANSACTION_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_LOAD_RATIO NUMBER;
+v_REGULATION_CH_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_IDX BINARY_INTEGER;
+v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+
+	PROCEDURE FLUSH_TO_FORMULA_CHARGE IS
+	BEGIN
+		IF NOT v_REGULATION_CH_ID IS NULL THEN
+            v_FORMULA_CHARGE.ITERATOR_ID := 0;
+			v_FORMULA_CHARGE.CHARGE_ID := v_REGULATION_CH_ID;
+			v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+			v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_AMOUNT;
+			v_FORMULA_CHARGE.CHARGE_RATE := 1;
+			v_FORMULA_CHARGE.CHARGE_AMOUNT := v_CHARGE_AMOUNT;
+			PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+		END IF;
+	END FLUSH_TO_FORMULA_CHARGE;
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+
+  	--get component id for 'PJM:RegChg'
+    v_COMPONENT_ID := GET_COMPONENT(g_REGULATION_COMP_NAME, g_REGULATION_CHG_COMP_IDENT, 0);
+    v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+		-- flush charge to formula charge
+		FLUSH_TO_FORMULA_CHARGE;
+        v_CHARGE_DATE := p_RECORDS(v_IDX).CUT_DATE;
+
+		v_CHARGE_AMOUNT := 0;
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX).ORG_ID OR
+            v_LAST_DATE <> TRUNC(FROM_CUT(p_RECORDS(v_IDX).CUT_DATE , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400) THEN
+
+			-- get charge IDs
+			v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE   := TRUNC(FROM_CUT(p_RECORDS(v_IDX).CUT_DATE , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+			v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+
+			--get contract id
+			v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+
+			v_REGULATION_CH_ID := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE, 'FORMULA');
+
+		END IF;
+
+        v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:RegMCP');
+		IF v_MARKET_PRICE_ID IS NULL THEN
+			IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+      							p_MARKET_PRICE_NAME => 'PJM Reg Mkt Clearing Price',
+								p_MARKET_PRICE_ALIAS => 'PJM Reg Mkt Clearing Price',
+                        		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+								p_MARKET_PRICE_ID => 0,
+                        		p_MARKET_PRICE_TYPE => 'Market Clearing Price',
+								p_MARKET_PRICE_INTERVAL => 'Hour',
+                        		p_MARKET_TYPE => '?',
+								p_COMMODITY_ID => 0,
+								p_SERVICE_POINT_TYPE => '?',
+                        		p_EXTERNAL_IDENTIFIER => 'PJM:RegMCP',
+								p_EDC_ID => 0,
+								p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                        		p_POD_ID => 0,
+								p_ZOD_ID => 0);
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, v_CHARGE_DATE,
+								p_RECORDS(v_IDX).REGULATION_CLEARING_PRICE);
+
+		--MSRS does not provide the RT Load Ratio. It needs to be calculated
+		IF p_RECORDS(v_IDX).TOTAL_PJM_RT_LOAD = 0 THEN
+			v_LOAD_RATIO := 0;
+		ELSE
+			v_LOAD_RATIO :=  p_RECORDS(v_IDX).RT_LOAD /
+					p_RECORDS(v_IDX).TOTAL_PJM_RT_LOAD;
+		END IF;
+
+		--get transaction id, update schedule
+        v_TRANSACTION_ID := GET_TX_ID('PJM:RegLSR',
+                                      'Ratio Load Share',
+                                      NULL,
+                                      'Hour',
+                                      0,
+                                      v_CONTRACT_ID);
+
+        PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_CHARGE_DATE,
+                           v_LOAD_RATIO);
+
+		v_TRANSACTION_ID := GET_TX_ID('PJM:RegTotal');
+
+        PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_CHARGE_DATE,
+                           p_RECORDS(v_IDX).TOTAL_ASSIGNED_REG);
+
+		v_TRANSACTION_ID := GET_TX_ID('PJM:RegOppCost');
+
+        IF v_LOAD_RATIO = 0 THEN
+			PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_CHARGE_DATE, 0);
+
+		ELSE
+			PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_CHARGE_DATE,
+                           p_RECORDS(v_IDX).OPPORTUNITY_COST_CHARGE /
+                           v_LOAD_RATIO);
+		END IF;
+
+        ID.ID_FOR_COMMODITY('Regulation',TRUE, v_COMMODITY_ID);
+
+        -- store regulation obligation as txn. This will be needed for SSC&D calc
+        v_TRANSACTION_ID := GET_TX_ID('RegulationOblg',
+                                      'Obligation',
+                                      NULL,
+                                      'Hour',
+                                      v_COMMODITY_ID,
+                                      v_CONTRACT_ID);
+
+        IF p_RECORDS(v_IDX).REGULATION_OBLIGATION = 0 THEN
+        	PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_CHARGE_DATE,
+                           0);
+        ELSE
+        	PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_CHARGE_DATE,
+                           p_RECORDS(v_IDX).REGULATION_OBLIGATION);
+       	END IF;
+
+		-- next, update formula variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_REGULATION_CH_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RMCP';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).REGULATION_CLEARING_PRICE;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'LoadShareRatio';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := v_LOAD_RATIO;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RegObl';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).REGULATION_OBLIGATION;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'BilatPurchases';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).BILATERAL_REG_PURCHASES;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'BilatSales';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).BILATERAL_REG_SALES;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RegCharge';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).CHARGE;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'TotalAssignments';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOTAL_SYSTEM_REG_PURCHASES;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'OppCostCharge';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).OPPORTUNITY_COST_CHARGE;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'TotalOppCost';
+		IF v_LOAD_RATIO = 0 THEN
+			v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := 0;
+		ELSE
+			v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).OPPORTUNITY_COST_CHARGE / v_LOAD_RATIO;
+		END IF;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_CHARGE_AMOUNT := p_RECORDS(v_IDX).OPPORTUNITY_COST_CHARGE + p_RECORDS(v_IDX).CHARGE;
+
+		v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+	-- flush charge to formula charge
+	FLUSH_TO_FORMULA_CHARGE;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+END IMPORT_REGULATION_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REGULATION_CREDITS
+	(
+	p_RECORDS IN MEX_PJM_REGULATION_CREDIT_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+v_CONTRACT_ID NUMBER(9);
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_CHARGE_DATE DATE;
+v_PSE_ID NUMBER(9);
+v_REGULATION_CR_ID NUMBER(9);
+v_RMCP_CR_ID NUMBER(9);
+v_LOC_CR_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_RMCP_COMP NUMBER(9);
+v_LOC_COMP NUMBER(9);
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_IDX BINARY_INTEGER;
+v_ATTRIBUTE_ID ENTITY_ATTRIBUTE.ATTRIBUTE_ID%TYPE;
+v_RESOURCE_NAME SUPPLY_RESOURCE.RESOURCE_NAME%TYPE;
+v_ITERATOR_ID NUMBER(3) := 0;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+
+PROCEDURE UPDATE_COMBINATION_CHARGES IS
+	BEGIN
+		--Roll everything all the values up the combination tree.
+		IF NOT v_REGULATION_CR_ID IS NULL THEN
+			UPDATE_COMBINATION_CHARGE(v_REGULATION_CR_ID,v_RMCP_CR_ID,'FORMULA',1, v_LAST_DATE, v_RMCP_COMP);
+		END IF;
+		IF NOT v_REGULATION_CR_ID IS NULL THEN
+			UPDATE_COMBINATION_CHARGE(v_REGULATION_CR_ID,v_LOC_CR_ID,'FORMULA', 1, v_LAST_DATE, v_LOC_COMP);
+		END IF;
+	END;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+    ID.ID_FOR_ENTITY_ATTRIBUTE('PJM_PNODEID','RESOURCE','String',FALSE,v_ATTRIBUTE_ID);
+
+    v_COMPONENT_ID := GET_COMPONENT(g_REGULATION_COMP_NAME, g_REGULATION_CR_COMP_IDENT, 1);
+    v_RMCP_COMP := GET_COMPONENT(NULL,'PJMRMCPCredit', NULL);
+    v_LOC_COMP := GET_COMPONENT(NULL,'PJMRegLOCCredit', NULL);
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_CHARGE_DATE := p_RECORDS(v_IDX).CUT_DATE;
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX).ORG_ID
+            OR v_LAST_DATE <> TRUNC(FROM_CUT(p_RECORDS(v_IDX).CUT_DATE , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400) THEN
+            IF v_LAST_DATE <> LOW_DATE THEN
+                UPDATE_COMBINATION_CHARGES;
+
+            END IF;
+			-- get charge IDs
+			v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE := TRUNC(FROM_CUT(p_RECORDS(v_IDX).CUT_DATE , MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+			v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+
+			--get contract id
+			v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+
+			v_REGULATION_CR_ID := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE, 'COMBINATION');
+            v_RMCP_CR_ID := GET_COMBO_CHARGE_ID(v_REGULATION_CR_ID,v_RMCP_COMP,v_LAST_DATE,'Formula', TRUE);
+            v_LOC_CR_ID := GET_COMBO_CHARGE_ID(v_REGULATION_CR_ID,v_LOC_COMP,v_LAST_DATE,'Formula', TRUE);
+
+		END IF;
+
+	    -- get the MM resourc name for the given pjm node id
+	    SELECT S.RESOURCE_NAME
+	    INTO v_RESOURCE_NAME
+	    FROM TEMPORAL_ENTITY_ATTRIBUTE T, SUPPLY_RESOURCE S
+	    WHERE T.ATTRIBUTE_ID = v_ATTRIBUTE_ID
+	    AND T.ATTRIBUTE_VAL = p_RECORDS(v_IDX).UNIT_ID
+        AND S.RESOURCE_ID = T.OWNER_ENTITY_ID;
+
+        v_ITERATOR_NAME.CHARGE_ID := v_RMCP_CR_ID;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'GeneratorUnit';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := 'UnitName';
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+         IF v_ITERATOR_ID_MAP.EXISTS(p_RECORDS(v_IDX).UNIT_ID) THEN
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(p_RECORDS(v_IDX).UNIT_ID);
+        ELSE
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(p_RECORDS(v_IDX).UNIT_ID) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+
+		v_ITERATOR.CHARGE_ID := v_RMCP_CR_ID;
+		v_ITERATOR.ITERATOR1 := p_RECORDS(v_IDX).UNIT_ID;
+		v_ITERATOR.ITERATOR2 := v_RESOURCE_NAME;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_RMCP_CR_ID;
+
+        v_FORMULA_CHARGE.CHARGE_ID := v_RMCP_CR_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := (p_RECORDS(v_IDX).PJM_ASSIGNED_REG * p_RECORDS(v_IDX).UNIT_OWN_SHARE) + p_RECORDS(v_IDX).SELF_SCHED_REG;
+        v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RMCP;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT := v_FORMULA_CHARGE.CHARGE_QUANTITY * v_FORMULA_CHARGE.CHARGE_RATE;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_LOC_CR_ID;
+
+        v_ITERATOR_NAME.CHARGE_ID := v_LOC_CR_ID;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+		v_ITERATOR.CHARGE_ID := v_LOC_CR_ID;
+		PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Reg_Lost_Opp_Cost';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).REG_LOC;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Regulation_Offer';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).REG_OFFER_AMOUNT;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Assigned_Regulation';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).PJM_ASSIGNED_REG;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'RMCP';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).RMCP;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_ID := v_LOC_CR_ID;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := Greatest(p_RECORDS(v_IDX).REG_LOC + p_RECORDS(v_IDX).REG_OFFER_AMOUNT -
+                                            (p_RECORDS(v_IDX).PJM_ASSIGNED_REG * p_RECORDS(v_IDX).RMCP),0);
+        v_FORMULA_CHARGE.CHARGE_RATE := 1;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).REG_LOC_CREDIT * p_RECORDS(v_IDX).UNIT_OWN_SHARE;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+		v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+	UPDATE_COMBINATION_CHARGES;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+END IMPORT_REGULATION_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_FTR_TARGET_CREDITS
+	(
+	p_WORK_ID IN NUMBER,
+	p_STATUS OUT NUMBER
+	) AS
+
+v_SOMETHING_DONE BOOLEAN := FALSE;
+v_DATE DATE;
+v_LAST_ORG_IDENT VARCHAR2(32) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_PSE_ID NUMBER(9);
+v_CONTRACT_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_CONG_CR_FTR_ID NUMBER(9);
+v_CONG_CR_ID NUMBER(9);
+v_FTR_CHARGE FTR_CHARGE%ROWTYPE;
+v_ALLOC_FACTOR_TX_ID NUMBER(9);
+v_ALLOC_FACTOR NUMBER;
+v_PSE_NAME VARCHAR2(32);
+v_NODENAME VARCHAR2(32);
+
+CURSOR c_ALLOC IS
+	SELECT A.ORG_IDENT, A.CUT_DATE, A.SINK_NAME, A.SINK_PNODE_ID, A.SOURCE_NAME, A.SOURCE_PNODE_ID, A.HEDGE_TYPE,
+		SUM(A.FTR_MW) "FTR_MW", MAX(A.SINK_LMP) "SINK_LMP", MAX(A.SOURCE_LMP) "SOURCE_LMP",
+		SUM(CASE WHEN MAX(SINK_LMP) > MAX(SOURCE_LMP) THEN (MAX(SINK_LMP)-MAX(SOURCE_LMP))*SUM(FTR_MW) ELSE 0 END) OVER
+			(PARTITION BY ORG_IDENT, CUT_DATE) "POS_ALLOC",
+		SUM(CASE WHEN MAX(SINK_LMP) < MAX(SOURCE_LMP) THEN (MAX(SINK_LMP)-MAX(SOURCE_LMP))*SUM(FTR_MW) ELSE 0 END) OVER
+			(PARTITION BY ORG_IDENT, CUT_DATE) "NEG_ALLOC"
+	FROM MEX_PJM_FTR_ALLOC_WORK A
+	WHERE A.WORK_ID = p_WORK_ID
+	GROUP BY A.ORG_IDENT, A.CUT_DATE, A.SINK_NAME, A.SINK_PNODE_ID, A.SOURCE_NAME, A.SOURCE_PNODE_ID, A.HEDGE_TYPE
+	ORDER BY ORG_IDENT, CUT_DATE;
+
+	PROCEDURE UPDATE_COMBINATION_CHARGES IS
+	BEGIN
+		--Roll all the values up the combination tree.
+		IF NOT v_CONG_CR_ID IS NULL THEN
+			UPDATE_COMBINATION_CHARGE(v_CONG_CR_ID, v_CONG_CR_FTR_ID, 'FTR');
+		END IF;
+	END;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	FOR v_ALLOC IN c_ALLOC LOOP
+		v_SOMETHING_DONE := TRUE;
+
+		IF v_LAST_ORG_IDENT <> v_ALLOC.ORG_IDENT OR v_LAST_DATE <>
+                        TRUNC(FROM_CUT(v_ALLOC.CUT_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400) THEN
+
+		    -- flush last month's charges to combination charge table
+            --cgn combination charge is already updated via congestion summary import
+			--UPDATE_COMBINATION_CHARGES;
+
+			-- get charge IDs
+			v_LAST_ORG_IDENT := v_ALLOC.ORG_IDENT;
+			v_LAST_DATE := TRUNC(FROM_CUT(v_ALLOC.CUT_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+			v_PSE_ID := GET_PSE(v_LAST_ORG_IDENT, NULL);
+            SELECT PSE_ALIAS INTO v_PSE_NAME FROM PURCHASING_SELLING_ENTITY
+    		WHERE PSE_ID = v_PSE_ID;
+
+			--get contract id
+			v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+
+			v_COMPONENT_ID := GET_COMPONENT(g_TX_CONG_COMP_NAME, g_TX_CONG_CR_COMP_IDENT, 1);
+			v_CONG_CR_ID := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE, 'COMBINATION');
+			v_COMPONENT_ID := GET_COMPONENT('Transmission Congestion Credits - FTR','PJM:TransCongCred:FTR',1);
+            v_CONG_CR_FTR_ID := GET_COMBO_CHARGE_ID(v_CONG_CR_ID, v_COMPONENT_ID, v_LAST_DATE, 'FTR', TRUE);
+
+            v_ALLOC_FACTOR_TX_ID := GET_TX_ID('FTR Alloc Factor: ' || v_PSE_NAME,
+            								'FTR Alloc Factor',
+                                            'FTR Alloc Factor',
+                                            'Hour',
+                                            0,
+                                            v_CONTRACT_ID,
+                                            0,
+                                            0,
+                                            0,
+                                            v_PSE_ID);
+
+		END IF;
+
+        v_DATE := v_ALLOC.CUT_DATE;
+
+		-- Populate the FTR Charge record.
+		v_FTR_CHARGE.CHARGE_ID := v_CONG_CR_FTR_ID;
+		v_FTR_CHARGE.CHARGE_DATE := v_DATE;
+
+		 IF INSTR(UPPER(v_ALLOC.SOURCE_NAME), '_ZONE') > 0 THEN
+        --if the Source Name has _ZONE in the name like APS_ZONE, it does not have the same pnode id
+        -- as the service point without _ZONE (e.g. APS) but we key everything off the Service Point,
+        --so get the corrected node name in this situation
+            v_NODENAME := NVL(GET_DICTIONARY_VALUE(v_ALLOC.SOURCE_NAME, 1, 'MarketExchange', 'PJM',
+                                                    'Corrected NodeName'), v_ALLOC.SOURCE_NAME);
+            v_FTR_CHARGE.SOURCE_ID := GET_SERVICE_POINT(v_NODENAME);
+        ELSE
+		    v_FTR_CHARGE.SOURCE_ID := GET_SERVICE_POINT(NULL, v_ALLOC.SOURCE_PNODE_ID);
+        END IF;
+
+        v_FTR_CHARGE.DELIVERY_POINT_ID := 0;
+         --if the Sink Name has _ZONE in the name like APS_ZONE, it does not have the same pnode id
+        -- as the service point without _ZONE (e.g. APS) but we key everything off the Service Point,
+        --so get the corrected node name in this situation
+        IF INSTR(UPPER(v_ALLOC.SINK_NAME), '_ZONE') > 0 THEN
+            v_NODENAME := NVL(GET_DICTIONARY_VALUE(v_ALLOC.SINK_NAME, 1, 'MarketExchange', 'PJM',
+                                                    'Corrected NodeName'), v_ALLOC.SINK_NAME);
+            v_FTR_CHARGE.SINK_ID := GET_SERVICE_POINT(v_NODENAME);
+        ELSE
+		    v_FTR_CHARGE.SINK_ID := GET_SERVICE_POINT(NULL, v_ALLOC.SINK_PNODE_ID);
+        END IF;
+
+		v_FTR_CHARGE.FTR_TYPE := v_ALLOC.HEDGE_TYPE;
+		v_FTR_CHARGE.PURCHASES := v_ALLOC.FTR_MW;
+		v_FTR_CHARGE.PRICE1 := v_ALLOC.SINK_LMP;
+		v_FTR_CHARGE.PRICE2 := v_ALLOC.SOURCE_LMP;
+
+
+        BEGIN
+            SELECT S.AMOUNT
+            INTO v_ALLOC_FACTOR
+            FROM IT_SCHEDULE S
+            WHERE S.TRANSACTION_ID = v_ALLOC_FACTOR_TX_ID
+            AND S.SCHEDULE_DATE = v_DATE
+            AND S.SCHEDULE_STATE = 1
+            AND S.SCHEDULE_TYPE = 1;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                v_ALLOC_FACTOR := 0;
+        END;
+		--Finish the FTR Charge.
+		v_FTR_CHARGE.ALLOC_FACTOR := v_ALLOC_FACTOR;
+		v_FTR_CHARGE.CHARGE_RATE := v_FTR_CHARGE.PRICE1 - v_FTR_CHARGE.PRICE2;
+        v_FTR_CHARGE.CHARGE_QUANTITY := v_FTR_CHARGE.PURCHASES * v_FTR_CHARGE.CHARGE_RATE;
+        v_FTR_CHARGE.CHARGE_RATE := v_ALLOC_FACTOR;
+		v_FTR_CHARGE.CHARGE_AMOUNT := v_FTR_CHARGE.CHARGE_QUANTITY * v_FTR_CHARGE.CHARGE_RATE;
+
+		PC.PUT_FTR_CHARGE(v_FTR_CHARGE);
+
+	END LOOP;
+--fix?
+    -- flush last month's charges to combination charge table
+	--UPDATE_COMBINATION_CHARGES;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+	--Clean up the work table.
+	DELETE MEX_PJM_FTR_ALLOC_WORK WHERE WORK_ID = p_WORK_ID;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		DELETE MEX_PJM_FTR_ALLOC_WORK WHERE WORK_ID = p_WORK_ID;
+		RAISE;
+
+END IMPORT_FTR_TARGET_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_TOSSCD_SUMMARY
+	(
+	p_RECORDS IN MEX_PJM_TOSSCD_SUMMARY_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+v_MARKET_PRICE_ID NUMBER(9);
+v_TO_SSCD_CH_ID NUMBER(9);
+v_TO_SSCD_CH_ID_NW NUMBER(9);
+v_TO_SSCD_CH_ID_P2P NUMBER(9);
+v_ZONE VARCHAR2(32);
+v_CHARGE_AMOUNT NUMBER;
+v_CREDIT_AMOUNT NUMBER;
+v_COMPONENT_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_ZONE_ID SERVICE_ZONE.SERVICE_ZONE_ID%TYPE;
+v_PSE_NAME VARCHAR2(64);
+v_ITERATOR_ID NUMBER(3) := 0;
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+  	v_ITERATOR.ITERATOR_ID := 0;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+
+        v_CHARGE_DATE   := TRUNC(p_RECORDS(v_IDX).DAY) + 1 / 86400;
+        v_CHARGE_AMOUNT := 0;
+        v_CREDIT_AMOUNT := 0;
+
+        v_ZONE := REPLACE(p_RECORDS(v_IDX).ZONE, ' ', '');
+
+        --get zone id
+        v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_ZONE);
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).DAY, 'DD') THEN
+            -- get charge IDs
+            v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).DAY, 'DD');
+            v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+
+            --get PSE Name
+            BEGIN
+            	SELECT PSE_NAME
+            	INTO v_PSE_NAME
+            	FROM PURCHASING_SELLING_ENTITY
+            	WHERE PSE_ID = v_PSE_ID;
+            EXCEPTION
+               	WHEN NO_DATA_FOUND THEN
+               		v_PSE_NAME := '?';
+            END;
+
+            ID.ID_FOR_COMMODITY('Transmission',FALSE, v_COMMODITY_ID);
+
+			v_COMPONENT_ID := GET_COMPONENT(g_TOSSCD_CONG_COMP_NAME, g_TOSSCD_CONG_CHG_COMP_IDENT, 0);
+    	    v_TO_SSCD_CH_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,TRUNC(v_CHARGE_DATE),'COMBINATION');
+
+			v_COMPONENT_ID := GET_COMPONENT('TOSSC&D - from Network Services','PJM:TOSSC&DChg:Nw',0);
+			v_TO_SSCD_CH_ID_NW := GET_COMBO_CHARGE_ID(v_TO_SSCD_CH_ID,v_COMPONENT_ID,TRUNC(v_CHARGE_DATE),'FORMULA', TRUE);
+
+			v_COMPONENT_ID := GET_COMPONENT('TOSSC&D - from Point-to-Point','PJM:TOSSC&DChg:P2P',0);
+			v_TO_SSCD_CH_ID_P2P := GET_COMBO_CHARGE_ID(v_TO_SSCD_CH_ID,v_COMPONENT_ID,TRUNC(v_CHARGE_DATE),'FORMULA', TRUE);
+
+		END IF;
+
+        --if zone is NOT PJM, then this is not P2P but part of the Network charge
+        IF v_ZONE <> 'PJM' THEN
+
+            v_ITERATOR_NAME.CHARGE_ID := v_TO_SSCD_CH_ID_NW;
+    		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+    		v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+    		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+    		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+    		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+    		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+    		v_ITERATOR.CHARGE_ID := v_TO_SSCD_CH_ID_NW;
+            IF v_ITERATOR_ID_MAP.EXISTS(v_ZONE) THEN
+				v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ZONE);
+			ELSE
+				v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+				v_ITERATOR_ID_MAP(v_ZONE) := v_ITERATOR.ITERATOR_ID;
+				v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        	END IF;
+
+    		v_ITERATOR.ITERATOR1 := v_ZONE;
+    		v_ITERATOR.ITERATOR2 := NULL;
+    		v_ITERATOR.ITERATOR3 := NULL;
+    		v_ITERATOR.ITERATOR4 := NULL;
+    		v_ITERATOR.ITERATOR5 := NULL;
+            PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+            v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+
+			-- first update the zonal rate market price
+			v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:' || v_ZONE || ':TOSSCDRate');
+            IF v_MARKET_PRICE_ID IS NULL THEN
+				IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+          							p_MARKET_PRICE_NAME => 'PJM TO SSCD Rate - ' || v_ZONE,
+									p_MARKET_PRICE_ALIAS =>'PJM TO SSCD Rate - ' || v_ZONE,
+                            		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+									p_MARKET_PRICE_ID => 0,
+                            		p_MARKET_PRICE_TYPE => 'PJM TO SSCD Rate',
+									p_MARKET_PRICE_INTERVAL => 'Month',
+                            		p_MARKET_TYPE => MM_PJM_UTIL.g_REALTIME,
+									p_COMMODITY_ID => v_COMMODITY_ID, --transmission
+									p_SERVICE_POINT_TYPE => '?',
+                            		p_EXTERNAL_IDENTIFIER => 'PJM:' || v_ZONE || ':TOSSCDRate',
+									p_EDC_ID => 0,
+									p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            		p_POD_ID => 0,
+									p_ZOD_ID => v_ZONE_ID);
+			END IF;
+			PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE),
+									p_RECORDS(v_IDX).RATE);
+
+    		-- next, update formula variables
+    		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+    		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_TO_SSCD_CH_ID_NW;
+            v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ZonalRate';
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).RATE;
+            PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+			v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ZoneLoad';
+    		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).LOAD;
+    		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+            v_FORMULA_CHARGE.CHARGE_ID       := v_TO_SSCD_CH_ID_NW;
+            v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).LOAD;
+            v_FORMULA_CHARGE.CHARGE_RATE     := p_RECORDS(v_IDX).RATE;
+            v_FORMULA_CHARGE.CHARGE_AMOUNT   := p_RECORDS(v_IDX).LOAD * p_RECORDS(v_IDX).RATE;
+            PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+            UPDATE_COMBINATION_CHARGE(v_TO_SSCD_CH_ID,v_TO_SSCD_CH_ID_NW,'FORMULA');
+            UPDATE_COMBINATION_CHARGE(v_TO_SSCD_CH_ID,v_TO_SSCD_CH_ID_P2P,'FORMULA');
+
+    	ELSE
+        	-- if PJM zone then its the P2P Charge
+        	v_FORMULA_CHARGE.CHARGE_ID := v_TO_SSCD_CH_ID_P2P;
+            v_FORMULA_CHARGE.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+
+            v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+
+            v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+    		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_TO_SSCD_CH_ID_P2P;
+            v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'P2PPoolRate';
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).RATE;
+            PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+            v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'P2PUsage';
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).P2P_TRANSMISSION_USE;
+            PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+            --TO DO create the pool rate if it doesn't exist
+            -- first update P2P pool-wide market price
+			v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:P2P:PoolRate');
+            IF v_MARKET_PRICE_ID IS NULL THEN
+				IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+          							p_MARKET_PRICE_NAME => 'PJM P2P Transmission Pool-Wide Rate',
+									p_MARKET_PRICE_ALIAS =>'PJM P2P Transmission Pool Rate',
+                            		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+									p_MARKET_PRICE_ID => 0,
+                            		p_MARKET_PRICE_TYPE => 'User Defined',
+									p_MARKET_PRICE_INTERVAL => 'Month',
+                            		p_MARKET_TYPE => MM_PJM_UTIL.g_REALTIME,
+									p_COMMODITY_ID => v_COMMODITY_ID, --transmission
+									p_SERVICE_POINT_TYPE => 'Point',
+                            		p_EXTERNAL_IDENTIFIER => 'PJM:P2P:PoolRate',
+									p_EDC_ID => 0,
+									p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            		p_POD_ID => 0,
+									p_ZOD_ID => v_ZONE_ID);
+			END IF;
+			PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE),
+									p_RECORDS(v_IDX).RATE);
+
+            v_FORMULA_CHARGE.CHARGE_ID       := v_TO_SSCD_CH_ID_P2P;
+            v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+            v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).P2P_TRANSMISSION_USE;
+            v_FORMULA_CHARGE.CHARGE_RATE     := p_RECORDS(v_IDX).RATE;
+            v_FORMULA_CHARGE.CHARGE_AMOUNT   := p_RECORDS(v_IDX).P2P_TRANSMISSION_USE * p_RECORDS(v_IDX).RATE;
+            PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+            UPDATE_COMBINATION_CHARGE(v_TO_SSCD_CH_ID,v_TO_SSCD_CH_ID_NW,'FORMULA');
+            UPDATE_COMBINATION_CHARGE(v_TO_SSCD_CH_ID,v_TO_SSCD_CH_ID_P2P,'FORMULA');
+
+        END IF;
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+--fix
+	--UPDATE_COMBINATION_CHARGE(v_TO_SSCD_CH_ID,v_TO_SSCD_CH_ID_NW,'FORMULA');
+    --UPDATE_COMBINATION_CHARGE(v_TO_SSCD_CH_ID,v_TO_SSCD_CH_ID_P2P,'FORMULA');
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_TOSSCD_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_FIRM_TRANS_SERV_CHARGES
+	(
+	p_RECORDS IN MEX_PJM_TRAN_SERV_CHG_TBL_MSRS,
+	p_STATUS OUT NUMBER
+	) AS
+v_IDX BINARY_INTEGER;
+v_PSE_ID NUMBER(9);
+v_CONTRACT_ID NUMBER(9);
+v_FM_TRANS_CH_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_CHARGE_AMOUNT NUMBER := 0;
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_TRANSACTION_NAME INTERCHANGE_TRANSACTION.TRANSACTION_NAME%TYPE;
+
+BEGIN
+  	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+    v_ITERATOR.ITERATOR_ID := 0;
+
+
+    WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+   		IF v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).CHARGE_DATE, 'DD') THEN
+
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).CHARGE_DATE, 'DD');
+
+            v_PSE_ID := GET_PSE(p_RECORDS(v_IDX).ORG_ID, p_RECORDS(v_IDX).ORG_NAME);
+            v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+
+            v_COMPONENT_ID := GET_COMPONENT(g_FIRM_P2P_COMP_NAME, g_FIRM_P2P_CHG_COMP_IDENT,0);
+            v_FM_TRANS_CH_ID := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE,
+										'FORMULA');
+		END IF;
+
+        BEGIN
+        	SELECT TRANSACTION_NAME INTO v_TRANSACTION_NAME
+            FROM INTERCHANGE_TRANSACTION
+            WHERE TRANSACTION_IDENTIFIER = TO_CHAR(p_RECORDS(v_IDX).OASIS_NUM);
+        EXCEPTION
+        	WHEN NO_DATA_FOUND THEN
+            	v_TRANSACTION_NAME := '';
+        END;
+
+		v_ITERATOR_NAME.CHARGE_ID := v_FM_TRANS_CH_ID;
+        v_ITERATOR_NAME.ITERATOR_NAME1 := 'Transaction';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := 'OasisNumber';
+		v_ITERATOR_NAME.ITERATOR_NAME3 := 'Begin_Date';
+		v_ITERATOR_NAME.ITERATOR_NAME4 := 'End_Date';
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        v_ITERATOR.CHARGE_ID := v_FM_TRANS_CH_ID;
+        v_ITERATOR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID + 1;
+        IF v_TRANSACTION_NAME IS NULL THEN
+            v_ITERATOR.ITERATOR1 := p_RECORDS(v_IDX).OASIS_NUM;
+        ELSE
+            v_ITERATOR.ITERATOR1 := v_TRANSACTION_NAME;
+
+        END IF;
+		v_ITERATOR.ITERATOR2 := p_RECORDS(v_IDX).OASIS_NUM;
+		v_ITERATOR.ITERATOR3 := p_RECORDS(v_IDX).BEGIN_DATE;
+		v_ITERATOR.ITERATOR4 := p_RECORDS(v_IDX).END_DATE;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+
+        v_CHARGE_DATE   := TRUNC(p_RECORDS(v_IDX).CHARGE_DATE) + 1 / 86400;
+
+        -- next, update formula variables
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE_VAR.CHARGE_ID := v_FM_TRANS_CH_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'FirmP2PTxnRate';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).RATE;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReservationMW';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).RES_AMT_MW;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_CHARGE_AMOUNT := p_RECORDS(v_IDX).CHARGE;
+
+    	v_FORMULA_CHARGE.CHARGE_ID       := v_FM_TRANS_CH_ID;
+		v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_AMOUNT;
+		v_FORMULA_CHARGE.CHARGE_RATE     := 1;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+    	v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+
+  IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+    COMMIT;
+  END IF;
+END IMPORT_FIRM_TRANS_SERV_CHARGES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NON_FM_TRANS_SV_CHARGES
+	(
+	p_RECORDS IN MEX_PJM_NFIRM_TRAN_CH_TBL_MSRS,
+	p_STATUS OUT NUMBER
+	) AS
+v_IDX BINARY_INTEGER;
+v_PSE_ID NUMBER(9);
+v_NFM_TRANS_CH_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_CHARGE_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_TRANSACTION_NAME INTERCHANGE_TRANSACTION.TRANSACTION_NAME%TYPE;
+
+BEGIN
+  	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN RETURN; END IF; -- nothing to do
+
+    v_IDX := p_RECORDS.FIRST;
+    v_ITERATOR.ITERATOR_ID := 0;
+
+	v_COMPONENT_ID := GET_COMPONENT(g_NON_FIRM_P2P_COMP_NAME,g_NON_FIRM_P2P_CHG_COMP_IDENT,0);
+
+    WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+    	v_PSE_ID := GET_PSE(p_RECORDS(v_IDX).ORG_ID, NULL);
+        v_NFM_TRANS_CH_ID := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID,
+        						TRUNC(p_RECORDS(v_IDX).CHARGE_DATE, 'DD'),
+								'FORMULA');
+
+        BEGIN
+        	SELECT TRANSACTION_NAME INTO v_TRANSACTION_NAME
+    		FROM INTERCHANGE_TRANSACTION
+    		WHERE TRANSACTION_IDENTIFIER = TO_CHAR(p_RECORDS(v_IDX).OASIS_NUM);
+    	EXCEPTION
+            	WHEN NO_DATA_FOUND THEN
+                	v_TRANSACTION_NAME := '';
+    	END;
+
+        --loop through each hour of data
+        FOR I IN 1..25 LOOP
+
+			IF p_RECORDS(v_IDX).RES_CAPACITY.EXISTS(I) THEN
+            	v_CHARGE_DATE := p_RECORDS(v_IDX).RES_CAPACITY(I).SCHEDULE_DATE;
+
+            	v_ITERATOR_NAME.CHARGE_ID := v_NFM_TRANS_CH_ID;
+                v_ITERATOR_NAME.ITERATOR_NAME1 := 'Transaction';
+        		v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+        		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+        		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+        		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+        		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+                v_ITERATOR.CHARGE_ID := v_NFM_TRANS_CH_ID;
+                v_ITERATOR.ITERATOR_ID :=  v_ITERATOR.ITERATOR_ID + 1;
+        		IF v_TRANSACTION_NAME IS NULL THEN
+            		v_ITERATOR.ITERATOR1 := p_RECORDS(v_IDX).OASIS_NUM;
+        		ELSE
+            		v_ITERATOR.ITERATOR1 := v_TRANSACTION_NAME;
+
+        		END IF;
+				v_ITERATOR.ITERATOR2 := NULL;
+				v_ITERATOR.ITERATOR3 := NULL;
+				v_ITERATOR.ITERATOR4 := NULL;
+				v_ITERATOR.ITERATOR5 := NULL;
+        		PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        		v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        		v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+                -- next, update formula variables
+                v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+                v_FORMULA_CHARGE_VAR.CHARGE_ID := v_NFM_TRANS_CH_ID;
+
+       			v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReservedCapacity';
+    			v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).RES_CAPACITY(I).QUANTITY;
+    			PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+				v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'BilledCapacity';
+    			v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).BILLABLE_CAPACITY(I).QUANTITY;
+    			PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'HourlyRate';
+    			v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).RATE(I).PRICE;
+    			PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+				v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'CongestionAdj';
+    			v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).CONGESTION_ADJ(I).QUANTITY;
+    			PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'TransServiceCharge';
+    			v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).CHARGE(I).QUANTITY - p_RECORDS(v_IDX).CONGESTION_ADJ(I).QUANTITY;
+    			PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+    			v_FORMULA_CHARGE.CHARGE_ID := v_NFM_TRANS_CH_ID;
+				v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+				v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).CHARGE(I).QUANTITY;
+				v_FORMULA_CHARGE.CHARGE_RATE := 1;
+				v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).CHARGE(I).QUANTITY;
+				PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+			END IF;
+    	END LOOP;
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+    END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+    	COMMIT;
+  	END IF;
+END IMPORT_NON_FM_TRANS_SV_CHARGES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNC_RES_OBL
+(
+    p_STATUS  OUT NUMBER
+) AS
+    TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(64);
+    v_SPIN_RES_CH_ID     NUMBER(9);
+    v_COMPONENT_ID       NUMBER(9);
+    v_PSE_ID             NUMBER(9);
+    v_LAST_ORG_ID        VARCHAR2(16) := '?';
+    v_CONTRACT_ID        NUMBER(9);
+    v_LAST_DATE          DATE := LOW_DATE;
+    v_CHARGE_DATE        DATE;
+    v_PSE_NAME           VARCHAR2(64);
+    v_SPIN_RES_ZONE      VARCHAR2(64);
+    v_ITERATOR_NAME      FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+    v_ITERATOR           FORMULA_CHARGE_ITERATOR%ROWTYPE;
+    v_FORMULA_CHARGE     FORMULA_CHARGE%ROWTYPE;
+    v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+    v_COMMODITY_ID       IT_COMMODITY.COMMODITY_ID%TYPE;
+    v_ITERATOR_ID_MAP    ITERATOR_ID_MAP;
+    v_ITERATOR_ID        NUMBER(3) := 0;
+    v_RT_LOAD_RATIO      NUMBER;
+	v_LAST_SPIN_RES_ZONE VARCHAR2(64) := '?';
+	v_SPIN_MCP_PRICE_ID  NUMBER(9);
+	v_SPIN_TIER1_PRICE_ID NUMBER(9);
+	v_SPIN_COST_PRICE_ID NUMBER(9);
+	v_SPIN_COSTA_PRICE_ID NUMBER(9);
+	v_SPIN_LSR_TXN_ID    NUMBER(9);
+	v_SPIN_TOTAL_TXN_ID  NUMBER(9);
+	v_SPIN_T1_TXN_ID     NUMBER(9);
+	v_SPIN_T1_TOTAL_TXN_ID NUMBER(9);
+	v_SPIN_T2_TOTAL_TXN_ID NUMBER(9);
+
+    CURSOR p_SYNC_RES IS
+        SELECT *
+        FROM PJM_SYNC_RESERVE_SUMMARY
+        ORDER BY ORG_ID, SPINNING_RESERVE_ZONE, CUT_DATE;
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+    v_ITERATOR.ITERATOR_ID := 0;
+    --get componet id for PJM:SpinResChg
+    v_COMPONENT_ID := GET_COMPONENT(g_SYNC_RESERVE_COMP_NAME, g_SYNC_RESERVE_CHG_COMP_IDENT, 0);
+
+    ID.ID_FOR_COMMODITY('Spinning Reserve', FALSE, v_COMMODITY_ID);
+
+    FOR v_SYNC_RES IN p_SYNC_RES LOOP
+        IF v_LAST_ORG_ID <> v_SYNC_RES.ORG_ID OR v_LAST_DATE <> TRUNC(v_SYNC_RES.CUT_DATE- 1/86400) THEN
+
+            -- get charge IDs
+            v_LAST_ORG_ID                 := v_SYNC_RES.ORG_ID;
+            v_LAST_DATE                   := TRUNC(v_SYNC_RES.CUT_DATE, 'DD');
+            v_PSE_ID                      := GET_PSE(v_LAST_ORG_ID, NULL);
+            v_CONTRACT_ID                 := GET_CONTRACT_ID(v_PSE_ID);
+
+            --get PSE Name
+            BEGIN
+                SELECT PSE_NAME INTO v_PSE_NAME
+                FROM PURCHASING_SELLING_ENTITY
+                WHERE PSE_ID = v_PSE_ID;
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    v_PSE_NAME := '?';
+            END;
+
+            v_SPIN_RES_CH_ID := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE, 'Formula');
+
+        END IF;
+
+        IF v_SYNC_RES.SUBZONE IS NULL THEN
+            v_SPIN_RES_ZONE := v_SYNC_RES.SPINNING_RESERVE_ZONE;
+        ELSE
+            v_SPIN_RES_ZONE := v_SYNC_RES.SPINNING_RESERVE_ZONE || ':' || v_SYNC_RES.SUBZONE;
+        END IF;
+
+		IF v_LAST_SPIN_RES_ZONE <> v_SPIN_RES_ZONE THEN
+			--get id / create Market Price entities
+			v_SPIN_MCP_PRICE_ID := GET_MARKET_PRICE('PJM:SpinResMCP:' || v_SPIN_RES_ZONE);
+            IF v_SPIN_MCP_PRICE_ID IS NULL THEN
+                IO.PUT_MARKET_PRICE(o_OID                   => v_SPIN_MCP_PRICE_ID,
+                                    p_MARKET_PRICE_NAME     => 'PJM:SpinResMCP:' || v_SPIN_RES_ZONE,
+                                    p_MARKET_PRICE_ALIAS    => 'PJM Spinning Reserve Mkt Clearing Price',
+                                    p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                                    p_MARKET_PRICE_ID       => 0,
+                                    p_MARKET_PRICE_TYPE     => 'Market Clearing Price',
+                                    p_MARKET_PRICE_INTERVAL => 'Hour',
+                                    p_MARKET_TYPE           => '?',
+                                    p_COMMODITY_ID          => v_COMMODITY_ID,
+                                    p_SERVICE_POINT_TYPE    => '?',
+                                    p_EXTERNAL_IDENTIFIER   => 'PJM:SpinResMCP:' || v_SPIN_RES_ZONE,
+                                    p_EDC_ID                => 0,
+                                    p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                    p_POD_ID                => 0,
+                                    p_ZOD_ID                => 0);
+            END IF;
+
+			v_SPIN_TIER1_PRICE_ID := GET_MARKET_PRICE('PJM:SpinResTier1Total:' || v_SPIN_RES_ZONE);
+            IF v_SPIN_TIER1_PRICE_ID IS NULL THEN
+                IO.PUT_MARKET_PRICE(o_OID                   => v_SPIN_TIER1_PRICE_ID,
+                                    p_MARKET_PRICE_NAME     => 'PJM SpinRes Tier1 Total:' || v_SPIN_RES_ZONE,
+                                    p_MARKET_PRICE_ALIAS    => 'PJM Spinning Reserve Tier1 Total',
+                                    p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                                    p_MARKET_PRICE_ID       => 0,
+                                    p_MARKET_PRICE_TYPE     => 'Market Result',
+                                    p_MARKET_PRICE_INTERVAL => 'Hour',
+                                    p_MARKET_TYPE           => '?',
+                                    p_COMMODITY_ID          => v_COMMODITY_ID,
+                                    p_SERVICE_POINT_TYPE    => '?',
+                                    p_EXTERNAL_IDENTIFIER   => 'PJM:SpinResTier1Total:' || v_SPIN_RES_ZONE,
+                                    p_EDC_ID                => 0,
+                                    p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                    p_POD_ID                => 0,
+                                    p_ZOD_ID                => 0);
+            END IF;
+
+			v_SPIN_COST_PRICE_ID := GET_MARKET_PRICE('PJM:SpinResOppCost:' ||  v_SPIN_RES_ZONE);
+            IF v_SPIN_COST_PRICE_ID IS NULL THEN
+                IO.PUT_MARKET_PRICE(o_OID                   => v_SPIN_COST_PRICE_ID,
+                                    p_MARKET_PRICE_NAME     => 'PJM SpinRes Opp Cost:' || v_SPIN_RES_ZONE,
+                                    p_MARKET_PRICE_ALIAS    => 'PJM Spinning Reserve Opp Cost',
+                                    p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                                    p_MARKET_PRICE_ID       => 0,
+                                    p_MARKET_PRICE_TYPE     => 'User Defined',
+                                    p_MARKET_PRICE_INTERVAL => 'Hour',
+                                    p_MARKET_TYPE           => '?',
+                                    p_COMMODITY_ID          => v_COMMODITY_ID,
+                                    p_SERVICE_POINT_TYPE    => '?',
+                                    p_EXTERNAL_IDENTIFIER   => 'PJM:SpinResOppCost:' || v_SPIN_RES_ZONE,
+                                    p_EDC_ID                => 0,
+                                    p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                    p_POD_ID                => 0,
+                                    p_ZOD_ID                => 0);
+            END IF;
+
+			v_SPIN_COSTA_PRICE_ID := GET_MARKET_PRICE('PJM:SpinResOppCostAdd:' || v_SPIN_RES_ZONE);
+            IF v_SPIN_COSTA_PRICE_ID IS NULL THEN
+                IO.PUT_MARKET_PRICE(o_OID                   => v_SPIN_COSTA_PRICE_ID,
+                                    p_MARKET_PRICE_NAME     => 'PJM SpinRes Opp Cost Added:' || v_SPIN_RES_ZONE,
+                                    p_MARKET_PRICE_ALIAS    => 'PJM Spinning Reserve Opportunity Cost Added',
+                                    p_MARKET_PRICE_DESC     => 'Generated by MarketManager',
+                                    p_MARKET_PRICE_ID       => 0,
+                                    p_MARKET_PRICE_TYPE     => 'User Defined',
+                                    p_MARKET_PRICE_INTERVAL => 'Hour',
+                                    p_MARKET_TYPE           => '?',
+                                    p_COMMODITY_ID          => v_COMMODITY_ID,
+                                    p_SERVICE_POINT_TYPE    => '?',
+                                    p_EXTERNAL_IDENTIFIER   => 'PJM:SpinResOppCostAdd:' || v_SPIN_RES_ZONE,
+                                    p_EDC_ID                => 0,
+                                    p_SC_ID                 => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                    p_POD_ID                => 0,
+                                    p_ZOD_ID                => 0);
+            END IF;
+
+			--get Transaction IDs
+			v_SPIN_LSR_TXN_ID := GET_TX_ID('PJM:SpinResLSR:' || v_SPIN_RES_ZONE,
+                                      'Market Result',
+                                      SUBSTR('PJM SpinRes LoadShareRatio:' || v_SPIN_RES_ZONE, 1, 51),
+                                      'Hour',
+                                      v_COMMODITY_ID,
+                                      v_CONTRACT_ID);
+
+			v_SPIN_TOTAL_TXN_ID := GET_TX_ID('PJM:SpinResTotal:' || v_SPIN_RES_ZONE,
+                                          'Market Result',
+                                          SUBSTR('PJM SpinRes Total:' || v_SPIN_RES_ZONE, 1, 51),
+                                          'Hour',
+                                          v_COMMODITY_ID);
+
+			v_SPIN_T1_TXN_ID := GET_TX_ID('PJM:SpinResTier1:' || v_SPIN_RES_ZONE,
+                                      'Market Result',
+                                      SUBSTR('PJM Tier1 Alloc to Obligation:' ||v_SPIN_RES_ZONE, 1, 51),
+                                      'Hour',
+                                      v_COMMODITY_ID,
+                                      v_CONTRACT_ID);
+
+			v_SPIN_T1_TOTAL_TXN_ID := GET_TX_ID('PJM:SpinResTier1Total:' || v_SPIN_RES_ZONE,
+                                      'Market Result',
+                                      SUBSTR('PJM Total Tier1 Allocation to Obligation:' || v_SPIN_RES_ZONE, 1, 51),
+                                      'Hour',
+                                      v_COMMODITY_ID);
+
+			v_SPIN_T2_TOTAL_TXN_ID := GET_TX_ID('PJM:SpinResTier2Total:' || v_SPIN_RES_ZONE,
+                                      'Market Result',
+                                      SUBSTR('PJM Spinning Reserve Tier2 Total:' || v_SPIN_RES_ZONE, 1, 51),
+                                      'Hour',
+                                      v_COMMODITY_ID);
+
+			v_LAST_SPIN_RES_ZONE := v_SPIN_RES_ZONE;
+			COMMIT;
+		END IF;
+
+        v_CHARGE_DATE := v_SYNC_RES.CUT_DATE;
+
+        PUT_MARKET_PRICE_VALUE(v_SPIN_MCP_PRICE_ID, v_CHARGE_DATE, NVL(v_SYNC_RES.SRMCP,0));
+
+        IF NVL(v_SYNC_RES.MEMBER_TIER1_ALLOC_TO_OBLIG,0) <> 0 THEN
+            PUT_MARKET_PRICE_VALUE(v_SPIN_TIER1_PRICE_ID, v_CHARGE_DATE,
+                                   (NVL(v_SYNC_RES.TOTAL_TIER1_ALLOC_TO_OBLIG,0) * NVL(v_SYNC_RES.TIER1_CHARGE,0)) /
+                                   v_SYNC_RES.MEMBER_TIER1_ALLOC_TO_OBLIG);
+        END IF;
+
+        IF NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0) <> 0 AND
+		  (NVL(v_SYNC_RES.ADJUSTED_OBLIGATION,0) / NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0)) <> 0 THEN
+            PUT_MARKET_PRICE_VALUE(v_SPIN_COST_PRICE_ID, v_CHARGE_DATE,
+                                   NVL(v_SYNC_RES.OPP_COST_CHARGE_CLEARED,0) /
+                                   (NVL(v_SYNC_RES.ADJUSTED_OBLIGATION,0) / NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0)));
+        END IF;
+
+        IF NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0) <> 0 AND
+           (NVL(v_SYNC_RES.ADJUSTED_OBLIGATION,0) / NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0)) <> 0 THEN
+               PUT_MARKET_PRICE_VALUE(v_SPIN_COSTA_PRICE_ID,
+                                   v_CHARGE_DATE,
+                                   NVL(v_SYNC_RES.OPP_COST_CHARGE_ADDED,0) /
+                                   (NVL(v_SYNC_RES.ADJUSTED_OBLIGATION,0) / NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0)));
+        END IF;
+
+    	-- put schedule data
+		IF NVL(v_SYNC_RES.TOTAL_SUBZONE_LOAD,0) <> 0 THEN
+			v_RT_LOAD_RATIO := NVL(v_SYNC_RES.SUBZONE_LOAD,0) / v_SYNC_RES.TOTAL_SUBZONE_LOAD;
+		ELSE
+			v_RT_LOAD_RATIO := 0;
+		END IF;
+
+        PUT_SCHEDULE_VALUE(v_SPIN_LSR_TXN_ID, v_CHARGE_DATE, v_RT_LOAD_RATIO);
+
+        IF v_RT_LOAD_RATIO <> 0 THEN
+            PUT_SCHEDULE_VALUE(v_SPIN_TOTAL_TXN_ID, v_CHARGE_DATE,
+                               NVL(v_SYNC_RES.SPIN_OBLIGATION,0) / v_RT_LOAD_RATIO);
+        END IF;
+
+        PUT_SCHEDULE_VALUE(v_SPIN_T1_TXN_ID,  v_CHARGE_DATE,
+                           NVL(v_SYNC_RES.MEMBER_TIER1_ALLOC_TO_OBLIG,0));
+
+        PUT_SCHEDULE_VALUE(v_SPIN_T1_TOTAL_TXN_ID, v_CHARGE_DATE,
+                           NVL(v_SYNC_RES.TOTAL_TIER1_ALLOC_TO_OBLIG,0));
+
+        PUT_SCHEDULE_VALUE(v_SPIN_T2_TOTAL_TXN_ID, v_CHARGE_DATE,
+                           NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0));
+
+        v_ITERATOR_NAME.CHARGE_ID      := v_SPIN_RES_CH_ID;
+        v_ITERATOR_NAME.ITERATOR_NAME1 := 'SpinResZone';
+        v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+        PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        v_ITERATOR.CHARGE_ID := v_SPIN_RES_CH_ID;
+        IF v_ITERATOR_ID_MAP.EXISTS(v_SPIN_RES_ZONE) THEN
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_SPIN_RES_ZONE);
+        ELSE
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_SPIN_RES_ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+
+        v_ITERATOR.ITERATOR1 := v_SPIN_RES_ZONE;
+        v_ITERATOR.ITERATOR2 := NULL;
+        v_ITERATOR.ITERATOR3 := NULL;
+        v_ITERATOR.ITERATOR4 := NULL;
+        v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID     := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.CHARGE_FACTOR   := 1.0;
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+
+        v_FORMULA_CHARGE_VAR.CHARGE_ID     := v_SPIN_RES_CH_ID;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'SRMCP';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := NVL(v_SYNC_RES.SRMCP,0);
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'LoadRatioShare';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := v_RT_LOAD_RATIO;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'TotalSpinAssignments';
+        IF v_RT_LOAD_RATIO = 0 THEN
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := 0;
+        ELSE
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := NVL(v_SYNC_RES.SPIN_OBLIGATION,0) /
+                                                 v_RT_LOAD_RATIO;
+        END IF;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'SpinObl';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := NVL(v_SYNC_RES.SPIN_OBLIGATION,0);
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'BilatPurchases';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := NVL(v_SYNC_RES.BILATERAL_SPIN_PURCHASES,0);
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'BilatSales';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := NVL(v_SYNC_RES.BILATERAL_SPIN_SALES,0);
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Tier1AllocMWH';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := NVL(v_SYNC_RES.MEMBER_TIER1_ALLOC_TO_OBLIG,0);
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Tier1TotalMWH';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := NVL(v_SYNC_RES.TOTAL_TIER1_ALLOC_TO_OBLIG,0);
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Tier1TotalCredits';
+        IF NVL(v_SYNC_RES.MEMBER_TIER1_ALLOC_TO_OBLIG,0) = 0 THEN
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := 0;
+        ELSE
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := (NVL(v_SYNC_RES.TOTAL_TIER1_ALLOC_TO_OBLIG,0) *
+                                                 NVL(v_SYNC_RES.TIER1_CHARGE,0)) /
+                                                 NVL(v_SYNC_RES.MEMBER_TIER1_ALLOC_TO_OBLIG,0);
+        END IF;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Tier1Ratio';
+        IF NVL(v_SYNC_RES.TOTAL_TIER1_ALLOC_TO_OBLIG,0) = 0 THEN
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := 0;
+        ELSE
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := NVL(v_SYNC_RES.MEMBER_TIER1_ALLOC_TO_OBLIG,0) /
+                                                 NVL(v_SYNC_RES.TOTAL_TIER1_ALLOC_TO_OBLIG,0);
+        END IF;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Tier1Charge';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := NVL(v_SYNC_RES.TIER1_CHARGE,0);
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Tier2MWH';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := NVL(v_SYNC_RES.ADJUSTED_OBLIGATION,0);
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Tier2TotalMWH';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0);
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Tier2Charge';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := NVL(v_SYNC_RES.SRMCP_CHARGE,0);
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Tier2Ratio';
+        IF NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0) = 0 THEN
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := 0;
+        ELSE
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := NVL(v_SYNC_RES.ADJUSTED_OBLIGATION,0) /
+                                                 v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES;
+        END IF;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'TotOppCostCleared';
+        IF NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0) <> 0 AND
+           (NVL(v_SYNC_RES.ADJUSTED_OBLIGATION,0) / NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0)) <> 0 THEN
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := NVL(v_SYNC_RES.OPP_COST_CHARGE_CLEARED,0) /
+                                                 (NVL(v_SYNC_RES.ADJUSTED_OBLIGATION,0) /
+                                                 NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0));
+        ELSE
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := 0;
+        END IF;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'OppCostClearedCharge';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := NVL(v_SYNC_RES.OPP_COST_CHARGE_CLEARED,0);
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'TotalOppCostAdded';
+        IF NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0) <> 0 AND
+           (NVL(v_SYNC_RES.ADJUSTED_OBLIGATION,0) /
+           NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0)) <> 0 THEN
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := NVL(v_SYNC_RES.OPP_COST_CHARGE_ADDED,0) /
+                                                 (NVL(v_SYNC_RES.ADJUSTED_OBLIGATION,0) /
+                                                 NVL(v_SYNC_RES.PJM_TOTAL_SPIN_PURCHASES,0));
+        ELSE
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL := 0;
+        END IF;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'OppCostAddedCharge';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := NVL(v_SYNC_RES.OPP_COST_CHARGE_ADDED,0);
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_ID       := v_SPIN_RES_CH_ID;
+        v_FORMULA_CHARGE.CHARGE_RATE     := 1;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := NVL(v_SYNC_RES.TIER1_CHARGE,0) +
+                                            NVL(v_SYNC_RES.SRMCP_CHARGE,0) +
+                                            NVL(v_SYNC_RES.OPP_COST_CHARGE_CLEARED,0) +
+                                            NVL(v_SYNC_RES.OPP_COST_CHARGE_ADDED,0);
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_FORMULA_CHARGE.CHARGE_QUANTITY;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+    END LOOP;
+
+    DELETE FROM PJM_SYNC_RESERVE_SUMMARY;
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        COMMIT;
+    END IF;
+
+END IMPORT_SYNC_RES_OBL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_BLACK_START_SUMMARY
+	(
+	p_RECORDS IN MEX_PJM_BLACKSTART_SUMMARY_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+TYPE MKT_PRICE_ID_MAP IS TABLE OF NUMBER(9) INDEX BY VARCHAR2(32);
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_BLACK_ST_REV_ID_MAP    MKT_PRICE_ID_MAP;
+v_ITERATOR_ID_MAP	ITERATOR_ID_MAP;
+v_MARKET_PRICE_ID	NUMBER(9);
+v_BLACK_ST_CH_ID	NUMBER(9);
+v_ZONE	VARCHAR2(32);
+v_CHARGE_AMOUNT	NUMBER;
+v_COMPONENT_ID	NUMBER(9);
+v_PSE_ID	NUMBER(9);
+v_ZONE_ID	SERVICE_ZONE.SERVICE_ZONE_ID%TYPE;
+v_PSE_NAME	VARCHAR2(64);
+v_CONTRACT_ID	NUMBER(9);
+v_ITERATOR_ID	NUMBER(3) := 0;
+v_TRANSACTION_ID	INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_IDX	BINARY_INTEGER;
+v_LAST_ORG_ID	VARCHAR2(16) := '?';
+v_LAST_DATE	DATE := LOW_DATE;
+v_CHARGE_DATE	DATE := LOW_DATE;
+v_FORMULA_CHARGE	FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+
+BEGIN
+  	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+  	v_ITERATOR.ITERATOR_ID := 0;
+
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+		-- flush charge to formula charge
+		IF NOT v_BLACK_ST_CH_ID IS NULL THEN
+			v_FORMULA_CHARGE.CHARGE_ID       := v_BLACK_ST_CH_ID;
+			v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+			v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_AMOUNT;
+			v_FORMULA_CHARGE.CHARGE_RATE     := 1;
+			v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+			PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+		END IF;
+
+		v_CHARGE_DATE   := TRUNC(p_RECORDS(v_IDX).BEGIN_DATE) + 1 / 86400;
+		v_CHARGE_AMOUNT := 0;
+
+        v_ZONE := REPLACE(p_RECORDS(v_IDX).CONTROL_AREA, ' ', '');
+        --get zone id
+        v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_ZONE);
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).BEGIN_DATE, 'MM') THEN
+            -- get charge IDs
+            v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).BEGIN_DATE, 'MM');
+            v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+
+            --get PSE Name
+            BEGIN
+            	SELECT PSE_NAME
+            	INTO v_PSE_NAME
+            	FROM PURCHASING_SELLING_ENTITY
+            	WHERE PSE_ID = v_PSE_ID;
+            EXCEPTION
+               	WHEN NO_DATA_FOUND THEN
+               		v_PSE_NAME := '?';
+            END;
+
+            --get contract id
+            v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+            ID.ID_FOR_COMMODITY('Transmission',FALSE, v_COMMODITY_ID);
+
+            v_COMPONENT_ID := GET_COMPONENT(g_BLACK_START_COMP_NAME,g_BLACK_START_CHG_COMP_IDENT,0);
+			v_BLACK_ST_CH_ID   := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE,
+																			'FORMULA');
+		END IF;
+
+   		v_ITERATOR_NAME.CHARGE_ID := v_BLACK_ST_CH_ID;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+		v_ITERATOR.CHARGE_ID := v_BLACK_ST_CH_ID;
+       	IF v_ITERATOR_ID_MAP.EXISTS(v_ZONE) THEN
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ZONE);
+		ELSE
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+		v_ITERATOR.ITERATOR1 := v_ZONE;
+		v_ITERATOR.ITERATOR2 := NULL;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+		-- first update the market prices - get IDs from cache
+		IF v_BLACK_ST_REV_ID_MAP.EXISTS(v_ZONE) THEN
+			v_MARKET_PRICE_ID := v_BLACK_ST_REV_ID_MAP(v_ZONE);
+		ELSE
+			v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:' || v_ZONE || ':BlackStRevReq');
+			IF v_MARKET_PRICE_ID IS NULL THEN
+				IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+          							p_MARKET_PRICE_NAME => 'PJM Black Start Rev Req - ' || v_ZONE,
+									p_MARKET_PRICE_ALIAS =>'PJM Black Start Rev Req - ' || v_ZONE,
+                            		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+									p_MARKET_PRICE_ID => 0,
+                            		p_MARKET_PRICE_TYPE => 'PJM Black Start Rev Req',
+									p_MARKET_PRICE_INTERVAL => 'Month',
+                            		p_MARKET_TYPE => '?',
+									p_COMMODITY_ID => v_COMMODITY_ID, --transmission
+									p_SERVICE_POINT_TYPE => '?',
+                            		p_EXTERNAL_IDENTIFIER => 'PJM:' || v_ZONE || ':BlackStRevReq',
+									p_EDC_ID => 0,
+									p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            		p_POD_ID => 0,
+									p_ZOD_ID => v_ZONE_ID);
+			END IF;
+			v_BLACK_ST_REV_ID_MAP(v_ZONE) := v_MARKET_PRICE_ID;
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE),
+													 p_RECORDS(v_IDX).TOT_ZONAL_BLACKSTART_REV_REQ);
+
+		-- next, update formula variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_BLACK_ST_CH_ID;
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ZonePeakUse';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOT_ZONE_PEAK_TRANS_USE;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        --cn get transaction id, update schedule
+        v_TRANSACTION_ID := GET_TX_ID('PJM:' || v_ZONE || ':ZnPk',
+                                      'Zonal Peak Use',
+                                      'PJM Zonal Peak Use: '|| v_ZONE,
+                                      'Month',
+                                      v_COMMODITY_ID,
+                                      0,
+                                      v_ZONE_ID);
+
+        PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_FORMULA_CHARGE_VAR.CHARGE_DATE,
+                           p_RECORDS(v_IDX).TOT_ZONE_PEAK_TRANS_USE );
+
+
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ZoneBlackStartRevReq';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOT_ZONAL_BLACKSTART_REV_REQ;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJMTotalNonZonePeakUse';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOT_PJM_NONZONE_PEAK_TRANS_USE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        --cn get transaction id, update schedule
+        v_TRANSACTION_ID := GET_TX_ID('PJMNonZonePeakBlkSt',
+                                      'TtlNZon Peak Use',
+                                      'PJM Total NonZonal Peak Use_BlkSt',
+                                      'Month',
+                                      v_COMMODITY_ID);
+
+        PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_FORMULA_CHARGE_VAR.CHARGE_DATE,
+                           p_RECORDS(v_IDX).TOT_PJM_NONZONE_PEAK_TRANS_USE );
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJMTotalZonalPeakUse';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOT_PJM_ZONE_PEAK_TRANS_USE ;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        --cn get transaction id, update schedule
+        v_TRANSACTION_ID := GET_TX_ID('PJMZonePeakBlkSt',
+                                      'TtlZone Pk BlkSt',
+                                      v_zone ||'PJM TotZonal Pk Use_BlkSt',
+                                      'Month',
+                                      v_COMMODITY_ID,
+                                      0,
+                                      v_ZONE_ID);
+
+        PUT_SCHEDULE_VALUE(v_TRANSACTION_ID,
+                           v_FORMULA_CHARGE_VAR.CHARGE_DATE,
+                           p_RECORDS(v_IDX).TOT_PJM_ZONE_PEAK_TRANS_USE );
+
+        -- intermediate variables for the charge component
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'MonthlyZoneTransUse';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).MEMBER_ZONE_PEAK_TRANS_USE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'MonthlyNonZoneTransUse';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).MEMBER_NONZONE_PEAK_TRANS_USE;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'AdjustmentFactor';
+        IF (p_RECORDS(v_IDX).TOT_PJM_ZONE_PEAK_TRANS_USE+p_RECORDS(v_IDX).TOT_PJM_NONZONE_PEAK_TRANS_USE) = 0 THEN
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := 0;
+        ELSE
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOT_PJM_ZONE_PEAK_TRANS_USE/
+        									(p_RECORDS(v_IDX).TOT_PJM_ZONE_PEAK_TRANS_USE+p_RECORDS(v_IDX).TOT_PJM_NONZONE_PEAK_TRANS_USE );
+        END IF;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'MonthlyZoneCharge';
+        IF p_RECORDS(v_IDX).TOT_ZONE_PEAK_TRANS_USE = 0 THEN
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := 0;
+        ELSE
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).MEMBER_ZONE_PEAK_TRANS_USE *p_RECORDS(v_IDX).TOT_ZONAL_BLACKSTART_REV_REQ *
+        									(p_RECORDS(v_IDX).TOT_PJM_ZONE_PEAK_TRANS_USE /
+        									(p_RECORDS(v_IDX).TOT_PJM_ZONE_PEAK_TRANS_USE +p_RECORDS(v_IDX).TOT_PJM_NONZONE_PEAK_TRANS_USE ))/
+                                            p_RECORDS(v_IDX).TOT_ZONE_PEAK_TRANS_USE ;
+        END IF;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'MonthlynNonZoneCharge';
+        IF (p_RECORDS(v_IDX).TOT_PJM_ZONE_PEAK_TRANS_USE+p_RECORDS(v_IDX).TOT_PJM_NONZONE_PEAK_TRANS_USE) = 0 THEN
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := 0;
+        ELSE
+        	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).MEMBER_NONZONE_PEAK_TRANS_USE /
+            									 (p_RECORDS(v_IDX).TOT_PJM_ZONE_PEAK_TRANS_USE+p_RECORDS(v_IDX).TOT_PJM_NONZONE_PEAK_TRANS_USE )*
+        									p_RECORDS(v_IDX).TOT_ZONAL_BLACKSTART_REV_REQ ;
+        END IF;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'MemberCharge';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).CHARGE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_CHARGE_AMOUNT := v_CHARGE_AMOUNT + p_RECORDS(v_IDX).CHARGE;
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+	-- flush charge to formula charge
+	IF NOT v_BLACK_ST_CH_ID IS NULL THEN
+		v_FORMULA_CHARGE.CHARGE_ID       := v_BLACK_ST_CH_ID;
+		v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.CHARGE_QUANTITY := v_CHARGE_AMOUNT;
+		v_FORMULA_CHARGE.CHARGE_RATE     := 1;
+		v_FORMULA_CHARGE.CHARGE_AMOUNT   := v_CHARGE_AMOUNT;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+	END IF;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+END IMPORT_BLACK_START_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_RAMAPO_PAR_SUMMARY
+	(
+	p_RECORDS IN MEX_PJM_RAMAPO_PAR_SUMMARY_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+v_MARKET_PRICE_ID	NUMBER(9);
+v_RAMAPO_CH_ID	NUMBER(9);
+v_COMPONENT_ID	NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_IDX	BINARY_INTEGER;
+v_LAST_ORG_ID	VARCHAR2(16) := '?';
+v_LAST_DATE	DATE := LOW_DATE;
+v_CHARGE_DATE	DATE := LOW_DATE;
+v_FORMULA_CHARGE	FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+
+BEGIN
+  	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+		v_CHARGE_DATE := TRUNC(p_RECORDS(v_IDX).MONTH) + 1 / 86400;
+        v_FORMULA_CHARGE.ITERATOR_ID := 0;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> p_RECORDS(v_IDX).MONTH THEN
+            -- get charge IDs
+            v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).MONTH, 'MM');
+            v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+            v_COMPONENT_ID := GET_COMPONENT(g_RAMAPO_PAR_COMP_NAME,g_RAMAPO_PAR_CH_COMP_IDENT,0);
+			v_RAMAPO_CH_ID   := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE,'FORMULA');
+		END IF;
+
+        v_FORMULA_CHARGE.ITERATOR_ID := 0;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+
+		-- first update the market prices
+        v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:RamapoPARTotal');
+        IF v_MARKET_PRICE_ID IS NULL THEN
+            IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+          							p_MARKET_PRICE_NAME => 'PJM Ramapo Par Total Expenses',
+									p_MARKET_PRICE_ALIAS => 'PJM Ramapo Par Total Expenses',
+                            		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+									p_MARKET_PRICE_ID => 0,
+                            		p_MARKET_PRICE_TYPE => 'Market Result',
+									p_MARKET_PRICE_INTERVAL => 'Month',
+                            		p_MARKET_TYPE => '?',
+									p_COMMODITY_ID => 0,
+									p_SERVICE_POINT_TYPE => '?',
+                            		p_EXTERNAL_IDENTIFIER => 'PJM:RamapoPARTotal',
+									p_EDC_ID => 0,
+									p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                    p_POD_ID => 0,
+                                    p_ZOD_ID => 0);
+
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE),
+													 p_RECORDS(v_IDX).TOTAL_PJM_RAMAPO_PAR);
+
+        v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:EastRamapoRevRqt');
+
+        IF v_MARKET_PRICE_ID IS NULL THEN
+            IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+          							p_MARKET_PRICE_NAME => 'PJM East Ramapo Revenue Rqt',
+									p_MARKET_PRICE_ALIAS => 'PJM East Ramapo Revenue Rqt',
+                            		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+									p_MARKET_PRICE_ID => 0,
+                            		p_MARKET_PRICE_TYPE => 'Market Result',
+									p_MARKET_PRICE_INTERVAL => 'Month',
+                            		p_MARKET_TYPE => '?',
+									p_COMMODITY_ID => 0,
+									p_SERVICE_POINT_TYPE => '?',
+                            		p_EXTERNAL_IDENTIFIER => 'PJM:EastRamapoRevRqt',
+									p_EDC_ID => 0,
+									p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                    p_POD_ID => 0,
+                                    p_ZOD_ID => 0);
+
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE),
+													 p_RECORDS(v_IDX).EAST_RAMAPO_REV_REQT);
+
+        v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:TotalRamapoRevRqt');
+
+        IF v_MARKET_PRICE_ID IS NULL THEN
+            IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+          							p_MARKET_PRICE_NAME => 'PJM Total Ramapo Revenue Rqt',
+									p_MARKET_PRICE_ALIAS => 'PJM Total Ramapo Revenue Rqt',
+                            		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+									p_MARKET_PRICE_ID => 0,
+                            		p_MARKET_PRICE_TYPE => 'Market Result',
+									p_MARKET_PRICE_INTERVAL => 'Month',
+                            		p_MARKET_TYPE => '?',
+									p_COMMODITY_ID => 0,
+									p_SERVICE_POINT_TYPE => '?',
+                            		p_EXTERNAL_IDENTIFIER => 'PJM:TotalRamapoRevRqt',
+									p_EDC_ID => 0,
+									p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                                    p_POD_ID => 0,
+                                    p_ZOD_ID => 0);
+
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE),
+													 p_RECORDS(v_IDX).TTL_PJM_RAMARO_REV_REQT);
+
+		-- next, update formula variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_RAMAPO_CH_ID;
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJM_Total_Ramapo_Par';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOTAL_PJM_RAMAPO_PAR;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJM_East_Ramapo_Par_Rev_Rqt';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).EAST_RAMAPO_REV_REQT;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'PJM_Total_Ramapo_Par_Rev_Rqt';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TTL_PJM_RAMARO_REV_REQT;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_ID := v_RAMAPO_CH_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).TOTAL_PJM_RAMAPO_PAR;
+        v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).EAST_RAMAPO_REV_REQT / p_RECORDS(v_IDX).TTL_PJM_RAMARO_REV_REQT;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).RAMAPO_PAR_CHARGE;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+END IMPORT_RAMAPO_PAR_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_CAP_TRANSFER_CREDITS
+    (
+    p_RECORDS IN MEX_PJM_CAP_TRANSFER_RIGHT_TBL,
+    p_STATUS  OUT NUMBER) AS
+TYPE MKT_PRICE_ID_MAP IS TABLE OF NUMBER(9) INDEX BY VARCHAR2(32);
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ZONE_PRICE_ID_MAP MKT_PRICE_ID_MAP;
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+v_MARKET_PRICE_ID NUMBER(9);
+v_CH_ID NUMBER(9);
+v_ZONE VARCHAR2(32);
+v_ZONE_ID NUMBER(9);
+v_ITERATOR_ID NUMBER(3) := 0;
+v_CAP_TRANS_COMP NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_COMMODITY_ID	IT_COMMODITY.COMMODITY_ID%TYPE;
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE     FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_TX_ID NUMBER(9);
+v_CONTRACT_ID NUMBER(9);
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+    v_ITERATOR.ITERATOR_ID := 0;
+	ID.ID_FOR_COMMODITY('Capacity',FALSE, v_COMMODITY_ID);
+    v_CAP_TRANS_COMP := GET_COMPONENT(g_CAP_TRANSFER_RIGHTS_NAME,g_CAP_TRANSFER_CR_IDENT,0);     
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_CHARGE_DATE   := TRUNC(p_RECORDS(v_IDX).OPER_DAY) + 1 / 86400;
+
+		IF v_LAST_ORG_ID <> TO_CHAR(p_RECORDS(v_IDX).ORG_ID) OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).OPER_DAY, 'DD') THEN
+
+			v_LAST_ORG_ID := TO_CHAR(p_RECORDS(v_IDX).ORG_ID);
+			v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).OPER_DAY, 'DD');
+			v_PSE_ID      := MM_PJM_UTIL.GET_PSE(v_LAST_ORG_ID, NULL);
+            v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+			v_CH_ID   := GET_CHARGE_ID(v_PSE_ID, v_CAP_TRANS_COMP, v_LAST_DATE,	'FORMULA');
+		END IF;
+
+		v_ZONE := REPLACE(p_RECORDS(v_IDX).ZONE, ' ', '');
+		v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_ZONE);
+
+		-- first update the market prices - get IDs from cache
+		IF v_ZONE_PRICE_ID_MAP.EXISTS(v_ZONE) THEN
+			v_MARKET_PRICE_ID := v_ZONE_PRICE_ID_MAP(v_ZONE);
+		ELSE
+			v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:' || v_ZONE || ':ZonalCTR');
+			IF v_MARKET_PRICE_ID IS NULL THEN
+				IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+          							p_MARKET_PRICE_NAME => 'PJM Zonal CTR Rate - ' || v_ZONE,
+									p_MARKET_PRICE_ALIAS =>'PJM Zonal CTR Rate - ' || v_ZONE,
+                            		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+									p_MARKET_PRICE_ID => 0,
+                            		p_MARKET_PRICE_TYPE => 'Zonal CTR',
+									p_MARKET_PRICE_INTERVAL => 'Day',
+                            		p_MARKET_TYPE => '?',
+									p_COMMODITY_ID => v_COMMODITY_ID,
+									p_SERVICE_POINT_TYPE => '?',
+                            		p_EXTERNAL_IDENTIFIER => 'PJM:' || v_ZONE || ':ZonalCTR',
+									p_EDC_ID => 0,
+									p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            		p_POD_ID => 0,
+									p_ZOD_ID => v_ZONE_ID);
+			END IF;
+			v_ZONE_PRICE_ID_MAP(v_ZONE) := v_MARKET_PRICE_ID;
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE), p_RECORDS(v_IDX).ZONALCTRRATE);
+        
+        v_TX_ID := GET_TX_ID('CTR: ' || v_ZONE,
+        								'CTR',
+                                        'Capacity Transfer Right MW ' || v_ZONE,
+                                        'Day',
+                                        v_COMMODITY_ID,
+                                        v_CONTRACT_ID,
+                                        v_ZONE_ID,
+                                        0,
+                                        0,
+                                        v_PSE_ID);
+                                        
+        PUT_SCHEDULE_VALUE(v_TX_ID, v_CHARGE_DATE, p_RECORDS(v_IDX).CAPTRANSFERRIGHTMW, NULL, TRUE);
+        
+         v_TX_ID := GET_TX_ID('TradedCTR: ' || v_ZONE,
+        								'Traded CTR',
+                                        'Traded Capacity Transfer Right MW ' || v_ZONE,
+                                        'Day',
+                                        v_COMMODITY_ID,
+                                        v_CONTRACT_ID,
+                                        v_ZONE_ID,
+                                        0,
+                                        0,
+                                        v_PSE_ID);
+                                        
+        PUT_SCHEDULE_VALUE(v_TX_ID, v_CHARGE_DATE, p_RECORDS(v_IDX).TRADEDCTRMW, NULL, TRUE);
+        
+        v_TX_ID := GET_TX_ID('TotalUCAP: ' || v_ZONE,
+        								'Zonal UCAP',
+                                        'Total Zone UCAP Obligation ' || v_ZONE,
+                                        'Day',
+                                        v_COMMODITY_ID,
+                                        0,
+                                        v_ZONE_ID,
+                                        0,
+                                        0,
+                                        0);
+                                        
+        PUT_SCHEDULE_VALUE(v_TX_ID, v_CHARGE_DATE, p_RECORDS(v_IDX).TOTALZONEOBLIGATION, NULL, TRUE);                                       
+
+		-- next, update formula variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_CH_ID;
+
+        v_ITERATOR_NAME.CHARGE_ID := v_CH_ID;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+		v_ITERATOR.CHARGE_ID := v_CH_ID;
+       	IF v_ITERATOR_ID_MAP.EXISTS(v_ZONE) THEN
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ZONE);
+		ELSE
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+
+		v_ITERATOR.ITERATOR1 := v_ZONE;
+		v_ITERATOR.ITERATOR2 := NULL;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'CTR_MW';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).CAPTRANSFERRIGHTMW;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'UCAPObligation';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).UCAPOBLIGATION;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'TotalZoneObligation';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TOTALZONEOBLIGATION;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'TradedCTR_MW';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).TRADEDCTRMW;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);     
+
+        v_FORMULA_CHARGE.CHARGE_ID       := v_CH_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := -p_RECORDS(v_IDX).CREDIT/p_RECORDS(v_IDX).ZONALCTRRATE;
+        v_FORMULA_CHARGE.CHARGE_RATE     := p_RECORDS(v_IDX).ZONALCTRRATE;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := -p_RECORDS(v_IDX).CREDIT;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+	    v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+	IF p_STATUS >= 0 THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_CAP_TRANSFER_CREDITS;
+-------------------------------------------------------------------------------------
+PROCEDURE IMPORT_LOC_RELIABILITY_SUMM
+    (
+    p_RECORDS IN MEX_PJM_RECONCIL_CHARGES_TBL,
+    p_STATUS  OUT NUMBER
+    ) AS
+TYPE MKT_PRICE_ID_MAP IS TABLE OF NUMBER(9) INDEX BY VARCHAR2(32);
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ZONE_PRICE_ID_MAP MKT_PRICE_ID_MAP;
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+v_MARKET_PRICE_ID NUMBER(9);
+v_CH_ID NUMBER(9);
+v_ZONE VARCHAR2(32);
+v_ZONE_ID NUMBER(9);
+v_ITERATOR_ID NUMBER(3) := 0;
+v_LOC_REL_COMP NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_COMMODITY_ID	IT_COMMODITY.COMMODITY_ID%TYPE;
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE     FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+    v_ITERATOR.ITERATOR_ID := 0;
+	ID.ID_FOR_COMMODITY('Capacity',FALSE, v_COMMODITY_ID);
+    v_LOC_REL_COMP := GET_COMPONENT(g_LOCATIONAL_REL_COMP_NAME,g_LOCATION_REL_CHG_COMP_IDENT,0);
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_CHARGE_DATE   := TRUNC(p_RECORDS(v_IDX).DAY) + 1 / 86400;
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).DAY, 'DD') THEN
+
+			v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+			v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).DAY, 'DD');
+			v_PSE_ID      := MM_PJM_UTIL.GET_PSE(v_LAST_ORG_ID, NULL);
+			v_CH_ID   := GET_CHARGE_ID(v_PSE_ID, v_LOC_REL_COMP, v_LAST_DATE,
+										'FORMULA');
+		END IF;
+
+		v_ZONE := REPLACE(p_RECORDS(v_IDX).ZONE, ' ', '');
+		v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_ZONE);
+
+		-- first update the market prices - get IDs from cache
+		IF v_ZONE_PRICE_ID_MAP.EXISTS(v_ZONE) THEN
+			v_MARKET_PRICE_ID := v_ZONE_PRICE_ID_MAP(v_ZONE);
+		ELSE
+			v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:' || v_ZONE || ':ZonalCapPrice');
+			IF v_MARKET_PRICE_ID IS NULL THEN
+				IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+          							p_MARKET_PRICE_NAME => 'PJM Zonal Capacity Price - ' || v_ZONE,
+									p_MARKET_PRICE_ALIAS =>'PJM Zonal Capacity Price - ' || v_ZONE,
+                            		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+									p_MARKET_PRICE_ID => 0,
+                            		p_MARKET_PRICE_TYPE => 'Zonal Capacity',
+									p_MARKET_PRICE_INTERVAL => 'Day',
+                            		p_MARKET_TYPE => '?',
+									p_COMMODITY_ID => v_COMMODITY_ID,
+									p_SERVICE_POINT_TYPE => '?',
+                            		p_EXTERNAL_IDENTIFIER => 'PJM:' || v_ZONE || ':ZonalCapPrice',
+									p_EDC_ID => 0,
+									p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                            		p_POD_ID => 0,
+									p_ZOD_ID => v_ZONE_ID);
+			END IF;
+			v_ZONE_PRICE_ID_MAP(v_ZONE) := v_MARKET_PRICE_ID;
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE),
+													 p_RECORDS(v_IDX).RATE);
+
+		-- next, update formula variables
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_CH_ID;
+
+        v_ITERATOR_NAME.CHARGE_ID := v_CH_ID;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+		v_ITERATOR.CHARGE_ID := v_CH_ID;
+       	IF v_ITERATOR_ID_MAP.EXISTS(v_ZONE) THEN
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ZONE);
+		ELSE
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+
+		v_ITERATOR.ITERATOR1 := v_ZONE;
+		v_ITERATOR.ITERATOR2 := NULL;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ZonalCapacityPrice';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).RATE;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'UCAPObligation';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).QUANTITY;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_ID       := v_CH_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).QUANTITY;
+        v_FORMULA_CHARGE.CHARGE_RATE     := p_RECORDS(v_IDX).RATE;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := p_RECORDS(v_IDX).CHARGE;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+	    v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_LOC_RELIABILITY_SUMM;
+-------------------------------------------------------------------------------------
+PROCEDURE IMPORT_RPM_AUCTION_SUMMARY
+    (
+    p_RECORDS IN MEX_PJM_RPM_AUCTION_TBL,
+    p_STATUS  OUT NUMBER
+    ) AS
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+v_MARKET_PRICE_ID NUMBER(9);
+v_CH_ID NUMBER(9);
+v_CR_ID NUMBER(9);
+v_CHARGE_ID NUMBER(9);
+v_ITERATOR_ID NUMBER(3) := 0;
+v_RPM_CHG_COMP NUMBER(9);
+v_RPM_CRED_COMP NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_COMMODITY_ID	IT_COMMODITY.COMMODITY_ID%TYPE;
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_CHARGE_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE     FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+BEGIN
+	p_STATUS := GA.SUCCESS;
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+    v_ITERATOR.ITERATOR_ID := 0;
+	ID.ID_FOR_COMMODITY('Capacity',FALSE, v_COMMODITY_ID);
+    v_RPM_CHG_COMP := GET_COMPONENT(g_RPM_AUCTION_COMP_NAME,g_RPM_AUCTION_CHG_COMP_IDENT,0);
+    v_RPM_CRED_COMP := GET_COMPONENT(g_RPM_AUCTION_COMP_NAME,g_RPM_AUCTION_CR_COMP_IDENT,1);
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_CHARGE_DATE   := TRUNC(p_RECORDS(v_IDX).DAY) + 1 / 86400;
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).DAY, 'DD') THEN
+
+			v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+			v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).DAY, 'DD');
+			v_PSE_ID      := MM_PJM_UTIL.GET_PSE(v_LAST_ORG_ID, NULL);
+			v_CH_ID   := GET_CHARGE_ID(v_PSE_ID, v_RPM_CHG_COMP, v_LAST_DATE,
+										'FORMULA');
+            v_CR_ID   := GET_CHARGE_ID(v_PSE_ID, v_RPM_CRED_COMP, v_LAST_DATE,
+										'FORMULA');
+		END IF;
+
+	    IF v_MARKET_PRICE_ID IS NULL THEN
+            v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:AnnualCapacityPrice');
+            PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE, 'MM'),
+													 p_RECORDS(v_IDX).CAPACITY_PRICE);
+        END IF;
+        IF v_MARKET_PRICE_ID IS NULL THEN
+            IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+      							p_MARKET_PRICE_NAME => 'PJM Annual RPM Capacity Price',
+					            p_MARKET_PRICE_ALIAS =>'PJM Annual RPM Capacity Price',
+                        		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+					            p_MARKET_PRICE_ID => 0,
+                        		p_MARKET_PRICE_TYPE => 'Market Result',
+					            p_MARKET_PRICE_INTERVAL => 'Month',
+                        		p_MARKET_TYPE => '?',
+					            p_COMMODITY_ID => v_COMMODITY_ID,
+					            p_SERVICE_POINT_TYPE => '?',
+                        		p_EXTERNAL_IDENTIFIER => 'PJM:AnnualCapacityPrice',
+					            p_EDC_ID => 0,
+					            p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                        		p_POD_ID => 0,
+					            p_ZOD_ID => 0);
+
+            PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, TRUNC(v_CHARGE_DATE, 'MM'),
+													 p_RECORDS(v_IDX).CAPACITY_PRICE);
+        END IF;
+
+        IF p_RECORDS(v_IDX).BUY_BID_ID IS NULL THEN
+            --RPM credit
+            v_CHARGE_ID := v_CR_ID;
+        ELSE
+            --RPM charge
+            v_CHARGE_ID := v_CH_ID;
+        END IF;
+
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_CHARGE_ID;
+
+        IF p_RECORDS(v_IDX).BUY_BID_ID IS NULL THEN
+            --Resource name and id provided for RPM credit
+            v_ITERATOR_NAME.CHARGE_ID := v_CHARGE_ID;
+    		v_ITERATOR_NAME.ITERATOR_NAME1 := 'ResourceName';
+    		v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+    		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+    		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+    		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+    		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+            IF v_ITERATOR_ID_MAP.EXISTS(p_RECORDS(v_IDX).RESOURCE_NAME) THEN
+                v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(p_RECORDS(v_IDX).RESOURCE_NAME);
+    		ELSE
+    			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+                v_ITERATOR_ID_MAP(p_RECORDS(v_IDX).RESOURCE_NAME) := v_ITERATOR.ITERATOR_ID;
+                v_ITERATOR_ID := v_ITERATOR_ID + 1;
+            END IF;
+
+    		v_ITERATOR.CHARGE_ID := v_CHARGE_ID;
+    		v_ITERATOR.ITERATOR1 := p_RECORDS(v_IDX).RESOURCE_NAME;
+    		v_ITERATOR.ITERATOR2 := NULL;
+    		v_ITERATOR.ITERATOR3 := NULL;
+    		v_ITERATOR.ITERATOR4 := NULL;
+    		v_ITERATOR.ITERATOR5 := NULL;
+            PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+            v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+        ELSE
+            --No Resource Name or ID provided for RPM charge
+            v_FORMULA_CHARGE.ITERATOR_ID := 0;
+            v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+        END IF;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ClearedCapacity';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).CLEARED_CAPACITY;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'CapacityPrice';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).CAPACITY_PRICE;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_ID       := v_CHARGE_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).CLEARED_CAPACITY;
+        v_FORMULA_CHARGE.CHARGE_RATE     := p_RECORDS(v_IDX).CAPACITY_PRICE;
+        IF v_CHARGE_ID = v_CR_ID THEN
+            v_FORMULA_CHARGE.CHARGE_AMOUNT   := -p_RECORDS(v_IDX).CREDIT;
+        ELSE
+            v_FORMULA_CHARGE.CHARGE_AMOUNT   := p_RECORDS(v_IDX).CHARGE;
+        END IF;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+	    v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_RPM_AUCTION_SUMMARY;
+-------------------------------------------------------------------------------------
+FUNCTION DAILY_TX_TO_TABLE(p_RECORDS IN MEX_PJM_DAILY_TX_TBL)
+	RETURN NUMBER IS
+
+	v_WORK_ID  NUMBER;
+BEGIN
+	SELECT AID.NEXTVAL INTO v_WORK_ID FROM DUAL;
+	FOR I IN p_RECORDS.FIRST .. p_RECORDS.LAST LOOP
+		INSERT INTO MEX_DAILY_TX_WORK
+			(WORK_ID,
+			 PARTICIPANT_NAME,
+			 TRANSACTION_ID,
+			 TRANSACTION_TYPE,
+			 SELLER,
+			 BUYER,
+			 TRANSACTION_DATE,
+			 HOUR_ENDING,
+			 AMOUNT)
+		VALUES
+			(v_WORK_ID,
+			 p_RECORDS(i).PARTICIPANT_NAME,
+			 p_RECORDS(i).TRANSACTION_ID,
+			 p_RECORDS(i).TRANSACTION_TYPE,
+			 p_RECORDS(i).SELLER,
+			 p_RECORDS(i).BUYER,
+			 p_RECORDS(i).TRANSACTION_DATE,
+			 p_RECORDS(i).HOUR_ENDING,
+			 p_RECORDS(i).AMOUNT);
+	END LOOP;
+	COMMIT;
+	RETURN v_WORK_ID;
+END DAILY_TX_TO_TABLE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DA_DAILY_TX
+(
+    p_RECORDS IN MEX_PJM_DAILY_TX_TBL,
+    p_STATUS  OUT NUMBER
+) AS
+
+    v_INC_AMT       NUMBER;
+    v_DEC_AMT       NUMBER;
+    v_LOAD_AMT      NUMBER;
+    v_GEN_AMT       NUMBER;
+    v_PURCH_AMT     NUMBER;
+    v_SALE_AMT      NUMBER;
+    v_HOURS_FOR_DAY NUMBER(2);
+
+    v_PSE_ID       NUMBER(9);
+    v_LAST_DATE    DATE := LOW_DATE;
+    v_CHARGE_DATE  DATE;
+    v_COMPONENT_ID NUMBER(9);
+
+    TYPE ARRAY IS VARRAY(10) OF BINARY_INTEGER;
+    v_CHARGE_IDS ARRAY := ARRAY();
+
+    v_WORK_ID NUMBER;
+    CURSOR c_DATES IS
+        SELECT DISTINCT T.TRANSACTION_DATE
+        FROM MEX_DAILY_TX_WORK T
+        WHERE T.WORK_ID = v_WORK_ID
+        ORDER BY T.TRANSACTION_DATE ASC;
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+    IF p_RECORDS.COUNT = 0 THEN
+        RETURN;
+    END IF; -- nothing to do
+
+    -- put the records into the working table
+    v_WORK_ID := DAILY_TX_TO_TABLE(p_RECORDS);
+
+    -- assume the first record's market participant name is the only one
+    v_PSE_ID := GET_PSE(p_ORG_ID   => p_RECORDS(1).ORG_ID,
+                        p_ORG_NAME => p_RECORDS(1).PARTICIPANT_NAME);
+    v_CHARGE_IDS.EXTEND(2);
+
+    FOR REC IN c_DATES LOOP
+
+        -- get the charge IDs to index into LMP_CHARGE with;
+        -- they'll only change once a month for these charges
+        IF v_LAST_DATE <> TRUNC(REC.TRANSACTION_DATE, 'DD') THEN
+            -- get charge IDs
+            v_LAST_DATE := TRUNC(REC.TRANSACTION_DATE, 'DD');
+
+            --get COMPONENT_ID for 'PJM:DASpotChg'
+			v_COMPONENT_ID := GET_COMPONENT(g_DA_SPOT_COMP_NAME, g_DA_SPOT_CHG_COMP_IDENT, 0);
+            v_CHARGE_IDS(1) := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE, 'Formula');
+
+			--get COMPONENT_ID for 'PJM:BalSpotChg;
+			v_COMPONENT_ID := GET_COMPONENT(g_BAL_SPOT_COMP_NAME, g_BAL_SPOT_CHG_COMP_IDENT, 0);
+            v_CHARGE_IDS(2) := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID,  v_LAST_DATE, 'Formula');
+        END IF;
+
+        -- get the number of hours by getting the max hour_ending for this date
+        SELECT MAX(T.HOUR_ENDING) INTO v_HOURS_FOR_DAY
+          FROM TABLE(p_RECORDS) T
+         WHERE T.TRANSACTION_DATE = REC.TRANSACTION_DATE;
+
+        FOR HR IN 1 .. v_HOURS_FOR_DAY LOOP
+            BEGIN
+                SELECT SUM(T.AMOUNT) INTO v_INC_AMT
+                  FROM MEX_DAILY_TX_WORK T
+                 WHERE T.TRANSACTION_TYPE = 'Increment'
+                   AND T.WORK_ID = v_WORK_ID
+                   AND T.TRANSACTION_DATE = REC.TRANSACTION_DATE
+                   AND T.HOUR_ENDING = HR;
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    v_INC_AMT := 0;
+            END;
+
+            BEGIN
+                SELECT SUM(T.AMOUNT) INTO v_DEC_AMT
+                  FROM MEX_DAILY_TX_WORK T
+                 WHERE T.TRANSACTION_TYPE = 'Decrement'
+                   AND T.WORK_ID = v_WORK_ID
+                   AND T.TRANSACTION_DATE = REC.TRANSACTION_DATE
+                   AND T.HOUR_ENDING = HR;
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    v_DEC_AMT := 0;
+            END;
+
+            BEGIN
+                SELECT SUM(T.AMOUNT) INTO v_LOAD_AMT
+                  FROM MEX_DAILY_TX_WORK T
+                 WHERE T.TRANSACTION_TYPE = 'Demand'
+                   AND T.WORK_ID = v_WORK_ID
+                   AND T.TRANSACTION_DATE = REC.TRANSACTION_DATE
+                   AND T.HOUR_ENDING = HR;
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    v_LOAD_AMT := 0;
+            END;
+
+            BEGIN
+                SELECT SUM(T.AMOUNT) INTO v_GEN_AMT
+                  FROM MEX_DAILY_TX_WORK T
+                 WHERE T.TRANSACTION_TYPE = 'Generation'
+                   AND T.WORK_ID = v_WORK_ID
+                   AND T.TRANSACTION_DATE = REC.TRANSACTION_DATE
+                   AND T.HOUR_ENDING = HR;
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    v_GEN_AMT := 0;
+            END;
+
+            SELECT SUM(T.AMOUNT) INTO v_PURCH_AMT
+              FROM MEX_DAILY_TX_WORK T
+             WHERE T.AMOUNT < 0
+               AND T.WORK_ID = v_WORK_ID
+               AND T.TRANSACTION_DATE = REC.TRANSACTION_DATE
+               AND T.HOUR_ENDING = HR
+               AND T.TRANSACTION_TYPE NOT IN
+                  ('Increment', 'Decrement', 'Demand', 'Generation');
+
+            SELECT SUM(T.AMOUNT) INTO v_SALE_AMT
+              FROM MEX_DAILY_TX_WORK T
+             WHERE T.AMOUNT > 0
+               AND T.WORK_ID = v_WORK_ID
+               AND T.TRANSACTION_DATE = REC.TRANSACTION_DATE
+               AND T.HOUR_ENDING = HR
+               AND T.TRANSACTION_TYPE NOT IN
+                  ('Increment', 'Decrement', 'Demand', 'Generation');
+
+            -- dst should be represented by HR = 25
+            v_CHARGE_DATE := GET_CHARGE_DATE(REC.TRANSACTION_DATE, HR, 0);
+
+            FOR i IN v_CHARGE_IDS.FIRST .. v_CHARGE_IDS.LAST LOOP
+                PUT_LMP_FORMULA_CHARGE_VAR_DA(v_CHARGE_IDS(i),
+                                              v_CHARGE_DATE,
+                                              NULL,
+                                              NULL,
+                                              NVL(v_LOAD_AMT, 0),
+                                              NVL(v_GEN_AMT, 0),
+                                              NVL(v_PURCH_AMT, 0),
+                                              NVL(v_SALE_AMT, 0),
+                                              NVL(v_INC_AMT, 0),
+                                              NVL(v_DEC_AMT, 0));
+            END LOOP;
+
+        END LOOP;
+
+        -- commit for every day
+        COMMIT;
+
+    END LOOP;
+
+    DELETE FROM MEX_DAILY_TX_WORK
+    WHERE WORK_ID = v_WORK_ID;
+    COMMIT;
+END IMPORT_DA_DAILY_TX;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_RT_DAILY_TX
+	(
+	p_RECORDS IN MEX_PJM_DAILY_TX_TBL,
+	p_STATUS  OUT NUMBER
+	) AS
+
+	v_PURCH_AMT NUMBER;
+	v_SALE_AMT NUMBER;
+    v_LOAD_AMT NUMBER;
+    v_GEN_AMT NUMBER;
+	v_HOURS_FOR_DAY NUMBER(2);
+
+    v_PSE_ID NUMBER(9);
+	v_LAST_DATE   DATE := LOW_DATE;
+	v_CHARGE_DATE DATE;
+	v_COMPONENT_ID      NUMBER(9);
+
+  TYPE ARRAY IS VARRAY(10) OF BINARY_INTEGER;
+  v_CHARGE_IDS ARRAY := ARRAY();
+
+	v_WORK_ID NUMBER;
+	CURSOR c_DATES IS
+		SELECT DISTINCT T.TRANSACTION_DATE
+			FROM MEX_DAILY_TX_WORK T
+		 WHERE T.WORK_ID = v_WORK_ID
+		 ORDER BY T.TRANSACTION_DATE ASC;
+
+    FUNCTION GET_FORMULA_VAR_VALUE
+    (
+        p_CHARGE_ID IN NUMBER,
+        p_CHARGE_DATE IN DATE,
+        p_VAR_NAME IN VARCHAR2,
+		p_ITERATOR_ID IN NUMBER := 0
+
+    ) RETURN NUMBER AS
+
+    v_VALUE NUMBER;
+    BEGIN
+        BEGIN
+            SELECT VARIABLE_VAL
+            INTO v_VALUE
+            FROM FORMULA_CHARGE_VARIABLE
+            WHERE CHARGE_ID = p_CHARGE_ID
+            AND ITERATOR_ID = p_ITERATOR_ID
+            AND CHARGE_DATE = p_CHARGE_DATE
+            AND VARIABLE_NAME = p_VAR_NAME;
+        EXCEPTION
+        	WHEN NO_DATA_FOUND THEN
+        		NULL;
+        END;
+
+    	RETURN NVL(v_VALUE,0);
+
+    END GET_FORMULA_VAR_VALUE;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	-- put the records into the working table
+	v_WORK_ID := DAILY_TX_TO_TABLE(p_RECORDS);
+
+	-- assume the first record's market participant name is the only one
+	v_PSE_ID := GET_PSE(p_ORG_ID => p_RECORDS(1).ORG_ID,
+						p_ORG_NAME => p_RECORDS(1).PARTICIPANT_NAME);
+    v_CHARGE_IDS.EXTEND(1);
+
+	FOR REC IN c_DATES LOOP
+
+		-- get the charge IDs to index into LMP_CHARGE with;
+		-- they'll only change once a month for these charges
+		IF v_LAST_DATE <> TRUNC(REC.TRANSACTION_DATE, 'DD') THEN
+			-- get charge IDs
+			v_LAST_DATE := TRUNC(REC.TRANSACTION_DATE, 'DD');
+
+			--get COMPONENT_ID  for 'PJM:BalSpotChg'
+			v_COMPONENT_ID  := GET_COMPONENT(g_BAL_SPOT_COMP_NAME, g_BAL_SPOT_CHG_COMP_IDENT, 0);
+			v_CHARGE_IDS(1) := GET_CHARGE_ID(v_PSE_ID, v_COMPONENT_ID, v_LAST_DATE, 'Formula');
+		END IF;
+
+		-- get the number of hours by getting the max hour_ending for this date
+		SELECT MAX(T.HOUR_ENDING)
+			INTO v_HOURS_FOR_DAY
+			FROM TABLE(p_RECORDS) T
+		 WHERE T.TRANSACTION_DATE = REC.TRANSACTION_DATE;
+
+
+		FOR HR IN 1 .. v_HOURS_FOR_DAY LOOP
+			-- we want the real-time purchases and sales exclusive of any WLRs, to back out from the
+			-- totals that are in the RTLoad and RTGen variables from the import of the transmission
+			-- congestion summary. Fix to bug 10900.
+
+            --to do: transaction type name has changed in MSRS
+			SELECT ABS(SUM(T.AMOUNT))
+				INTO v_PURCH_AMT
+				FROM MEX_DAILY_TX_WORK T
+			 WHERE T.AMOUNT < 0
+				 AND T.WORK_ID = v_WORK_ID
+				 AND T.TRANSACTION_DATE = REC.TRANSACTION_DATE
+				 AND T.HOUR_ENDING = HR
+                 AND TRANSACTION_TYPE != 'INTERNAL WLR';
+			SELECT SUM(T.AMOUNT)
+				INTO v_SALE_AMT
+				FROM MEX_DAILY_TX_WORK T
+			 WHERE T.AMOUNT > 0
+				 AND T.WORK_ID = v_WORK_ID
+				 AND T.TRANSACTION_DATE = REC.TRANSACTION_DATE
+				 AND T.HOUR_ENDING = HR
+                 AND TRANSACTION_TYPE != 'Wholesale Load Responsibility';
+
+            --HR will be 25 for second hour 2 on DST day.
+			v_CHARGE_DATE := GET_CHARGE_DATE(REC.TRANSACTION_DATE, HR, 0);
+
+			FOR i IN v_CHARGE_IDS.FIRST..v_CHARGE_IDS.LAST LOOP
+
+				v_LOAD_AMT  := GET_FORMULA_VAR_VALUE(v_CHARGE_IDS(i), v_CHARGE_DATE, 'RTLoad') - NVL(v_SALE_AMT, 0);
+				v_GEN_AMT   := GET_FORMULA_VAR_VALUE(v_CHARGE_IDS(i), v_CHARGE_DATE, 'RTGen') - NVL(v_PURCH_AMT, 0);
+				-- strictly speaking, there won't ever be an existing value in RTPurch or RTSales
+				v_PURCH_AMT := NVL(v_PURCH_AMT, 0) + GET_FORMULA_VAR_VALUE(v_CHARGE_IDS(i), v_CHARGE_DATE, 'RTPurch');
+				v_SALE_AMT  := NVL(v_SALE_AMT, 0)  + GET_FORMULA_VAR_VALUE(v_CHARGE_IDS(i), v_CHARGE_DATE, 'RTSales');
+
+				PUT_LMP_FORMULA_CHARGE_VAR_RT(v_CHARGE_IDS(i), v_CHARGE_DATE, NULL, NULL,
+					v_LOAD_AMT, -v_GEN_AMT, -v_PURCH_AMT, v_SALE_AMT);
+			END LOOP; --over charge ids
+
+		END LOOP; --over hours
+
+		-- commit for every day
+		COMMIT;
+
+	END LOOP;
+
+	DELETE FROM MEX_DAILY_TX_WORK WHERE WORK_ID = v_WORK_ID;
+	COMMIT;
+END IMPORT_RT_DAILY_TX;
+----------------------------------------------------------------------------------------------------
+FUNCTION EXPLICIT_CONG_TO_TABLE
+	(
+	p_RECORDS IN MEX_PJM_EXPLICIT_CONG_TBL
+	) RETURN NUMBER IS
+
+	v_WORK_ID NUMBER;
+BEGIN
+	SELECT AID.NEXTVAL INTO v_WORK_ID FROM DUAL;
+	FOR I IN p_RECORDS.FIRST .. p_RECORDS.LAST LOOP
+		INSERT INTO MEX_CONGESTION_WORK
+			(WORK_ID,
+			 ORG_ID,
+			 DAY,
+			 HOUR,
+			 DST,
+			 OASIS_ID,
+			 RESERVATION_TYPE,
+			 RESERVED_MW,
+			 ENERGY_ID,
+			 BUYER,
+			 SELLER,
+			 SINK_NAME,
+			 SOURCE_NAME,
+			 DA_SCHEDULED_MWH,
+			 DA_SINK_LMP,
+			 DA_SOURCE_LMP,
+			 DA_EXPLICIT_CONGESTION_CHARGE,
+			 BAL_DEVIATION_MWH,
+			 BAL_SINK_LMP,
+			 BAL_SOURCE_LMP,
+			 BAL_EXPLICIT_CONGESTION_CHARGE)
+		VALUES
+			(v_WORK_ID,
+			 p_RECORDS(I).ORG_ID,
+			 p_RECORDS(I).DAY,
+			 p_RECORDS(I).HOUR,
+			 p_RECORDS(I).DST,
+			 p_RECORDS(I).OASIS_ID,
+			 p_RECORDS(I).RESERVATION_TYPE,
+			 p_RECORDS(I).RESERVED_MW,
+			 p_RECORDS(I).ENERGY_ID,
+			 p_RECORDS(I).BUYER,
+			 p_RECORDS(I).SELLER,
+			 p_RECORDS(I).SINK_NAME,
+			 p_RECORDS(I).SOURCE_NAME,
+			 p_RECORDS(I).DA_SCHEDULED_MWH,
+			 p_RECORDS(I).DA_SINK_LMP,
+			 p_RECORDS(I).DA_SOURCE_LMP,
+			 p_RECORDS(I).DA_EXPLICIT_CONGESTION_CHARGE,
+			 p_RECORDS(I).BAL_DEVIATION_MWH,
+			 p_RECORDS(I).BAL_SINK_LMP,
+			 p_RECORDS(I).BAL_SOURCE_LMP,
+			 p_RECORDS(I).BAL_EXPLICIT_CONGESTION_CHARGE);
+	END LOOP;
+	COMMIT;
+	RETURN v_WORK_ID;
+END EXPLICIT_CONG_TO_TABLE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_EXPLICIT_CONGESTION
+	(
+	p_STATUS  OUT NUMBER
+	) AS
+v_DA_CONG_CH_ID     NUMBER(9);
+v_DA_CONG_CH_ID_EXP NUMBER(9);
+v_RT_CONG_CH_ID     NUMBER(9);
+v_RT_CONG_CH_ID_EXP NUMBER(9);
+v_COMPONENT_ID      NUMBER(9);
+v_PSE_ID            NUMBER(9);
+v_LAST_ORG_ID       VARCHAR2(16) := '?';
+v_LAST_DATE         DATE := LOW_DATE;
+v_CHARGE_DATE       DATE;
+v_WORK_ID NUMBER;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_ITERATOR_ID NUMBER := 0;
+
+CURSOR c_BAL_EXPLICIT IS
+    SELECT T.CUT_DATE,
+	        T.SOURCE_NAME,
+	        T.SINK_NAME,
+	        SUM(T.BAL_DEV_MWH) AS QUANTITY,
+	        T.RT_SOURCE_CONG_PRICE,
+	        T.RT_SINK_CONG_PRICE,
+	        (T.RT_SINK_CONG_PRICE - T.RT_SOURCE_CONG_PRICE) AS RATE
+    FROM PJM_EXPLICIT_CONG_CHARGES T
+    GROUP BY T.CUT_DATE,T.SOURCE_NAME,T.SINK_NAME,T.RT_SINK_CONG_PRICE,T.RT_SOURCE_CONG_PRICE
+    ORDER BY T.CUT_DATE;
+
+CURSOR c_DA_EXPLICIT IS
+    SELECT T.CUT_DATE,
+	        T.SOURCE_NAME,
+	        T.SINK_NAME,
+	        SUM(T.DA_TRANSACTION_MWH) AS QUANTITY,
+	        T.DA_SOURCE_CONG_PRICE,
+	        T.DA_SINK_CONG_PRICE,
+	    (T.DA_SINK_CONG_PRICE - T.DA_SOURCE_CONG_PRICE) AS RATE
+    FROM PJM_EXPLICIT_CONG_CHARGES T
+    GROUP BY T.CUT_DATE, T.SOURCE_NAME, T.SINK_NAME, T.DA_SINK_CONG_PRICE, T.DA_SOURCE_CONG_PRICE
+    ORDER BY T.CUT_DATE;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	-- day-ahead
+	FOR v_DA IN c_DA_EXPLICIT LOOP
+
+        SELECT T.ORG_NID
+		INTO v_LAST_ORG_ID
+		FROM PJM_EXPLICIT_CONG_CHARGES T
+	    WHERE ROWNUM = 1;
+	    v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+
+        v_CHARGE_DATE := v_DA.CUT_DATE;
+
+        IF v_LAST_DATE = LOW_DATE THEN
+			--get component id for 'PJM:DATxCongChg' --1210
+            v_COMPONENT_ID      := GET_COMPONENT(g_DA_TX_CONG_COMP_NAME, g_DA_TX_CONG_CHG_COMP_IDENT, 0 );
+            v_DA_CONG_CH_ID     := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,TRUNC(v_CHARGE_DATE - 1/86400),
+                                                    'COMBINATION');
+            v_COMPONENT_ID      := GET_COMPONENT(NULL, 'PJM:DATxCongChg:Exp', NULL);
+            v_DA_CONG_CH_ID_EXP := GET_COMBO_CHARGE_ID(v_DA_CONG_CH_ID,v_COMPONENT_ID,
+                                    TRUNC(v_CHARGE_DATE - 1/86400),'Formula', TRUE);
+        END IF;
+
+		IF v_LAST_DATE <> LOW_DATE THEN
+			IF v_LAST_DATE <> TRUNC(FROM_CUT(v_CHARGE_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400) THEN
+				UPDATE_COMBINATION_CHARGE(v_DA_CONG_CH_ID, v_DA_CONG_CH_ID_EXP, 'FORMULA', 1, v_LAST_DATE, GET_COMPONENT(NULL,'PJM:DATxCongChg:Exp', NULL));
+                v_LAST_DATE := TRUNC(FROM_CUT(v_CHARGE_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+                --get component id for 'PJM:DATxCongChg' --1210
+            	v_COMPONENT_ID      := GET_COMPONENT(g_DA_TX_CONG_COMP_NAME, g_DA_TX_CONG_CHG_COMP_IDENT, 0 );
+                v_DA_CONG_CH_ID     := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'COMBINATION');
+                v_COMPONENT_ID      := GET_COMPONENT(NULL, 'PJM:DATxCongChg:Exp', NULL);
+                v_DA_CONG_CH_ID_EXP := GET_COMBO_CHARGE_ID(v_DA_CONG_CH_ID,v_COMPONENT_ID,v_LAST_DATE,'Formula', TRUE);
+			END IF;
+		END IF;
+		v_LAST_DATE := TRUNC(FROM_CUT(v_CHARGE_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+
+		v_ITERATOR_NAME.CHARGE_ID := v_DA_CONG_CH_ID_EXP;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Source';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := 'Sink';
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+		v_ITERATOR.CHARGE_ID := v_DA_CONG_CH_ID_EXP;
+		v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+		v_ITERATOR_ID := v_ITERATOR_ID + 1;
+		v_ITERATOR.ITERATOR1 := v_DA.Source_Name;
+		v_ITERATOR.ITERATOR2 := v_DA.Sink_Name;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_DA_CONG_CH_ID_EXP;
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'SourceCongPrice';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_DA.Da_Source_Cong_Price;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'SinkCongPrice';
+	    v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_DA.Da_Sink_Cong_Price;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE.Charge_Id := v_DA_CONG_CH_ID_EXP;
+		v_FORMULA_CHARGE.Iterator_Id := v_FORMULA_CHARGE_VAR.ITERATOR_ID;
+		v_FORMULA_CHARGE.Charge_Date := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.Charge_Quantity := v_DA.Quantity;
+		v_FORMULA_CHARGE.Charge_Rate := v_DA.Rate;
+		v_FORMULA_CHARGE.Charge_Amount := v_DA.Quantity * v_DA.Rate;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+	END LOOP;
+
+    IF v_LAST_DATE <> LOW_DATE THEN
+        UPDATE_COMBINATION_CHARGE(v_DA_CONG_CH_ID, v_DA_CONG_CH_ID_EXP, 'FORMULA', 1, v_LAST_DATE, GET_COMPONENT(NULL, 'PJM:DATxCongChg:Exp', NULL));
+    END IF;
+
+	-- real-time purchases
+	v_LAST_DATE := LOW_DATE;
+	FOR v_BAL IN c_BAL_EXPLICIT LOOP
+
+        SELECT T.ORG_NID
+		INTO v_LAST_ORG_ID
+		FROM PJM_EXPLICIT_CONG_CHARGES T
+	    WHERE ROWNUM = 1;
+	    v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+
+        v_CHARGE_DATE := v_BAL.CUT_DATE;
+
+         IF v_LAST_DATE = LOW_DATE THEN
+            --get the component_id for the 'PJM:BalTxCongChg' -1215
+			v_COMPONENT_ID      := GET_COMPONENT(g_BAL_TX_CONG_COMP_NAME, g_BAL_TX_CONG_CHG_COMP_IDENT, 0);
+	        v_RT_CONG_CH_ID     := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,TRUNC(v_CHARGE_DATE - 1/86400),
+                                    'COMBINATION');
+	        v_COMPONENT_ID      := GET_COMPONENT(NULL, 'PJM:BalTxCongChg:Exp', NULL);
+	        v_RT_CONG_CH_ID_EXP := GET_COMBO_CHARGE_ID(v_RT_CONG_CH_ID,v_COMPONENT_ID,
+                                    TRUNC(v_CHARGE_DATE - 1/86400),'Formula', TRUE);
+        END IF;
+		IF v_LAST_DATE <> LOW_DATE THEN
+            IF v_LAST_DATE <> TRUNC(FROM_CUT(v_CHARGE_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400) THEN
+				UPDATE_COMBINATION_CHARGE(v_RT_CONG_CH_ID, v_RT_CONG_CH_ID_EXP, 'FORMULA', 1, v_LAST_DATE,
+                                            GET_COMPONENT('Balancing Transmission Congestion Charges (Explicit)',
+                                            'PJM:BalTxCongChg:Exp',0));
+                v_LAST_DATE := TRUNC(FROM_CUT(v_CHARGE_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+	            --get the component_id for the 'PJM:BalTxCongChg' -1215
+			    v_COMPONENT_ID      := GET_COMPONENT(g_BAL_TX_CONG_COMP_NAME, g_BAL_TX_CONG_CHG_COMP_IDENT, 0);
+                v_RT_CONG_CH_ID     := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'COMBINATION');
+	            v_COMPONENT_ID      := GET_COMPONENT('Balancing Transmission Congestion Charges (Explicit)','PJM:BalTxCongChg:Exp', 0);
+                v_RT_CONG_CH_ID_EXP := GET_COMBO_CHARGE_ID(v_RT_CONG_CH_ID,v_COMPONENT_ID,v_LAST_DATE,'Formula', TRUE);
+			END IF;
+		END IF;
+        v_LAST_DATE := TRUNC(FROM_CUT(v_CHARGE_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+
+		v_ITERATOR_NAME.CHARGE_ID := v_RT_CONG_CH_ID_EXP;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Source';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := 'Sink';
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+		v_ITERATOR.CHARGE_ID := v_RT_CONG_CH_ID_EXP;
+		v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+		v_ITERATOR_ID := v_ITERATOR_ID + 1;
+		v_ITERATOR.ITERATOR1 := v_BAL.Source_Name;
+		v_ITERATOR.ITERATOR2 := v_BAL.Sink_Name;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_RT_CONG_CH_ID_EXP;
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'SourceCongPrice';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_BAL.Rt_Source_Cong_Price;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'SinkCongPrice';
+	  v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_BAL.Rt_Sink_Cong_Price;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE.Charge_Id := v_RT_CONG_CH_ID_EXP;
+		v_FORMULA_CHARGE.Iterator_Id := v_FORMULA_CHARGE_VAR.ITERATOR_ID;
+		v_FORMULA_CHARGE.Charge_Date := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.Charge_Quantity := v_BAL.Quantity;
+		v_FORMULA_CHARGE.Charge_Rate := v_BAL.Rate;
+		v_FORMULA_CHARGE.Charge_Amount := v_BAL.Quantity * v_BAL.Rate;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+	END LOOP;
+	--COMMIT;
+
+	-- flush charges to combination charge table
+    IF v_LAST_DATE <> LOW_DATE THEN
+		UPDATE_COMBINATION_CHARGE(v_RT_CONG_CH_ID, v_RT_CONG_CH_ID_EXP, 'FORMULA', 1, v_LAST_DATE, GET_COMPONENT(NULL, 'PJM:BalTxCongChg:Exp', NULL));
+    END IF;
+	-- kill the stuff in the working table
+	DELETE FROM MEX_CONGESTION_WORK WHERE WORK_ID = v_WORK_ID;
+    DELETE FROM PJM_EXPLICIT_CONG_CHARGES;
+	COMMIT;
+
+END IMPORT_EXPLICIT_CONGESTION;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_EXPLICIT_LOSSES
+	(
+	p_STATUS  OUT NUMBER
+	) AS
+v_DA_LOSS_CH_ID     NUMBER(9);
+v_DA_LOSS_CH_ID_EXP NUMBER(9);
+v_RT_LOSS_CH_ID     NUMBER(9);
+v_RT_LOSS_CH_ID_EXP NUMBER(9);
+v_COMPONENT_ID      NUMBER(9);
+v_PSE_ID            NUMBER(9);
+v_LAST_ORG_ID       VARCHAR2(16) := '?';
+v_LAST_DATE         DATE := LOW_DATE;
+v_CHARGE_DATE       DATE;
+v_WORK_ID NUMBER;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_ITERATOR_ID	 NUMBER := 0;
+
+CURSOR c_BAL_EXPLICIT IS
+    SELECT T.CUT_DATE,
+	        T.SOURCE_NAME,
+	        T.SINK_NAME,
+	        SUM(T.BAL_DEV_MWH) AS QUANTITY,
+	        T.RT_SOURCE_LOSS_PRICE,
+	        T.RT_SINK_LOSS_PRICE,
+	        (T.RT_SINK_LOSS_PRICE - T.RT_SOURCE_LOSS_PRICE) AS RATE
+    FROM PJM_EXPLICIT_LOSS_CHARGES T
+    GROUP BY T.CUT_DATE,T.SOURCE_NAME,T.SINK_NAME,T.RT_SINK_LOSS_PRICE,T.RT_SOURCE_LOSS_PRICE
+    ORDER BY T.CUT_DATE;
+
+CURSOR c_DA_EXPLICIT IS
+    SELECT T.CUT_DATE,
+	        T.SOURCE_NAME,
+	        T.SINK_NAME,
+	        SUM(T.DA_TRANSACTION_MWH) AS QUANTITY,
+	        T.DA_SOURCE_LOSS_PRICE,
+	        T.DA_SINK_LOSS_PRICE,
+	    (T.DA_SINK_LOSS_PRICE - T.DA_SOURCE_LOSS_PRICE) AS RATE
+    FROM PJM_EXPLICIT_LOSS_CHARGES T
+    GROUP BY T.CUT_DATE, T.SOURCE_NAME, T.SINK_NAME, T.DA_SINK_LOSS_PRICE, T.DA_SOURCE_LOSS_PRICE
+    ORDER BY T.CUT_DATE;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	-- day-ahead
+	FOR v_DA IN c_DA_EXPLICIT LOOP
+
+        SELECT T.ORG_NID
+		INTO v_LAST_ORG_ID
+		FROM PJM_EXPLICIT_LOSS_CHARGES T
+	    WHERE ROWNUM = 1;
+
+        v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+        v_CHARGE_DATE := v_DA.CUT_DATE;
+
+        IF v_LAST_DATE = LOW_DATE THEN
+			--get component id for 'PJM:DATransLossChg'
+            v_COMPONENT_ID      := GET_COMPONENT(g_DA_TX_LOSS_COMP_NAME, g_DA_TX_LOSS_CHG_COMP_IDENT, 0);
+            v_DA_LOSS_CH_ID     := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,TRUNC(v_CHARGE_DATE - 1/86400),
+                                                    'COMBINATION');
+            v_COMPONENT_ID      := GET_COMPONENT(NULL,'PJM:DATransLossChg:Exp', NULL);
+            v_DA_LOSS_CH_ID_EXP := GET_COMBO_CHARGE_ID(v_DA_LOSS_CH_ID,v_COMPONENT_ID,
+                                    TRUNC(v_CHARGE_DATE - 1/86400),'Formula', TRUE);
+        END IF;
+
+		IF v_LAST_DATE <> LOW_DATE THEN
+			IF v_LAST_DATE <> TRUNC(FROM_CUT(v_CHARGE_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400) THEN
+				UPDATE_COMBINATION_CHARGE(v_DA_LOSS_CH_ID, v_DA_LOSS_CH_ID_EXP, 'FORMULA', 1, v_LAST_DATE,
+                                            GET_COMPONENT('Day-Ahead Transmission Losses Charges (Explicit)','PJM:DATransLossChg:Exp',0));
+                v_LAST_DATE := TRUNC(FROM_CUT(v_CHARGE_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+                --get component id for 'PJM:DATransLossChg'
+				v_COMPONENT_ID      := GET_COMPONENT(g_DA_TX_LOSS_COMP_NAME, g_DA_TX_LOSS_CHG_COMP_IDENT, 0);
+                v_DA_LOSS_CH_ID     := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'COMBINATION');
+                v_COMPONENT_ID      := GET_COMPONENT(NULL, 'PJM:DATransLossChg:Exp', NULL);
+                v_DA_LOSS_CH_ID_EXP := GET_COMBO_CHARGE_ID(v_DA_LOSS_CH_ID,v_COMPONENT_ID,v_LAST_DATE,'Formula', TRUE);
+			END IF;
+		END IF;
+		v_LAST_DATE := TRUNC(FROM_CUT(v_CHARGE_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+
+		v_ITERATOR_NAME.CHARGE_ID := v_DA_LOSS_CH_ID_EXP;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Source';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := 'Sink';
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+		v_ITERATOR.CHARGE_ID := v_DA_LOSS_CH_ID_EXP;
+		v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+		v_ITERATOR_ID := v_ITERATOR_ID + 1;
+		v_ITERATOR.ITERATOR1 := v_DA.Source_Name;
+		v_ITERATOR.ITERATOR2 := v_DA.Sink_Name;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_DA_LOSS_CH_ID_EXP;
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'SourceLossPrice';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_DA.Da_Source_Loss_Price;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'SinkLossPrice';
+	    v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_DA.Da_Sink_Loss_Price;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE.Charge_Id := v_DA_LOSS_CH_ID_EXP;
+		v_FORMULA_CHARGE.Iterator_Id := v_FORMULA_CHARGE_VAR.ITERATOR_ID;
+		v_FORMULA_CHARGE.Charge_Date := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.Charge_Quantity := v_DA.Quantity;
+		v_FORMULA_CHARGE.Charge_Rate := v_DA.Rate;
+		v_FORMULA_CHARGE.Charge_Amount := v_DA.Quantity * v_DA.Rate;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+	END LOOP;
+
+    IF v_LAST_DATE <> LOW_DATE THEN
+        UPDATE_COMBINATION_CHARGE(v_DA_LOSS_CH_ID, v_DA_LOSS_CH_ID_EXP, 'FORMULA', 1, v_LAST_DATE, GET_COMPONENT(NULL,'PJM:DATransLossChg:Exp',NULL));
+    END IF;
+
+	-- real-time purchases
+	v_LAST_DATE := LOW_DATE;
+	FOR v_BAL IN c_BAL_EXPLICIT LOOP
+
+        SELECT T.ORG_NID
+		INTO v_LAST_ORG_ID
+		FROM PJM_EXPLICIT_LOSS_CHARGES T
+	    WHERE ROWNUM = 1;
+
+        v_PSE_ID := GET_PSE(v_LAST_ORG_ID, NULL);
+        v_CHARGE_DATE := v_BAL.CUT_DATE;
+
+         IF v_LAST_DATE = LOW_DATE THEN
+		 	--get component id for 'PJM:BalTransLossChg
+            v_COMPONENT_ID      := GET_COMPONENT(g_BAL_TX_LOSS_COMP_NAME, g_BAL_TX_LOSS_CHG_COMP_IDENT, 0);
+	        v_RT_LOSS_CH_ID     := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,TRUNC(v_CHARGE_DATE - 1/86400),
+                                    'COMBINATION');
+	        v_COMPONENT_ID      := GET_COMPONENT(NULL,'PJM:BalTransLossChg:Exp',NULL);
+	        v_RT_LOSS_CH_ID_EXP := GET_COMBO_CHARGE_ID(v_RT_LOSS_CH_ID,v_COMPONENT_ID,
+                                    TRUNC(v_CHARGE_DATE - 1/86400),'Formula', TRUE);
+        END IF;
+		IF v_LAST_DATE <> LOW_DATE THEN
+            IF v_LAST_DATE <> TRUNC(FROM_CUT(v_CHARGE_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400) THEN
+				UPDATE_COMBINATION_CHARGE(v_RT_LOSS_CH_ID, v_RT_LOSS_CH_ID_EXP, 'FORMULA', 1, v_LAST_DATE, GET_COMPONENT(NULL,'PJM:BalTransLossChg:Exp',NULL));
+                v_LAST_DATE := TRUNC(FROM_CUT(v_CHARGE_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+	            --get component id for 'PJM:BalTransLossChg
+            	v_COMPONENT_ID      := GET_COMPONENT(g_BAL_TX_LOSS_COMP_NAME, g_BAL_TX_LOSS_CHG_COMP_IDENT, 0);
+                v_RT_LOSS_CH_ID     := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'COMBINATION');
+	            v_COMPONENT_ID      := GET_COMPONENT(NULL,'PJM:BalTransLossChg:Exp',NULL);
+                v_RT_LOSS_CH_ID_EXP := GET_COMBO_CHARGE_ID(v_RT_LOSS_CH_ID,v_COMPONENT_ID,v_LAST_DATE,'Formula', TRUE);
+			END IF;
+		END IF;
+        v_LAST_DATE := TRUNC(FROM_CUT(v_CHARGE_DATE, MM_PJM_UTIL.g_PJM_TIME_ZONE) - 1/86400);
+
+		v_ITERATOR_NAME.CHARGE_ID := v_RT_LOSS_CH_ID_EXP;
+		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Source';
+		v_ITERATOR_NAME.ITERATOR_NAME2 := 'Sink';
+		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+		v_ITERATOR.CHARGE_ID := v_RT_LOSs_CH_ID_EXP;
+		v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+		v_ITERATOR_ID := v_ITERATOR_ID + 1;
+		v_ITERATOR.ITERATOR1 := v_BAL.Source_Name;
+		v_ITERATOR.ITERATOR2 := v_BAL.Sink_Name;
+		v_ITERATOR.ITERATOR3 := NULL;
+		v_ITERATOR.ITERATOR4 := NULL;
+		v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+		v_FORMULA_CHARGE_VAR.CHARGE_ID := v_RT_LOSS_CH_ID_EXP;
+		v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_CHARGE_DATE;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'SourceLossPrice';
+		v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_BAL.Rt_Source_Loss_Price;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'SinkLossPrice';
+	    v_FORMULA_CHARGE_VAR.VARIABLE_VAL := v_BAL.Rt_Sink_Loss_Price;
+		PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+		v_FORMULA_CHARGE.Charge_Id := v_RT_LOSS_CH_ID_EXP;
+		v_FORMULA_CHARGE.Iterator_Id := v_FORMULA_CHARGE_VAR.ITERATOR_ID;
+		v_FORMULA_CHARGE.Charge_Date := v_CHARGE_DATE;
+		v_FORMULA_CHARGE.Charge_Quantity := v_BAL.Quantity;
+		v_FORMULA_CHARGE.Charge_Rate := v_BAL.Rate;
+		v_FORMULA_CHARGE.Charge_Amount := v_BAL.Quantity * v_BAL.Rate;
+		PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+	END LOOP;
+
+	-- flush charges to combination charge table
+    IF v_LAST_DATE <> LOW_DATE THEN
+		UPDATE_COMBINATION_CHARGE(v_RT_LOSS_CH_ID, v_RT_LOSS_CH_ID_EXP, 'FORMULA', 1, v_LAST_DATE,
+                                    GET_COMPONENT('Balancing Transmission Losses Charges (Explicit)','PJM:BalTransLossChg:Exp',0));
+    END IF;
+	-- kill the stuff in the working table
+	DELETE FROM MEX_CONGESTION_WORK WHERE WORK_ID = v_WORK_ID;
+    DELETE FROM PJM_EXPLICIT_LOSS_CHARGES;
+	COMMIT;
+
+END IMPORT_EXPLICIT_LOSSES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SCHED_9_10_RECON
+	(
+	p_RECORDS IN MEX_PJM_SCHED_9_10_RECON_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+v_SSCD_RECON_ID NUMBER(9);
+v_SSCD_REF_RECON_ID NUMBER(9);
+v_FERC_RECON_ID NUMBER(9);
+v_OPSI_RECON_ID NUMBER(9);
+v_NERC_RECON_ID NUMBER(9);
+v_RFC_RECON_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_RECONCIL_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_RECONCIL_LAG BINARY_INTEGER;
+v_CONTRACT_ID NUMBER(9);
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+
+    IF p_RECORDS.Exists(v_IDX) THEN
+        v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+        v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+        v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+        v_RECONCIL_LAG := MM_PJM_SHADOW_BILL.GET_RECONCILIATION_LAG(v_CONTRACT_ID);
+    END IF;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+
+        v_RECONCIL_DATE := p_RECORDS(v_IDX).RECON_DATE;
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).BILL_MONTH, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH') THEN
+            -- get charge IDs
+            v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).BILL_MONTH, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH');
+
+			v_COMPONENT_ID := GET_COMPONENT(g_LD_RECONCIL_SSCD_NAME, g_LD_RECONCIL_SSCD_IDENT, 0);
+            v_SSCD_RECON_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+
+            v_COMPONENT_ID := GET_COMPONENT(g_LD_RECONCIL_SSCD_REF_NAME, g_LD_RECONCIL_SSCD_REF_IDENT, 0);
+            v_SSCD_REF_RECON_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+
+            v_COMPONENT_ID := GET_COMPONENT(g_LD_RECONCIL_FERC_NAME, g_LD_RECONCIL_FERC_IDENT, 0);
+            v_FERC_RECON_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+
+            v_COMPONENT_ID := GET_COMPONENT(g_LD_RECONCIL_OPSI_NAME, g_LD_RECONCIL_OPSI_IDENT, 0);
+            v_OPSI_RECON_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+
+            v_COMPONENT_ID := GET_COMPONENT(g_LD_RECONCIL_NERC_NAME, g_LD_RECONCIL_NERC_IDENT, 0);
+            v_NERC_RECON_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+
+            v_COMPONENT_ID := GET_COMPONENT(g_LD_RECONCIL_RFC_NAME, g_LD_RECONCIL_RFC_IDENT, 0);
+            v_RFC_RECON_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+
+		END IF;
+
+		v_FORMULA_CHARGE.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+
+    	--update formula variables
+        --Load Reconciliation for SSCD
+    	v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_RECONCIL_DATE;
+    	v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_RECON_ID;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Sched9_1Rate';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_9_1_BILL_DET;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Sched9_3Rate';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_9_3_RECON_DET;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReconciliationMWh';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_9_RECON_MWH;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_RECON_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := (p_RECORDS(v_IDX).SCHED_9_RECON_MWH * p_RECORDS(v_IDX).SCHED_9_1_BILL_DET)
+                                                + (p_RECORDS(v_IDX).SCHED_9_RECON_MWH * p_RECORDS(v_IDX).SCHED_9_3_RECON_DET);
+        v_FORMULA_CHARGE.CHARGE_RATE     := 1;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := p_RECORDS(v_IDX).SCHED_9_1_RECON_CHG +
+                                            p_RECORDS(v_IDX).SCHED_9_3_RECON_CHG;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        --Load Reconciliation for SSCD Refund
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_RECONCIL_DATE;
+    	v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SSCD_REF_RECON_ID;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Sched9_1RefundRate';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_9_1_REFUND_DET;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Sched9_3RefundRate';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_9_3_REFUND_DET;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReconciliationMWh';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_9_RECON_MWH;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_ID := v_SSCD_REF_RECON_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := (p_RECORDS(v_IDX).SCHED_9_RECON_MWH * p_RECORDS(v_IDX).SCHED_9_1_REFUND_DET)
+                                                + (p_RECORDS(v_IDX).SCHED_9_RECON_MWH * p_RECORDS(v_IDX).SCHED_9_3_REFUND_DET);
+        v_FORMULA_CHARGE.CHARGE_RATE     := 1;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := p_RECORDS(v_IDX).SCHED_9_1_REFUND_RECON_CHG +
+                                            p_RECORDS(v_IDX).SCHED_9_3_REFUND_RECON_CHG;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        --Load Reconciliation for FERC Annual Charge Recovery
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_RECONCIL_DATE;
+    	v_FORMULA_CHARGE_VAR.CHARGE_ID := v_FERC_RECON_ID;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Rate';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_9_FERC_RECON_DET;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReconciliationMWh';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_9_RECON_MWH;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_ID := v_FERC_RECON_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).SCHED_9_RECON_MWH;
+        v_FORMULA_CHARGE.CHARGE_RATE     := p_RECORDS(v_IDX).SCHED_9_FERC_RECON_DET;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := p_RECORDS(v_IDX).SCHED_9_FERC_RECON_CHG;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        --Load Reconciliation for OPSI Funding
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_RECONCIL_DATE;
+    	v_FORMULA_CHARGE_VAR.CHARGE_ID := v_OPSI_RECON_ID;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Rate';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_9_OPSI_RECON_DET;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReconciliationMWh';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_9_RECON_MWH;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_ID := v_OPSI_RECON_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).SCHED_9_RECON_MWH;
+        v_FORMULA_CHARGE.CHARGE_RATE     := p_RECORDS(v_IDX).SCHED_9_OPSI_RECON_DET;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := p_RECORDS(v_IDX).SCHED_9_OPSI_RECON_CHG;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        --Load Reconciliation for NERC
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_RECONCIL_DATE;
+    	v_FORMULA_CHARGE_VAR.CHARGE_ID := v_NERC_RECON_ID;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Rate';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_10_BILL_DET;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReconciliationMWh';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_10_RECON_MWH;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_ID := v_NERC_RECON_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).SCHED_10_RECON_MWH;
+        v_FORMULA_CHARGE.CHARGE_RATE     := p_RECORDS(v_IDX).SCHED_10_BILL_DET;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := p_RECORDS(v_IDX).SCHED_10_RECON_CHG;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+         --Load Reconciliation for RFC
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_RECONCIL_DATE;
+    	v_FORMULA_CHARGE_VAR.CHARGE_ID := v_RFC_RECON_ID;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'Rate';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_10_RFC_BILL_DET;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReconciliationMWh';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).SCHED_10_RFC_RECON_MWH;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_ID := v_RFC_RECON_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).SCHED_10_RFC_RECON_MWH;
+        v_FORMULA_CHARGE.CHARGE_RATE     := p_RECORDS(v_IDX).SCHED_10_RFC_BILL_DET;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := p_RECORDS(v_IDX).SCHED_10_RFC_RECON_CHG;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_SCHED_9_10_RECON;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SCHEDULE1A_RECONCILE
+	(
+	p_RECORDS IN MEX_PJM_SCHEDULE1A_SUMMARY_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+v_TO_SSCD_REC_ID NUMBER(9);
+v_ZONE VARCHAR2(32);
+v_COMPONENT_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_ZONE_ID SERVICE_ZONE.SERVICE_ZONE_ID%TYPE;
+v_PSE_NAME VARCHAR2(64);
+v_ITERATOR_ID NUMBER(3) := 0;
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_RECONCIL_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_NO_CHARGE BOOLEAN := FALSE;
+v_ZONE_ATTRIBUTE_ID NUMBER(9);
+v_VAL VARCHAR2(32);
+v_RECONCIL_LAG BINARY_INTEGER;
+v_CONTRACT_ID NUMBER(9);
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+  	v_ITERATOR.ITERATOR_ID := 0;
+
+    IF p_RECORDS.Exists(v_IDX) THEN
+        v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+        v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+        v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+        v_RECONCIL_LAG := MM_PJM_SHADOW_BILL.GET_RECONCILIATION_LAG(v_CONTRACT_ID);
+    END IF;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_RECONCIL_DATE := p_RECORDS(v_IDX).MONTH;  --this is the day
+        v_ZONE := REPLACE(p_RECORDS(v_IDX).ZONE, ' ', '');
+        --get zone id
+        v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_ZONE);
+
+        --make sure zone custom attribute is set
+        ID.ID_FOR_ENTITY_ATTRIBUTE('Zone', 'PSE', 'String', TRUE, v_ZONE_ATTRIBUTE_ID);
+
+        BEGIN
+            SELECT T.ATTRIBUTE_VAL INTO v_VAL
+            FROM TEMPORAL_ENTITY_ATTRIBUTE T
+            WHERE T.OWNER_ENTITY_ID = v_PSE_ID
+            AND T.ATTRIBUTE_ID = v_ZONE_ATTRIBUTE_ID;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+            SP.PUT_TEMPORAL_ENTITY_ATTRIBUTE(v_PSE_ID, v_ZONE_ATTRIBUTE_ID,
+        								SYSDATE, NULL, v_ZONE,
+                                        v_PSE_ID, v_ZONE_ATTRIBUTE_ID,
+                                        SYSDATE, p_STATUS);
+        END;
+
+    	IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).MONTH, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH') THEN
+            -- get charge IDs
+            v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).MONTH, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH');
+            v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+
+            --get PSE Name
+            BEGIN
+            	SELECT PSE_NAME
+            	INTO v_PSE_NAME
+            	FROM PURCHASING_SELLING_ENTITY
+            	WHERE PSE_ID = v_PSE_ID;
+            EXCEPTION
+               	WHEN NO_DATA_FOUND THEN
+               		v_PSE_NAME := '?';
+            END;
+
+			v_COMPONENT_ID := GET_COMPONENT(g_LD_RECONCIL_TOSSCD_NAME, g_LD_RECONCIL_TOSSCD_IDENT, 0);
+            v_TO_SSCD_REC_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+
+			IF v_TO_SSCD_REC_ID IS NULL THEN
+            	LOGS.LOG_WARN('Reconciliation for TOSSCD Charge ID not found for PSE_ID:' || v_PSE_ID
+                                    || ' during IMPORT_SCHEDULE1A_RECONCILE');
+                v_NO_CHARGE := TRUE;
+            END IF;
+
+        END IF;
+        IF v_NO_CHARGE = FALSE THEN
+    		v_ITERATOR_NAME.CHARGE_ID := v_TO_SSCD_REC_ID;
+    		v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+    		v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+    		v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+    		v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+    		v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+    		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        	v_ITERATOR.CHARGE_ID := v_TO_SSCD_REC_ID;
+            IF v_ITERATOR_ID_MAP.EXISTS(v_ZONE) THEN
+    			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ZONE);
+    		ELSE
+    			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+                v_ITERATOR_ID_MAP(v_ZONE) := v_ITERATOR.ITERATOR_ID;
+                v_ITERATOR_ID := v_ITERATOR_ID + 1;
+            END IF;
+
+        	v_ITERATOR.ITERATOR1 := v_ZONE;
+        	v_ITERATOR.ITERATOR2 := NULL;
+        	v_ITERATOR.ITERATOR3 := NULL;
+        	v_ITERATOR.ITERATOR4 := NULL;
+        	v_ITERATOR.ITERATOR5 := NULL;
+            PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+    		v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+    		v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+            v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_RECONCIL_DATE;
+            v_FORMULA_CHARGE_VAR.CHARGE_ID := v_TO_SSCD_REC_ID;
+            v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReconciliationMWh';
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).LOAD;
+            PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+            v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ZonalRate';
+            v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).RATE;
+            PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+            v_FORMULA_CHARGE.CHARGE_ID := v_TO_SSCD_REC_ID;
+            v_FORMULA_CHARGE.CHARGE_DATE := v_RECONCIL_DATE;
+            v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).LOAD;
+            v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RATE;
+            v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).CHARGE;
+            PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+        END IF;
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_SCHEDULE1A_RECONCILE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_ENERGY_CH_RECONCIL
+	(
+	p_STATUS OUT NUMBER
+	) AS
+
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);   
+v_ITERATOR_ID_MAP    ITERATOR_ID_MAP;
+v_SPOT_RECON_ID NUMBER(9);
+v_INADVERT_RECON_ID NUMBER(9);
+v_SPOT_CHARGE_ID NUMBER(9);
+v_INADVERT_CHARGE_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_RECONCIL_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE_1 FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR_1 FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_FORMULA_CHARGE_2 FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR_2 FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_RECONCIL_LAG BINARY_INTEGER;
+v_IC_CONTRACT NUMBER(9);
+v_ITERATOR_ID NUMBER(3) := 0;
+v_ZONE VARCHAR2(32);
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+
+CURSOR p_RECON IS
+    SELECT * FROM PJM_ENG_INADVERT_CHRGS_RCN C
+    ORDER BY C.CUT_DATE;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+    v_SPOT_RECON_ID := GET_COMPONENT(g_LOAD_RECONCIL_SPOT_NAME,g_LOAD_RECONCIL_SPOT_IDENT,0);
+    v_INADVERT_RECON_ID := GET_COMPONENT(g_LOAD_RECONCIL_INADVERT_NAME,g_LOAD_RECONCIL_INADVERT_IDENT,0);
+
+	FOR v_RECON IN p_RECON LOOP
+        v_PSE_ID      := GET_PSE(v_RECON.ORG_ID, NULL);
+        v_IC_CONTRACT := GET_CONTRACT_ID(v_PSE_ID);
+        v_RECONCIL_LAG := MM_PJM_SHADOW_BILL.GET_RECONCILIATION_LAG(v_IC_CONTRACT);
+		v_RECONCIL_DATE := v_RECON.CUT_DATE;
+		v_ZONE := v_RECON.ZONE;
+
+		IF v_LAST_ORG_ID <> v_RECON.ORG_ID OR
+            v_LAST_DATE <> (TRUNC(v_RECON.CUT_DATE - 1/86400, 'MM')
+                                + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH')) THEN
+            v_LAST_ORG_ID := v_RECON.ORG_ID;
+            v_LAST_DATE   := TRUNC(v_RECON.CUT_DATE - 1/86400, 'MM')
+                                 + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH');
+
+            v_SPOT_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_SPOT_RECON_ID,v_LAST_DATE,'FORMULA');
+            v_INADVERT_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_INADVERT_RECON_ID,v_LAST_DATE,'FORMULA');
+
+			IF v_SPOT_CHARGE_ID IS NULL THEN
+            	LOGS.LOG_WARN('Reconciliation for Spot Market Charge ID not found for PSE_ID:' || v_PSE_ID
+                                    || ' during IMPORT_ENERGY_CH_RECONCIL');
+                RETURN;
+            END IF;
+            IF v_INADVERT_CHARGE_ID IS NULL THEN
+            	LOGS.LOG_WARN('Reconciliation for Inadvertent Interchange Charge ID not found for PSE_ID:' || v_PSE_ID
+                                    || ' during IMPORT_ENERGY_CH_RECONCIL');
+                RETURN;
+            END IF;
+
+		END IF;
+
+        v_ITERATOR_NAME.CHARGE_ID := v_SPOT_CHARGE_ID;
+        v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+        v_ITERATOR_NAME.ITERATOR_NAME2 :=  NULL; 
+        v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+        PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        v_ITERATOR.CHARGE_ID := v_SPOT_CHARGE_ID;
+        IF v_ITERATOR_ID_MAP.EXISTS(v_ZONE) THEN
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ZONE);
+        ELSE
+            v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+        
+        v_ITERATOR.ITERATOR1 := v_ZONE;
+        v_ITERATOR.ITERATOR2 := NULL;
+        v_ITERATOR.ITERATOR3 := NULL;
+        v_ITERATOR.ITERATOR4 := NULL;
+        v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+        
+    	--update formula variables
+        v_FORMULA_CHARGE_VAR_1.Iterator_Id := v_ITERATOR.ITERATOR_ID;
+		v_FORMULA_CHARGE_VAR_1.CHARGE_DATE := v_RECONCIL_DATE;
+    	v_FORMULA_CHARGE_VAR_1.CHARGE_ID := v_SPOT_CHARGE_ID;
+
+		v_FORMULA_CHARGE_VAR_1.VARIABLE_NAME := 'ReconciliationMWh';
+    	v_FORMULA_CHARGE_VAR_1.VARIABLE_VAL  := v_RECON.LOAD_RECON_ENERGY;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR_1);
+
+        v_FORMULA_CHARGE_1.Iterator_Id := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_1.CHARGE_ID := v_SPOT_CHARGE_ID;
+        v_FORMULA_CHARGE_1.CHARGE_DATE := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE_1.CHARGE_QUANTITY := v_RECON.LOAD_RECON_ENERGY;
+        v_FORMULA_CHARGE_1.CHARGE_RATE := v_RECON.RT_ENERGY_PRICE;
+        v_FORMULA_CHARGE_1.CHARGE_AMOUNT := v_RECON.EN_LOAD_RECON_CHARGE;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE_1);
+        
+        v_ITERATOR.CHARGE_ID := v_INADVERT_CHARGE_ID;
+        v_ITERATOR_NAME.CHARGE_ID := v_INADVERT_CHARGE_ID;
+        v_FORMULA_CHARGE_VAR_2.Iterator_Id := v_ITERATOR.ITERATOR_ID;
+        v_FORMULA_CHARGE_VAR_2.CHARGE_DATE := v_RECONCIL_DATE;
+    	v_FORMULA_CHARGE_VAR_2.CHARGE_ID := v_INADVERT_CHARGE_ID;
+        
+        v_FORMULA_CHARGE_VAR_2.VARIABLE_NAME := 'ReconciliationMWh';
+    	v_FORMULA_CHARGE_VAR_2.VARIABLE_VAL  := v_RECON.LOAD_RECON_ENERGY;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR_2);
+
+        v_FORMULA_CHARGE_VAR_2.VARIABLE_NAME := 'InadvertentEnergyBillDet';
+    	v_FORMULA_CHARGE_VAR_2.VARIABLE_VAL  := v_RECON.INADVERT_EN_BILL_DET;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR_2);
+
+        v_FORMULA_CHARGE_VAR_2.VARIABLE_NAME := 'InadvertentCongBillDet';
+    	v_FORMULA_CHARGE_VAR_2.VARIABLE_VAL  := v_RECON.INADVERT_CONG_BILL_DET;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR_2);
+
+        v_FORMULA_CHARGE_VAR_2.VARIABLE_NAME := 'InadvertentLossBillDet';
+    	v_FORMULA_CHARGE_VAR_2.VARIABLE_VAL  := v_RECON.INADVERT_LOSS_BILL_DET;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR_2);
+
+        v_FORMULA_CHARGE_2.Iterator_Id := v_ITERATOR.ITERATOR_ID;
+
+        v_FORMULA_CHARGE_2.CHARGE_ID := v_INADVERT_CHARGE_ID;
+        v_FORMULA_CHARGE_2.CHARGE_DATE := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE_2.CHARGE_QUANTITY := (v_RECON.LOAD_RECON_ENERGY * v_RECON.INADVERT_EN_BILL_DET) +
+                                               (v_RECON.LOAD_RECON_ENERGY * v_RECON.INADVERT_CONG_BILL_DET) +
+                                               (v_RECON.LOAD_RECON_ENERGY * v_RECON.INADVERT_LOSS_BILL_DET);
+        v_FORMULA_CHARGE_2.CHARGE_RATE := 1;
+        v_FORMULA_CHARGE_2.CHARGE_AMOUNT := v_RECON.INADVERT_EN_RECON_CHG;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE_2);
+
+	END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+    DELETE FROM PJM_ENG_INADVERT_CHRGS_RCN;
+    COMMIT;
+
+END IMPORT_ENERGY_CH_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_CONG_LOSS_LOAD_RECONCIL
+	(
+	p_STATUS OUT NUMBER
+	) AS
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+v_CONG_RECON_ID NUMBER(9);
+v_LOSS_RECON_ID NUMBER(9);
+v_CONG_CHARGE_ID NUMBER(9);
+v_LOSS_CHARGE_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_RECONCIL_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE_1 FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR_1 FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_FORMULA_CHARGE_2 FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR_2 FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_RECONCIL_LAG BINARY_INTEGER;
+v_IC_CONTRACT NUMBER(9);
+v_CONTRACT_ID VARCHAR2(16);
+v_ITERATOR_1 FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_ITERATOR_2 FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_ITERATOR_NAME_1 FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR_NAME_2 FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR_ID NUMBER(3) := 0;
+
+CURSOR p_RECON IS
+    SELECT * FROM PJM_CONG_LOSS_CHRGS_RCN C
+    ORDER BY C.CUT_DATE;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+    v_ITERATOR_1.ITERATOR_ID := 0;
+    v_ITERATOR_2.ITERATOR_ID := 0;
+    v_CONG_RECON_ID := GET_COMPONENT(g_LOAD_RECONCIL_SPOT_NAME,g_LOAD_RECONCIL_SPOT_IDENT,0);
+    v_LOSS_RECON_ID := GET_COMPONENT(g_LOAD_RECONCIL_INADVERT_NAME,g_LOAD_RECONCIL_INADVERT_IDENT,0);
+
+	FOR v_RECON IN p_RECON LOOP
+        v_PSE_ID      := GET_PSE(v_RECON.ORG_ID, NULL);
+        v_IC_CONTRACT := GET_CONTRACT_ID(v_PSE_ID);
+        v_RECONCIL_LAG := MM_PJM_SHADOW_BILL.GET_RECONCILIATION_LAG(v_IC_CONTRACT);
+		v_RECONCIL_DATE := v_RECON.CUT_DATE;
+        v_CONTRACT_ID := v_RECON.ESCHEDULES_ID;
+
+		IF v_LAST_ORG_ID <> v_RECON.ORG_ID OR
+            v_LAST_DATE <> (TRUNC(v_RECON.CUT_DATE - 1/86400, 'MM')
+                                + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH')) THEN
+            v_LAST_ORG_ID := v_RECON.ORG_ID;
+            v_LAST_DATE   := TRUNC(v_RECON.CUT_DATE - 1/86400, 'MM')
+                                 + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH');
+
+            v_CONG_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_CONG_RECON_ID,v_LAST_DATE,'FORMULA');
+            v_LOSS_CHARGE_ID := GET_CHARGE_ID(v_PSE_ID,v_LOSS_RECON_ID,v_LAST_DATE,'FORMULA');
+
+			IF v_CONG_CHARGE_ID IS NULL THEN
+            	LOGS.LOG_WARN('Reconciliation for Transmission Congestion Charge ID not found for PSE_ID:' || v_PSE_ID
+                                    || ' during IMPORT_CONG_LOSS_LOAD_RECONCIL');
+                RETURN;
+            END IF;
+            IF v_LOSS_CHARGE_ID IS NULL THEN
+            	LOGS.LOG_WARN('Reconciliation for Transmission Losses Charge ID not found for PSE_ID:' || v_PSE_ID
+                                    || ' during IMPORT_CONG_LOSS_LOAD_RECONCIL');
+                RETURN;
+            END IF;
+
+		END IF;
+
+        v_ITERATOR_NAME_1.CHARGE_ID := v_CONG_CHARGE_ID;
+		v_ITERATOR_NAME_1.ITERATOR_NAME1 := 'Contract_ID';
+		v_ITERATOR_NAME_1.ITERATOR_NAME2 := NULL;
+		v_ITERATOR_NAME_1.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME_1.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME_1.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME_1);
+
+        v_ITERATOR_NAME_2.CHARGE_ID := v_LOSS_CHARGE_ID;
+		v_ITERATOR_NAME_2.ITERATOR_NAME1 := 'Contract_ID';
+		v_ITERATOR_NAME_2.ITERATOR_NAME2 := NULL;
+		v_ITERATOR_NAME_2.ITERATOR_NAME3 := NULL;
+		v_ITERATOR_NAME_2.ITERATOR_NAME4 := NULL;
+		v_ITERATOR_NAME_2.ITERATOR_NAME5 := NULL;
+		PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME_2);
+
+        v_ITERATOR_1.CHARGE_ID := v_CONG_CHARGE_ID;
+        v_ITERATOR_2.CHARGE_ID := v_LOSS_CHARGE_ID;
+
+        IF v_ITERATOR_ID_MAP.EXISTS(v_CONTRACT_ID) THEN
+			v_ITERATOR_1.ITERATOR_ID := v_ITERATOR_ID_MAP(v_CONTRACT_ID);
+            v_ITERATOR_2.ITERATOR_ID := v_ITERATOR_ID_MAP(v_CONTRACT_ID);
+		ELSE
+			v_ITERATOR_1.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_2.ITERATOR_ID := v_ITERATOR_1.ITERATOR_ID;
+            v_ITERATOR_ID_MAP(v_CONTRACT_ID) := v_ITERATOR_1.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+
+    	v_ITERATOR_1.ITERATOR1 := v_CONTRACT_ID;
+    	v_ITERATOR_1.ITERATOR2 := NULL;
+    	v_ITERATOR_1.ITERATOR3 := NULL;
+    	v_ITERATOR_1.ITERATOR4 := NULL;
+    	v_ITERATOR_1.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR_1);
+
+        v_ITERATOR_2.ITERATOR1 := v_CONTRACT_ID;
+    	v_ITERATOR_2.ITERATOR2 := NULL;
+    	v_ITERATOR_2.ITERATOR3 := NULL;
+    	v_ITERATOR_2.ITERATOR4 := NULL;
+    	v_ITERATOR_2.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR_2);
+
+        v_FORMULA_CHARGE_1.ITERATOR_ID := v_ITERATOR_1.ITERATOR_ID;
+		v_FORMULA_CHARGE_VAR_1.ITERATOR_ID := v_ITERATOR_1.ITERATOR_ID;
+
+        v_FORMULA_CHARGE_2.ITERATOR_ID := v_ITERATOR_2.ITERATOR_ID;
+		v_FORMULA_CHARGE_VAR_2.ITERATOR_ID := v_ITERATOR_2.ITERATOR_ID;
+
+    	--update formula variables
+    	v_FORMULA_CHARGE_VAR_1.CHARGE_DATE := v_RECONCIL_DATE;
+    	v_FORMULA_CHARGE_VAR_1.CHARGE_ID := v_CONG_CHARGE_ID;
+
+        v_FORMULA_CHARGE_VAR_2.CHARGE_DATE := v_RECONCIL_DATE;
+    	v_FORMULA_CHARGE_VAR_2.CHARGE_ID := v_LOSS_CHARGE_ID;
+
+		v_FORMULA_CHARGE_VAR_1.VARIABLE_NAME := 'ReconciliationMWh';
+    	v_FORMULA_CHARGE_VAR_1.VARIABLE_VAL  := v_RECON.LOAD_RECON_ENERGY;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR_1);
+
+        v_FORMULA_CHARGE_VAR_2.VARIABLE_NAME := 'ReconciliationMWh';
+    	v_FORMULA_CHARGE_VAR_2.VARIABLE_VAL  := v_RECON.LOAD_RECON_ENERGY;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR_2);
+
+        v_FORMULA_CHARGE_1.CHARGE_ID := v_CONG_CHARGE_ID;
+        v_FORMULA_CHARGE_1.CHARGE_DATE := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE_1.CHARGE_QUANTITY := v_RECON.LOAD_RECON_ENERGY;
+        v_FORMULA_CHARGE_1.CHARGE_RATE := v_RECON.RT_CONG_PRICE;
+        v_FORMULA_CHARGE_1.CHARGE_AMOUNT := v_RECON.CONG_LOAD_RECON_CHARGE;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE_1);
+
+        v_FORMULA_CHARGE_2.CHARGE_ID := v_LOSS_CHARGE_ID;
+        v_FORMULA_CHARGE_2.CHARGE_DATE := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE_2.CHARGE_QUANTITY := v_RECON.LOAD_RECON_ENERGY;
+        v_FORMULA_CHARGE_2.CHARGE_RATE := v_RECON.RT_LOSS_PRICE;
+        v_FORMULA_CHARGE_2.CHARGE_AMOUNT := v_RECON.LOSS_LOAD_RECON_CHARGE;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE_2);
+
+	END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+    DELETE FROM PJM_ENG_INADVERT_CHRGS_RCN;
+    COMMIT;
+
+END IMPORT_CONG_LOSS_LOAD_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REGULATION_CH_RECONCIL
+	(
+	p_RECORDS IN MEX_PJM_RECON_CHRGS_MSRS_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+
+v_REG_REC_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_PSE_NAME VARCHAR2(64);
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_RECONCIL_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_MARKET_PRICE_ID NUMBER(9);
+v_RECONCIL_LAG BINARY_INTEGER;
+v_CONTRACT_ID NUMBER(9);
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+
+    IF p_RECORDS.Exists(v_IDX) THEN
+        v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+        v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+        v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+        v_RECONCIL_LAG := MM_PJM_SHADOW_BILL.GET_RECONCILIATION_LAG(v_CONTRACT_ID);
+        v_FORMULA_CHARGE.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+    END IF;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+
+        -- put the date
+		v_RECONCIL_DATE := p_RECORDS(v_IDX).CUT_DATE;
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).CUT_DATE - 1/86400, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH') THEN
+            -- get charge IDs
+            v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).CUT_DATE - 1/86400, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH');
+            v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+
+            --get PSE Name
+            BEGIN
+            	SELECT PSE_NAME
+            	INTO v_PSE_NAME
+            	FROM PURCHASING_SELLING_ENTITY
+            	WHERE PSE_ID = v_PSE_ID;
+            EXCEPTION
+               	WHEN NO_DATA_FOUND THEN
+               		v_PSE_NAME := '?';
+            END;
+
+			v_COMPONENT_ID := GET_COMPONENT(g_LD_RECONCIL_REG_NAME, g_LD_RECONCIL_REG_IDENT, 0);
+            v_REG_REC_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+
+        	IF v_REG_REC_ID IS NULL THEN
+            	LOGS.LOG_WARN('Reconciliation for Regulation Charge ID not found for PSE_ID:' || v_PSE_ID
+                                    || ' during IMPORT_REGULATION_CH_RECONCIL');
+                RETURN;
+            END IF;
+
+		END IF;
+
+        v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:RegReconRate:');
+		IF v_MARKET_PRICE_ID IS NULL THEN
+			IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+      							p_MARKET_PRICE_NAME => 'PJM Regulation Reconciliation Rate:',
+								p_MARKET_PRICE_ALIAS => 'PJM Reg Reconcil Rate',
+                        		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+								p_MARKET_PRICE_ID => 0,
+                        		p_MARKET_PRICE_TYPE => 'Market Clearing Price',
+								p_MARKET_PRICE_INTERVAL => 'Hour',
+                        		p_MARKET_TYPE => '?',
+								p_COMMODITY_ID => 0,
+								p_SERVICE_POINT_TYPE => '?',
+                        		p_EXTERNAL_IDENTIFIER => 'PJM:RegReconRate:',
+								p_EDC_ID => 0,
+								p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                        		p_POD_ID => 0,
+								p_ZOD_ID => 0);
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, v_RECONCIL_DATE,
+								p_RECORDS(v_IDX).RECON_BILL_DET);
+
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE_VAR.CHARGE_ID := v_REG_REC_ID;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReconciliationMWh';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).LOAD_RECON_ENERGY;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_DATE := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE.CHARGE_ID := v_REG_REC_ID;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).LOAD_RECON_ENERGY;
+        v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RECON_BILL_DET;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).RECON_CHARGE;
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_REGULATION_CH_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNC_CONDENSE_RECONCIL
+	(
+	p_RECORDS IN MEX_PJM_RECON_CHRGS_MSRS_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+
+v_SYNC_COND_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_PSE_NAME VARCHAR2(64);
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_RECONCIL_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_MARKET_PRICE_ID NUMBER(9);
+v_RECONCIL_LAG BINARY_INTEGER;
+v_CONTRACT_ID NUMBER(9);
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+    v_COMPONENT_ID := GET_COMPONENT(g_LD_RECONCIL_SYNC_COND_NAME, g_LD_RECONCIL_SYNC_COND_IDENT, 0);
+
+    v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:SyncCondenseReconRate:');
+	    IF v_MARKET_PRICE_ID IS NULL THEN
+			IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+      							p_MARKET_PRICE_NAME => 'PJM SyncCondense Reconciliation Rate:',
+								p_MARKET_PRICE_ALIAS => 'PJM SyncCondense Reconcil Rate',
+                        		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+								p_MARKET_PRICE_ID => 0,
+                        		p_MARKET_PRICE_TYPE => 'Market Clearing Price',
+								p_MARKET_PRICE_INTERVAL => 'Day',
+                        		p_MARKET_TYPE => '?',
+								p_COMMODITY_ID => 0,
+								p_SERVICE_POINT_TYPE => '?',
+                        		p_EXTERNAL_IDENTIFIER => 'PJM:SyncCondenseRate:',
+								p_EDC_ID => 0,
+								p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                        		p_POD_ID => 0,
+								p_ZOD_ID => 0);
+		END IF;
+
+    IF p_RECORDS.Exists(v_IDX) THEN
+        v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+        v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+        v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+        v_RECONCIL_LAG := MM_PJM_SHADOW_BILL.GET_RECONCILIATION_LAG(v_CONTRACT_ID);
+        v_FORMULA_CHARGE.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+    END IF;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+
+        -- put the date
+		v_RECONCIL_DATE := p_RECORDS(v_IDX).CUT_DATE;
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).CUT_DATE - 1/86400, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH') THEN
+            -- get charge IDs
+            v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).CUT_DATE - 1/86400, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH');
+            v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+
+            --get PSE Name
+            BEGIN
+            	SELECT PSE_NAME
+            	INTO v_PSE_NAME
+            	FROM PURCHASING_SELLING_ENTITY
+            	WHERE PSE_ID = v_PSE_ID;
+            EXCEPTION
+               	WHEN NO_DATA_FOUND THEN
+               		v_PSE_NAME := '?';
+            END;
+
+            v_SYNC_COND_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+
+        	IF v_SYNC_COND_ID IS NULL THEN
+            	LOGS.LOG_WARN('Reconciliation for ync Condensing Charge ID not found for PSE_ID:' || v_PSE_ID
+                                    || ' during IMPORT_SYNC_CONDENSE_RECONCIL');
+                RETURN;
+            END IF;
+
+		END IF;
+
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, v_RECONCIL_DATE,
+								p_RECORDS(v_IDX).RECON_BILL_DET);
+
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SYNC_COND_ID;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReconciliationMWh';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).LOAD_RECON_ENERGY;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_DATE := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE.CHARGE_ID := v_SYNC_COND_ID;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).LOAD_RECON_ENERGY;
+        v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RECON_BILL_DET;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).RECON_CHARGE;
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_SYNC_CONDENSE_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNC_RES_CH_RECONCIL
+	(
+	p_RECORDS IN MEX_PJM_RECON_CHRGS_MSRS_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+v_ITERATOR_ID NUMBER(3) := 0;
+v_SPIN_RES_REC_ID NUMBER(9);
+v_COMPONENT_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_ZONE_ID SERVICE_ZONE.SERVICE_ZONE_ID%TYPE;
+v_PSE_NAME VARCHAR2(64);
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_RECONCIL_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_MARKET_PRICE_ID NUMBER(9);
+v_RECONCIL_LAG BINARY_INTEGER;
+v_CONTRACT_ID NUMBER(9);
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+  	v_ITERATOR.ITERATOR_ID := 0;
+    v_COMPONENT_ID := GET_COMPONENT(g_LD_RECONCIL_SPIN_RES_NAME, g_LD_RECONCIL_SPIN_RES_IDENT, 0);
+
+    IF p_RECORDS.Exists(v_IDX) THEN
+        v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+        v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+        v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+        v_RECONCIL_LAG := MM_PJM_SHADOW_BILL.GET_RECONCILIATION_LAG(v_CONTRACT_ID);
+    END IF;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+
+        -- put the date
+		v_RECONCIL_DATE := p_RECORDS(v_IDX).CUT_DATE;
+
+        --get zone id
+        v_ZONE_ID := ID_FOR_SERVICE_ZONE(p_RECORDS(v_IDX).ZONE);
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).CUT_DATE - 1/86400, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH') THEN
+            -- get charge IDs
+            v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).CUT_DATE - 1/86400, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH');
+            v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+
+            --get PSE Name
+            BEGIN
+            	SELECT PSE_NAME
+            	INTO v_PSE_NAME
+            	FROM PURCHASING_SELLING_ENTITY
+            	WHERE PSE_ID = v_PSE_ID;
+            EXCEPTION
+               	WHEN NO_DATA_FOUND THEN
+               		v_PSE_NAME := '?';
+            END;
+
+            v_SPIN_RES_REC_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+
+			IF v_SPIN_RES_REC_ID IS NULL THEN
+            	LOGS.LOG_WARN('Reconciliation for Spinning Reserve Charge ID not found for PSE_ID:' || v_PSE_ID
+                                    || ' during IMPORT_SYNC_RES_CH_RECONCIL');
+                RETURN;
+            END IF;
+
+		END IF;
+
+        v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:SpinResReconRate:' || p_RECORDS(v_IDX).ZONE);
+		IF v_MARKET_PRICE_ID IS NULL THEN
+			IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+      							p_MARKET_PRICE_NAME => 'PJM SpinRes Reconciliation Rate:' || p_RECORDS(v_IDX).ZONE,
+								p_MARKET_PRICE_ALIAS => 'PJM SpinRes Reconcil Rate' || p_RECORDS(v_IDX).ZONE,
+                        		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+								p_MARKET_PRICE_ID => 0,
+                        		p_MARKET_PRICE_TYPE => 'Market Clearing Price',
+								p_MARKET_PRICE_INTERVAL => 'Hour',
+                        		p_MARKET_TYPE => '?',
+								p_COMMODITY_ID => 0,
+								p_SERVICE_POINT_TYPE => '?',
+                        		p_EXTERNAL_IDENTIFIER => 'PJM:SpinResReconRate:' || p_RECORDS(v_IDX).ZONE,
+								p_EDC_ID => 0,
+								p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                        		p_POD_ID => 0,
+								p_ZOD_ID => v_ZONE_ID);
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, v_RECONCIL_DATE,
+								p_RECORDS(v_IDX).RECON_BILL_DET);
+
+        v_ITERATOR_NAME.CHARGE_ID := v_SPIN_RES_REC_ID;
+        v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+        v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+        PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        v_ITERATOR.CHARGE_ID := v_SPIN_RES_REC_ID;
+        IF v_ITERATOR_ID_MAP.EXISTS(p_RECORDS(v_IDX).ZONE) THEN
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(p_RECORDS(v_IDX).ZONE);
+		ELSE
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(p_RECORDS(v_IDX).ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+        v_ITERATOR.ITERATOR1 := p_RECORDS(v_IDX).ZONE;
+	    v_ITERATOR.ITERATOR2 := NULL;
+	    v_ITERATOR.ITERATOR3 := NULL;
+	    v_ITERATOR.ITERATOR4 := NULL;
+	    v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE_VAR.CHARGE_ID := v_SPIN_RES_REC_ID;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReconciliationMWh';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).LOAD_RECON_ENERGY;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_DATE := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE.CHARGE_ID := v_SPIN_RES_REC_ID;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).LOAD_RECON_ENERGY;
+        v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RECON_BILL_DET;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).RECON_CHARGE;
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_SYNC_RES_CH_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REACT_SERVICES_RECONCIL
+	(
+	p_RECORDS IN MEX_PJM_RECON_CHRGS_MSRS_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+TYPE ITERATOR_ID_MAP IS TABLE OF NUMBER(2) INDEX BY VARCHAR2(32);
+v_ITERATOR_ID_MAP ITERATOR_ID_MAP;
+v_ITERATOR_ID NUMBER(3) := 0;
+v_REACTIVE_REC_ID NUMBER(9);
+v_ZONE VARCHAR2(32);
+v_COMPONENT_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_ZONE_ID SERVICE_ZONE.SERVICE_ZONE_ID%TYPE;
+v_PSE_NAME VARCHAR2(64);
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_RECONCIL_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_ITERATOR_NAME FORMULA_CHARGE_ITERATOR_NAME%ROWTYPE;
+v_ITERATOR FORMULA_CHARGE_ITERATOR%ROWTYPE;
+v_MARKET_PRICE_ID NUMBER(9);
+v_ATTRIBUTE NUMBER(9);
+v_RECONCIL_LAG BINARY_INTEGER;
+v_CONTRACT_ID NUMBER(9);
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+  	v_ITERATOR.ITERATOR_ID := 0;
+
+    IF p_RECORDS.Exists(v_IDX) THEN
+        v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+        v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+        v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+        v_RECONCIL_LAG := MM_PJM_SHADOW_BILL.GET_RECONCILIATION_LAG(v_CONTRACT_ID);
+    END IF;
+
+	WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+
+        -- put the date
+		v_RECONCIL_DATE := p_RECORDS(v_IDX).CUT_DATE;
+
+        --get zone name from custom attribute
+        ID.ID_FOR_ENTITY_ATTRIBUTE('Zone', 'PSE', 'String', TRUE, v_ATTRIBUTE);
+
+        SELECT ATTRIBUTE_VAL INTO v_ZONE
+        FROM TEMPORAL_ENTITY_ATTRIBUTE
+        WHERE ATTRIBUTE_ID = v_ATTRIBUTE
+        AND OWNER_ENTITY_ID = (SELECT PSE_ID FROM PSE
+        WHERE PSE_ALIAS = p_RECORDS(v_IDX).ZONE);
+
+        --get zone id
+        v_ZONE_ID := ID_FOR_SERVICE_ZONE(v_ZONE);
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).CUT_DATE - 1/86400, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH') THEN
+            -- get charge IDs
+            v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).CUT_DATE - 1/86400, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH');
+            v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+
+            --get PSE Name
+            BEGIN
+            	SELECT PSE_NAME
+            	INTO v_PSE_NAME
+            	FROM PURCHASING_SELLING_ENTITY
+            	WHERE PSE_ID = v_PSE_ID;
+            EXCEPTION
+               	WHEN NO_DATA_FOUND THEN
+               		v_PSE_NAME := '?';
+            END;
+
+			v_COMPONENT_ID := GET_COMPONENT(g_LD_RECONCIL_REACTIVE_NAME, g_LD_RECONCIL_REACTIVE_IDENT, 0);
+            v_REACTIVE_REC_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+
+			IF v_REACTIVE_REC_ID IS NULL THEN
+            	LOGS.LOG_WARN('Reconciliation for Reactive Services Charge ID not found for PSE_ID:' || v_PSE_ID
+                                    || ' during IMPORT_REACT_SERVICES_RECONCIL');
+                RETURN;
+            END IF;
+
+		END IF;
+
+        v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:ReactiveServicesReconRate:' || v_ZONE);
+		IF v_MARKET_PRICE_ID IS NULL THEN
+			IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+      							p_MARKET_PRICE_NAME => 'PJM ReactiveServices Reconciliation Rate:' || v_ZONE,
+								p_MARKET_PRICE_ALIAS => 'PJM ReactiveServices Reconcil Rate' || v_ZONE,
+                        		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+								p_MARKET_PRICE_ID => 0,
+                        		p_MARKET_PRICE_TYPE => 'Market Clearing Price',
+								p_MARKET_PRICE_INTERVAL => 'Day',
+                        		p_MARKET_TYPE => '?',
+								p_COMMODITY_ID => 0,
+								p_SERVICE_POINT_TYPE => '?',
+                        		p_EXTERNAL_IDENTIFIER => 'PJM:ReactiveServicesReconRate:' || v_ZONE,
+								p_EDC_ID => 0,
+								p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                        		p_POD_ID => 0,
+								p_ZOD_ID => v_ZONE_ID);
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, v_RECONCIL_DATE,
+								p_RECORDS(v_IDX).RECON_BILL_DET);
+
+        v_ITERATOR_NAME.CHARGE_ID := v_REACTIVE_REC_ID;
+        v_ITERATOR_NAME.ITERATOR_NAME1 := 'Zone';
+        v_ITERATOR_NAME.ITERATOR_NAME2 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME3 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME4 := NULL;
+        v_ITERATOR_NAME.ITERATOR_NAME5 := NULL;
+        PC.PUT_FORMULA_ITERATOR_NAMES(v_ITERATOR_NAME);
+
+        v_ITERATOR.CHARGE_ID := v_REACTIVE_REC_ID;
+        IF v_ITERATOR_ID_MAP.EXISTS(v_ZONE) THEN
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID_MAP(v_ZONE);
+		ELSE
+			v_ITERATOR.ITERATOR_ID := v_ITERATOR_ID + 1;
+            v_ITERATOR_ID_MAP(v_ZONE) := v_ITERATOR.ITERATOR_ID;
+            v_ITERATOR_ID := v_ITERATOR_ID + 1;
+        END IF;
+        v_ITERATOR.ITERATOR1 := v_ZONE;
+	    v_ITERATOR.ITERATOR2 := NULL;
+	    v_ITERATOR.ITERATOR3 := NULL;
+	    v_ITERATOR.ITERATOR4 := NULL;
+	    v_ITERATOR.ITERATOR5 := NULL;
+        PC.PUT_FORMULA_ITERATOR(v_ITERATOR);
+
+        v_FORMULA_CHARGE.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := v_ITERATOR.ITERATOR_ID;
+
+        v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE_VAR.CHARGE_ID := v_REACTIVE_REC_ID;
+        v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReconciliationMWh';
+        v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).LOAD_RECON_ENERGY;
+        PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_DATE := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE.CHARGE_ID := v_REACTIVE_REC_ID;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).LOAD_RECON_ENERGY;
+        v_FORMULA_CHARGE.CHARGE_RATE := p_RECORDS(v_IDX).RECON_BILL_DET;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT := p_RECORDS(v_IDX).RECON_CHARGE;
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_REACT_SERVICES_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_TRANS_LOSS_CR_RECONCIL
+	(
+	p_RECORDS IN MEX_PJM_RECON_CHRGS_MSRS_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+v_REG_REC_ID NUMBER(9);
+v_ZONE VARCHAR2(32);
+v_COMPONENT_ID NUMBER(9);
+v_PSE_ID NUMBER(9);
+v_ZONE_ID SERVICE_ZONE.SERVICE_ZONE_ID%TYPE;
+v_PSE_NAME VARCHAR2(64);
+v_IDX BINARY_INTEGER;
+v_LAST_ORG_ID VARCHAR2(16) := '?';
+v_LAST_DATE DATE := LOW_DATE;
+v_RECONCIL_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_FORMULA_CHARGE_VAR FORMULA_CHARGE_VARIABLE%ROWTYPE;
+v_MARKET_PRICE_ID NUMBER(9);
+v_RECONCIL_LAG BINARY_INTEGER;
+v_CONTRACT_ID NUMBER(9);
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN
+		RETURN;
+	END IF; -- nothing to do
+
+	v_IDX := p_RECORDS.FIRST;
+
+    IF p_RECORDS.Exists(v_IDX) THEN
+        v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+        v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+        v_CONTRACT_ID := GET_CONTRACT_ID(v_PSE_ID);
+        v_RECONCIL_LAG := MM_PJM_SHADOW_BILL.GET_RECONCILIATION_LAG(v_CONTRACT_ID);
+    END IF;
+
+    WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        -- put the date
+        v_RECONCIL_DATE := p_RECORDS(v_IDX).CUT_DATE;
+
+		IF v_LAST_ORG_ID <> p_RECORDS(v_IDX)
+		.ORG_ID OR v_LAST_DATE <> TRUNC(p_RECORDS(v_IDX).CUT_DATE - 1/86400, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH') THEN
+            -- get charge IDs
+            v_LAST_ORG_ID := p_RECORDS(v_IDX).ORG_ID;
+            v_LAST_DATE   := TRUNC(p_RECORDS(v_IDX).CUT_DATE - 1/86400, 'MM') + NUMTOYMINTERVAL(v_RECONCIL_LAG, 'MONTH');
+            v_PSE_ID      := GET_PSE(v_LAST_ORG_ID, NULL);
+
+            --get PSE Name
+            BEGIN
+            	SELECT PSE_NAME
+            	INTO v_PSE_NAME
+            	FROM PURCHASING_SELLING_ENTITY
+            	WHERE PSE_ID = v_PSE_ID;
+            EXCEPTION
+               	WHEN NO_DATA_FOUND THEN
+               		v_PSE_NAME := '?';
+            END;
+
+			v_COMPONENT_ID := GET_COMPONENT(g_LD_RECONCIL_LOSSES_NAME, g_LD_RECONCIL_LOSSES_CR_IDENT, 1);
+            v_REG_REC_ID := GET_CHARGE_ID(v_PSE_ID,v_COMPONENT_ID,v_LAST_DATE,'FORMULA');
+
+			IF v_REG_REC_ID IS NULL THEN
+            	LOGS.LOG_WARN('Transmission Losses Reconciliation Credits ID not found for PSE_ID:' || v_PSE_ID
+                                    || ' during IMPORT_TRANS_LOSS_CR_RECONCIL');
+                RETURN;
+            END IF;
+
+		END IF;
+
+        v_MARKET_PRICE_ID := GET_MARKET_PRICE('PJM:TransLossReconRate:' || v_ZONE);
+		IF v_MARKET_PRICE_ID IS NULL THEN
+			IO.PUT_MARKET_PRICE(o_OID =>v_MARKET_PRICE_ID,
+      							p_MARKET_PRICE_NAME => 'PJM Transmission Loss Reconciliation Rate:' || v_ZONE,
+								p_MARKET_PRICE_ALIAS => 'PJM Trans Loss Reconcil Rate' || v_ZONE,
+                        		p_MARKET_PRICE_DESC => 'Generated by MarketManager',
+								p_MARKET_PRICE_ID => 0,
+                        		p_MARKET_PRICE_TYPE => 'Market Clearing Price',
+								p_MARKET_PRICE_INTERVAL => 'Hour',
+                        		p_MARKET_TYPE => '?',
+								p_COMMODITY_ID => 0,
+								p_SERVICE_POINT_TYPE => '?',
+                        		p_EXTERNAL_IDENTIFIER => 'PJM:TransLossReconRate:' || v_ZONE,
+								p_EDC_ID => 0,
+								p_SC_ID => EI.GET_ID_FROM_IDENTIFIER_EXTSYS('PJM', EC.ED_SC, EC.ES_PJM),
+                        		p_POD_ID => 0,
+								p_ZOD_ID => v_ZONE_ID);
+		END IF;
+		PUT_MARKET_PRICE_VALUE(v_MARKET_PRICE_ID, v_RECONCIL_DATE,
+								p_RECORDS(v_IDX).RECON_BILL_DET);
+
+
+		v_FORMULA_CHARGE.ITERATOR_ID := 0;
+		v_FORMULA_CHARGE_VAR.ITERATOR_ID := 0;
+
+    	--update formula variables
+    	v_FORMULA_CHARGE_VAR.CHARGE_DATE := v_RECONCIL_DATE;
+    	v_FORMULA_CHARGE_VAR.CHARGE_ID := v_REG_REC_ID;
+
+		v_FORMULA_CHARGE_VAR.VARIABLE_NAME := 'ReconciliationMWh';
+    	v_FORMULA_CHARGE_VAR.VARIABLE_VAL  := p_RECORDS(v_IDX).LOAD_RECON_ENERGY;
+    	PC.PUT_FORMULA_CHARGE_VAR(v_FORMULA_CHARGE_VAR);
+
+        v_FORMULA_CHARGE.CHARGE_ID := v_REG_REC_ID;
+        v_FORMULA_CHARGE.CHARGE_DATE     := v_RECONCIL_DATE;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).LOAD_RECON_ENERGY;
+        v_FORMULA_CHARGE.CHARGE_RATE     := p_RECORDS(v_IDX).RECON_BILL_DET;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT   := p_RECORDS(v_IDX).RECON_CHARGE;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_TRANS_LOSS_CR_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_GEN_CREDIT_PORTFOLIO
+	(
+	p_RECORDS IN MEX_PJM_GEN_PORTFO_CREDIT_TBL,
+	p_STATUS OUT NUMBER
+	) AS
+
+v_PSE_ID NUMBER(9);
+v_IDX BINARY_INTEGER;
+v_CHARGE_DATE DATE := LOW_DATE;
+v_FORMULA_CHARGE FORMULA_CHARGE%ROWTYPE;
+v_DA_OP_CR_COMP NUMBER(9);
+v_DA_OP_RES_TXN_CREDIT NUMBER(9);
+v_BAL_OP_RES_TXN_CREDIT NUMBER(9);
+v_BAl_OP_RES_STARTUP_CANCEL NUMBER(9);
+v_BAL_OP_CR_COMP NUMBER(9);
+v_BAL_OPRES_CR_ID NUMBER(9);
+v_DA_OPRES_CR_ID NUMBER(9);
+v_DA_OP_RES_TXN_ID NUMBER(9);
+v_BAL_OPRES_TXN_CR_ID NUMBER(9);
+v_BAL_OPRES_STARTUP_CR_ID NUMBER(9);
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	IF p_RECORDS.COUNT = 0 THEN	RETURN;	END IF;
+
+	v_IDX := p_RECORDS.FIRST;
+
+    --The DA Op Res Gen Credit, the BAL Op Res Gen Credit and the BAL Op LOC Credit will be updated in other routines
+    --from other reports so are not updated here
+
+    v_DA_OP_CR_COMP := GET_COMPONENT(g_DA_OP_RES_COMP_NAME,g_DA_OP_RES_CR_COMP_IDENT,1);
+    v_DA_OP_RES_TXN_CREDIT := GET_COMPONENT('Day Ahead Op Reserves Transaction Credit','PJMDAOpResTxnCredit',1);
+    v_BAL_OP_CR_COMP := GET_COMPONENT(g_BAL_OP_RES_COMP_NAME,g_BAL_OP_RES_CR_COMP_IDENT,1);
+    v_BAL_OP_RES_STARTUP_CANCEL := GET_COMPONENT('Balancing Operating Reserves Credit: Startup Cancellation Credit','PJM:BalOpResCredStartup',1);
+    v_BAL_OP_RES_TXN_CREDIT := GET_COMPONENT('Balancing Operating Reserves Transaction Credit','PJM:BalOpResTxnCred',1);
+
+
+    IF p_RECORDS.Exists(v_IDX) THEN
+        v_PSE_ID      := GET_PSE(p_RECORDS(v_IDX).ORG_ID, NULL);
+    END IF;
+
+    WHILE p_RECORDS.EXISTS(v_IDX) LOOP
+        v_CHARGE_DATE := p_RECORDS(v_IDX).DAY + 1 / 86400;
+        v_DA_OPRES_CR_ID := GET_CHARGE_ID(v_PSE_ID, v_DA_OP_CR_COMP, v_CHARGE_DATE, 'FORMULA');
+
+        v_DA_OP_RES_TXN_ID := GET_COMBO_CHARGE_ID(v_DA_OPRES_CR_ID,v_DA_OP_RES_TXN_CREDIT,v_CHARGE_DATE,'FORMULA', TRUE);        v_BAL_OPRES_CR_ID := GET_CHARGE_ID(v_PSE_ID, v_BAL_OP_CR_COMP, v_CHARGE_DATE, 'FORMULA');
+        v_BAL_OPRES_TXN_CR_ID := GET_COMBO_CHARGE_ID(v_BAL_OPRES_CR_ID,v_BAL_OP_RES_TXN_CREDIT,v_CHARGE_DATE,'FORMULA', TRUE);
+        v_BAL_OPRES_STARTUP_CR_ID := GET_COMBO_CHARGE_ID(v_BAL_OPRES_CR_ID,v_BAL_OP_RES_STARTUP_CANCEL,v_CHARGE_DATE,'FORMULA', TRUE);
+
+        v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.ITERATOR_ID := 0;
+        v_FORMULA_CHARGE.CHARGE_ID :=  v_DA_OP_RES_TXN_ID;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).DA_OP_RES_TXN_CREDIT;
+        v_FORMULA_CHARGE.CHARGE_RATE := 1;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT := v_FORMULA_CHARGE.CHARGE_QUANTITY;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.ITERATOR_ID := 0;
+        v_FORMULA_CHARGE.CHARGE_ID :=  v_BAL_OPRES_TXN_CR_ID;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).BAL_OP_RES_TXN_CREDIT;
+        v_FORMULA_CHARGE.CHARGE_RATE := 1;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT := v_FORMULA_CHARGE.CHARGE_QUANTITY;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        v_FORMULA_CHARGE.CHARGE_DATE := v_CHARGE_DATE;
+        v_FORMULA_CHARGE.ITERATOR_ID := 0;
+        v_FORMULA_CHARGE.CHARGE_ID :=  v_BAL_OPRES_STARTUP_CR_ID;
+        v_FORMULA_CHARGE.CHARGE_QUANTITY := p_RECORDS(v_IDX).BAL_OP_RES_STARTUP_CANCEL_CRED;
+        v_FORMULA_CHARGE.CHARGE_RATE := 1;
+        v_FORMULA_CHARGE.CHARGE_AMOUNT := v_FORMULA_CHARGE.CHARGE_QUANTITY;
+        PC.PUT_FORMULA_CHARGE(v_FORMULA_CHARGE);
+
+        UPDATE_COMBINATION_CHARGE(v_DA_OPRES_CR_ID, v_DA_OP_RES_TXN_ID, 'FORMULA',-1,v_CHARGE_DATE, v_DA_OP_RES_TXN_CREDIT);
+        UPDATE_COMBINATION_CHARGE(v_BAL_OPRES_CR_ID, v_BAL_OPRES_TXN_CR_ID, 'FORMULA',-1,v_CHARGE_DATE, v_BAL_OP_RES_TXN_CREDIT);
+        UPDATE_COMBINATION_CHARGE(v_BAL_OPRES_CR_ID, v_BAL_OPRES_STARTUP_CR_ID, 'FORMULA',-1,v_CHARGE_DATE, v_BAL_OP_RES_STARTUP_CANCEL);
+
+        v_IDX := p_RECORDS.NEXT(v_IDX);
+	END LOOP;
+
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		COMMIT;
+	END IF;
+
+END IMPORT_GEN_CREDIT_PORTFOLIO;
+----------------------------------------------------------------------------------------------------
+-- These public routines take a CLOB of CSV data and import them into RO/MM tables. They use routines
+-- in MEX to parse the CSV data into records.
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_MONTHLY_STATEMENT
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_MONTHLY_STMNT_MSRS_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_MONTHLY_STATEMENT(p_CSV,v_RECORDS,p_STATUS,p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_MONTHLY_STATEMENT(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_MONTHLY_STATEMENT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_MONTH_TO_DATE_BILL
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_MONTH_TO_DATE_BILL_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_MONTH_TO_DATE_BILL(p_CSV,v_RECORDS,p_STATUS,p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_MONTH_TO_DATE_BILL(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_MONTH_TO_DATE_BILL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SPOT_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+BEGIN
+	--assumes date is 6/1/2007 or later with marginal losses changes
+    MEX_PJM_SETTLEMENT_MSRS.PARSE_SPOT_SUMMARY(p_CSV, p_STATUS, p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_SPOT_SUMMARY(p_STATUS);
+	END IF;
+END IMPORT_SPOT_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_CONGESTION_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+BEGIN
+    --assumes date is 6/1/2007 or later with marginal losses changes
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_CONGESTION_SUMMARY(p_CSV, p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_CONGESTION_SUMMARY(p_STATUS);
+	END IF;
+END IMPORT_CONGESTION_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_HR_TRANS_CONG_CREDITS
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+
+BEGIN
+
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_HR_TRANS_CONG_CR(p_CSV, p_STATUS, p_MESSAGE);
+	--this report has no corresponding MM side import
+
+END IMPORT_HR_TRANS_CONG_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SCHEDULE9_10_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_SCHED9_10_SUM_TBL_MSRS;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_SCHEDULE9_10_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_SCHEDULE9_10_SUMMARY(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_SCHEDULE9_10_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_TOSSCD_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_TOSSCD_SUMMARY_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_TOSSCD_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_TOSSCD_SUMMARY(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_TOSSCD_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NITS_CREDIT_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_NITS_SUMMARY_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_NITS_CREDIT_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_NITS_CREDIT_SUMMARY(v_RECORDS, NULL, p_STATUS, 1);
+	END IF;
+END IMPORT_NITS_CREDIT_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NITS_CHARGE_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_NITS_SUMMARY_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_NITS_CHARGE_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_NITS_CHARGE_SUMMARY(v_RECORDS, NULL, p_STATUS, 1);
+	END IF;
+END IMPORT_NITS_CHARGE_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_OP_RES_LOST_OPP_COST
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_OP_RES_LOC_MSRS_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_OP_RES_LOST_OPP_COST(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_OP_RES_LOST_OPP_COST(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_OP_RES_LOST_OPP_COST;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_GEN_CREDIT_PORTFOLIO
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_GEN_PORTFO_CREDIT_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_GEN_CREDIT_PORTFOLIO(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_GEN_CREDIT_PORTFOLIO(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_GEN_CREDIT_PORTFOLIO;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NITS_OFFSET_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_TRANS_OFFSET_CHG_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_NITS_OFFSET_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_NITS_OFFSET_SUMMARY(v_RECORDS, NULL, p_STATUS, 1);
+	END IF;
+END IMPORT_NITS_OFFSET_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_EXPANSION_COST_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_NITS_SUMMARY_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_EXPANSION_COST_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_EXPANSION_COST_SUMMARY(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_EXPANSION_COST_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_RTO_STARTUP_COST_SUMM
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_NITS_SUMMARY_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_RTO_STARTUP_COST_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_RTO_STARTUP_COST_SUMM(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_RTO_STARTUP_COST_SUMM;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_OP_RES_CHG_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_OPER_RES_SUMM_MSRS_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_OPER_RES_CHG_SUMMARY_NEW(p_CSV,v_RECORDS,p_STATUS,p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_OP_RES_CHG_SUMMARY_NEW(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_OP_RES_CHG_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_GEN_CREDIT_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+
+BEGIN
+
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_GENERATOR_CREDIT_SUMMARY(p_CSV, p_STATUS, p_MESSAGE);
+	--there is no MM side fro this report
+END IMPORT_GEN_CREDIT_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_OP_RES_GEN_CR_DETAILS
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+
+BEGIN
+
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_OP_RES_GEN_CR_DETAILS(p_CSV,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_OP_RES_GEN_CR_DETAILS(p_STATUS);
+	END IF;
+
+END IMPORT_OP_RES_GEN_CR_DETAILS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_FTR_AUCTION
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_FTR_AUCTION_TBL_MSRS;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_FTR_AUCTION(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_FTR_AUCTION(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_FTR_AUCTION;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_BLACK_START_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_BLACKSTART_SUMMARY_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_BLACK_START_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_BLACK_START_SUMMARY(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_BLACK_START_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_RAMAPO_PAR_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_RAMAPO_PAR_SUMMARY_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_RAMAPO_PAR_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_RAMAPO_PAR_SUMMARY(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_RAMAPO_PAR_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_CAP_TRANSFER_CREDITS
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_CAP_TRANSFER_RIGHT_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_CAP_TRANSFER_CREDITS(p_CSV,v_RECORDS,p_STATUS,p_MESSAGE);
+	IF p_STATUS >= 0 THEN
+		IMPORT_CAP_TRANSFER_CREDITS(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_CAP_TRANSFER_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_ARR_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_ARR_SUMMARY_TBL_MSRS;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_ARR_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_ARR_SUMMARY(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_ARR_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REACTIVE_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_REACTIVE_SUMMARY_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_REACTIVE_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_REACTIVE_SUMMARY(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_REACTIVE_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REACTIVE_SERV_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_REACTIVE_SERV_SUMM_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_REACTIVE_SERV_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_REACTIVE_SERV_SUMMARY(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_REACTIVE_SERV_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REGULATION_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_REGL_SUMMARY_MSRS_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_REGULATION_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_REGULATION_SUMMARY(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_REGULATION_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REGULATION_CREDITS
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_REGULATION_CREDIT_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_REGULATION_CREDITS(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_REGULATION_CREDITS(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_REGULATION_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_FTR_TARGET_CREDITS
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+	v_WORK_ID NUMBER(9);
+BEGIN
+	UT.GET_RTO_WORK_ID(v_WORK_ID);
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_FTR_TARGET_CREDITS(p_CSV, v_WORK_ID, p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_FTR_TARGET_CREDITS(v_WORK_ID,p_STATUS);
+	END IF;
+END IMPORT_FTR_TARGET_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNC_RES_T2_CHG_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_SYNC_RES_T2_CHG_SUMMARY(p_CSV,p_STATUS, p_MESSAGE);
+
+END IMPORT_SYNC_RES_T2_CHG_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNC_RES_T1_CHG_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_SYNC_RES_T1_CHG_SUMMARY(p_CSV,p_STATUS, p_MESSAGE);
+
+END IMPORT_SYNC_RES_T1_CHG_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNC_RES_OBL
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_SYNC_RES_OBL(p_CSV,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_SYNC_RES_OBL(p_STATUS);
+	END IF;
+END IMPORT_SYNC_RES_OBL;
+---------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DA_DAILY_TX
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_DAILY_TX_TBL;
+BEGIN
+	MEX_PJM_ESCHED.PARSE_DAILY_TRANS_RPT_MSRS(p_CSV,v_RECORDS,p_STATUS,p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_DA_DAILY_TX(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_DA_DAILY_TX;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_RT_DAILY_TX
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_DAILY_TX_TBL;
+BEGIN
+	MEX_PJM_ESCHED.PARSE_REAL_TIME_DAILY_TX_MSRS(p_CSV,v_RECORDS,p_STATUS,p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_RT_DAILY_TX(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_RT_DAILY_TX;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_EXPLICIT_CONGESTION
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+BEGIN
+
+    MEX_PJM_SETTLEMENT_MSRS.PARSE_EXPLICIT_CONGESTION(p_CSV, p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_EXPLICIT_CONGESTION(p_STATUS);
+	END IF;
+END IMPORT_EXPLICIT_CONGESTION;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_FIRM_TRANS_SERV_CHARGES
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_TRAN_SERv_CHG_TBL_MSRS;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_FIRM_TRANS_SERV_CHARGES(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_FIRM_TRANS_SERV_CHARGES(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_FIRM_TRANS_SERV_CHARGES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NON_FM_TRANS_SV_CHARGES
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_NFIRM_TRAN_CH_TBL_MSRS;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_NON_FM_TRANS_SV_CHARGES(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_NON_FM_TRANS_SV_CHARGES(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_NON_FM_TRANS_SV_CHARGES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NON_FM_TRANS_SV_CREDITS
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_NON_FIRM_TRAN_CRED_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_NON_FM_TRANS_SV_CREDITS(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_NON_FM_TRANS_SV_CREDITS(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_NON_FM_TRANS_SV_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNCH_CONDENS_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_SYNCH_CONDENS_MSRS_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_SYNCH_CONDENS_SUMMARY(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_SYNCH_CONDENS_SUMMARY(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_SYNCH_CONDENS_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SCHED_9_10_RECON
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_SCHED_9_10_RECON_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_SCHED_9_10_RECON(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_SCHED_9_10_RECON(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_SCHED_9_10_RECON;
+-----------------------------------------------------------------------------
+PROCEDURE IMPORT_SCHEDULE1A_RECONCILE
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_SCHEDULE1A_SUMMARY_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_SCHEDULE1A_RECONCILE(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_SCHEDULE1A_RECONCILE(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_SCHEDULE1A_RECONCILE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_ENERGY_CH_RECONCIL
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+BEGIN
+    MEX_PJM_SETTLEMENT_MSRS.PARSE_ENERGY_CHARGES_RECONCIL(p_CSV, p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_ENERGY_CH_RECONCIL(p_STATUS);
+	END IF;
+END IMPORT_ENERGY_CH_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_CONG_LOSS_LOAD_RECONCIL
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+BEGIN
+    MEX_PJM_SETTLEMENT_MSRS.PARSE_CONG_LOSS_LOAD_RECONCIL(p_CSV, p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_CONG_LOSS_LOAD_RECONCIL(p_STATUS);
+	END IF;
+END IMPORT_CONG_LOSS_LOAD_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REGULATION_CH_RECONCIL
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_RECON_CHRGS_MSRS_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_REG_CHARGES_RECONCIL(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_REGULATION_CH_RECONCIL(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_REGULATION_CH_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNC_CONDENSE_RECONCIL
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_RECON_CHRGS_MSRS_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_SYNC_CONDENSE_RECONCIL(p_CSV,v_RECORDS,p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_SYNC_CONDENSE_RECONCIL(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_SYNC_CONDENSE_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REACT_SERVICES_RECONCIL
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_RECON_CHRGS_MSRS_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_REACT_SERVICES_RECONCIL(p_CSV,v_RECORDS,p_STATUS,p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_REACT_SERVICES_RECONCIL(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_REACT_SERVICES_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNC_RES_CH_RECONCIL
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_RECON_CHRGS_MSRS_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_SYNC_RES_CH_RECONCIL(p_CSV,v_RECORDS,p_STATUS,p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_SYNC_RES_CH_RECONCIL(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_SYNC_RES_CH_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_TRANS_LOSS_CR_RECONCIL
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_RECON_CHRGS_MSRS_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_TRANS_LOSS_CR_RECONCIL(p_CSV,v_RECORDS,p_STATUS,p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_TRANS_LOSS_CR_RECONCIL(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_TRANS_LOSS_CR_RECONCIL;
+--------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_TRANS_LOSS_CHARGES
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_TRANS_LOSS_CHARGE(p_CSV, p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_TRANS_LOSS_CHARGES(p_STATUS);
+	END IF;
+END IMPORT_TRANS_LOSS_CHARGES;
+--------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_EXPLICIT_LOSSES
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_EXPLICIT_LOSS(p_CSV, p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_EXPLICIT_LOSSES(p_STATUS);
+	END IF;
+END IMPORT_EXPLICIT_LOSSES;
+--------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_INADVERTENT_INTERCHANGE
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_INADV_INTERCHG_SUMMARY(p_CSV, p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_INADVERTENT_INTERCHANGE(p_STATUS);
+	END IF;
+END IMPORT_INADVERTENT_INTERCHANGE;
+--------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_TRANS_LOSS_CREDITS
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_TRANS_LOSS_CREDIT(p_CSV, p_STATUS, p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_TRANS_LOSS_CREDITS(p_STATUS);
+	END IF;
+END IMPORT_TRANS_LOSS_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_RPM_AUCTION_SUMMARY
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_RPM_AUCTION_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_RPM_AUCTION_SUMMARY(p_CSV,v_RECORDS,p_STATUS,p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_RPM_AUCTION_SUMMARY(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_RPM_AUCTION_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_LOC_RELIABILITY_SUMM
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+v_RECORDS MEX_PJM_RECONCIL_CHARGES_TBL;
+BEGIN
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_LOC_RELIABILITY_SUMMARY(p_CSV,v_RECORDS,p_STATUS,p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_LOC_RELIABILITY_SUMM(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_LOC_RELIABILITY_SUMM;
+-----------------------------------------------------------------------------
+-- These public routines take a begin and end date and download the corresponding data from PJM and
+-- then import them into RO/MM tables.
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_MONTHLY_STATEMENT(p_CRED 		IN mex_credentials,
+								   p_MONTH 		IN DATE,
+								   p_LOG_ONLY	IN BINARY_INTEGER,
+                                   p_STATUS     OUT NUMBER,
+                                   p_MESSAGE    OUT VARCHAR2,
+								   p_LOGGER		IN OUT mm_logger_adapter) AS
+    v_RECORDS MEX_PJM_MONTHLY_STMNT_MSRS_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_MONTHLY_STATEMENT(TRUNC(p_MONTH,
+                                                     'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+      IMPORT_MONTHLY_STATEMENT(v_RECORDS, p_STATUS);
+    END IF;
+END IMPORT_MONTHLY_STATEMENT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_MONTH_TO_DATE_BILL
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_MONTH_TO_DATE_BILL_TBL;
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_MONTH_TO_DATE_BILL(TRUNC(p_MONTH,'MM'),
+                                                    LAST_DAY(p_MONTH),
+							                        p_LOGGER,
+							                        p_CRED,
+							                        p_LOG_ONLY,
+                                                    v_RECORDS,
+                                                    p_STATUS,
+                                                    p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_MONTH_TO_DATE_BILL(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_MONTH_TO_DATE_BILL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SPOT_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_SPOT_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                                LAST_DAY(p_MONTH),
+                                                p_LOGGER,
+			                                    p_CRED,
+			                                    p_LOG_ONLY,
+                                                p_STATUS,
+                                                p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_SPOT_SUMMARY(p_STATUS);
+    END IF;
+
+END IMPORT_SPOT_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_CONGESTION_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+	p_STATUS := GA.SUCCESS;
+    UT.GET_RTO_WORK_ID(g_FTR_CONG_CRED_WK_ID);
+	MEX_PJM_SETTLEMENT_MSRS.FETCH_CONGESTION_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                                LAST_DAY(p_MONTH),
+                                                p_LOGGER,
+			                                    p_CRED,
+			                                    p_LOG_ONLY,
+                                                p_STATUS,
+                                                p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_CONGESTION_SUMMARY(p_STATUS);
+    END IF;
+
+END IMPORT_CONGESTION_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_HR_TRANS_CONG_CREDITS
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+	p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_HR_TRANS_CONG_CR(TRUNC(p_MONTH,'MM'),
+                                                LAST_DAY(p_MONTH),
+                                                p_LOGGER,
+			                                    p_CRED,
+			                                    p_LOG_ONLY,
+                                                p_STATUS,
+                                                p_MESSAGE);
+
+   --this report has no corresponding MM side import
+
+END IMPORT_HR_TRANS_CONG_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_IMPLICIT_CONG_LOSS_CH
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+--fix
+    --stipulation - can only fetch this report for one day only
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_IMPL_CONG_LOSS_CH(p_MONTH,
+                                                p_MONTH,
+                                                p_LOGGER,
+			                                    p_CRED,
+			                                    p_LOG_ONLY,
+                                                p_STATUS,
+                                                p_MESSAGE);
+
+   --this report has no corresponding MM side import
+
+END IMPORT_IMPLICIT_CONG_LOSS_CH;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_IMPLICIT_CONG_LOSS_CH
+	(
+	p_CSV IN CLOB,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2
+	) AS
+BEGIN
+
+	MEX_PJM_SETTLEMENT_MSRS.PARSE_IMPL_CONG_LOSS_CH(p_CSV, p_STATUS, p_MESSAGE);
+	--this report has no corresponding MM side import
+
+END IMPORT_IMPLICIT_CONG_LOSS_CH;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SCHEDULE9_10_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_SCHED9_10_SUM_TBL_MSRS;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_SCHEDULE9_10_SUMMARY(TRUNC(p_MONTH,
+                                                     'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+      IMPORT_SCHEDULE9_10_SUMMARY(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_SCHEDULE9_10_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_TOSSCD_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_TOSSCD_SUMMARY_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_TOSSCD_SUMMARY(TRUNC(p_MONTH,
+                                                     'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_TOSSCD_SUMMARY(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_TOSSCD_SUMMARY;
+--------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NITS_CREDIT_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS   MEX_PJM_NITS_SUMMARY_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_NITS_CREDIT_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                           LAST_DAY(p_MONTH),
+            							   p_LOGGER,
+            							   p_CRED,
+            							   p_LOG_ONLY,
+                                           v_RECORDS,
+                                           p_STATUS,
+                                           p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_NITS_CREDIT_SUMMARY(v_RECORDS, p_CRED.EXTERNAL_ACCOUNT_NAME, p_STATUS);
+    END IF;
+
+END IMPORT_NITS_CREDIT_SUMMARY;
+------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NITS_CHARGE_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS   MEX_PJM_NITS_SUMMARY_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_NITS_CHARGE_SUMMARY(TRUNC(p_MONTH,
+                                                     'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_NITS_CHARGE_SUMMARY(v_RECORDS, p_CRED.EXTERNAL_ACCOUNT_NAME, p_STATUS);
+    END IF;
+
+END IMPORT_NITS_CHARGE_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_OP_RES_LOST_OPP_COST
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_OP_RES_LOC_MSRS_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_OP_RES_LOST_OPP_COST(TRUNC(p_MONTH,
+                                                     'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               p_STATUS,
+                                               p_MESSAGE);
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_OP_RES_LOST_OPP_COST(v_RECORDS,p_STATUS);
+	END IF;
+
+END IMPORT_OP_RES_LOST_OPP_COST;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REG_OPER_RES_CHG_SUMM
+	(
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+	) AS
+v_RECORDS MEX_PJM_REG_OPER_RES_SUMM_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_REG_OPER_RES_CHG_SUMMARY(TRUNC(p_MONTH,
+                                                     'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               p_STATUS,
+                                               p_MESSAGE);
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_REG_OPER_RES_CHG_SUMM(v_RECORDS,p_STATUS);
+	END IF;
+END IMPORT_REG_OPER_RES_CHG_SUMM;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_GEN_CREDIT_PORTFOLIO
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_GEN_PORTFO_CREDIT_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_GEN_CREDIT_PORTFOLIO(TRUNC(p_MONTH,'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_GEN_CREDIT_PORTFOLIO(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_GEN_CREDIT_PORTFOLIO;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NITS_OFFSET_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+    --import Network Integration Transmission Service Offset Charge Summary
+	--new type for this report MEX_PJM_TRANS_OFFSET_CHARGES
+	--TO DO: drop MEX_PJM_TRANS_REVNEUT_CHG
+v_RECORDS   MEX_PJM_TRANS_OFFSET_CHG_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_NITS_OFFSET_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_NITS_OFFSET_SUMMARY(v_RECORDS, p_CRED.EXTERNAL_ACCOUNT_NAME, p_STATUS);
+    END IF;
+
+END IMPORT_NITS_OFFSET_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_EXPANSION_COST_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_NITS_SUMMARY_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_EXPANSION_COST_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_EXPANSION_COST_SUMMARY(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_EXPANSION_COST_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_RTO_STARTUP_COST_SUMM
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_NITS_SUMMARY_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_RTO_STARTUP_COST_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+      IMPORT_RTO_STARTUP_COST_SUMM(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_RTO_STARTUP_COST_SUMM;
+----------------------------------------------------------------------------------------------------
+--FIX? WASN'T LOOPING THRU CREDENTIALS
+PROCEDURE IMPORT_OP_RES_CHG_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_OPER_RES_SUMMARY_TBL;
+--Dec 1, 2008 - New object type that holds the new format of the report
+v_RECORDS_NEW MEX_PJM_OPER_RES_SUMM_MSRS_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_OPER_RES_CHG_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               v_RECORDS_NEW,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+    	IF TRUNC(p_MONTH,'MM') >= MM_PJM_UTIL.g_PJM_OP_RES_GO_LIVE THEN
+			IMPORT_OP_RES_CHG_SUMMARY_NEW(v_RECORDS_NEW, p_STATUS);
+        ELSE
+        	IMPORT_OP_RES_CHG_SUMMARY(v_RECORDS, p_STATUS);
+		END IF;
+    END IF;
+
+END IMPORT_OP_RES_CHG_SUMMARY;
+----------------------------------------------------------------------------------------------------
+--FIX? WASN'T LOOPING THRU CREDENTIALS
+PROCEDURE IMPORT_GEN_CREDIT_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_GENERATOR_CREDIT_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        --Generator Credit Details and Generator Credit Summary use the same data structure;
+        --call the import after the 2nd report (this one) is downloaded and parsed
+		IMPORT_OP_RES_GEN_CR_DETAILS(p_STATUS);
+	END IF;
+
+END IMPORT_GEN_CREDIT_SUMMARY;
+----------------------------------------------------------------------------------------------------
+--FIX? WASN'T LOOPING THRU CREDENTIALS
+PROCEDURE IMPORT_OP_RES_GEN_CR_DETAILS
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_OP_RES_GEN_CR_DETAILS(TRUNC(p_MONTH,'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    --there is no MM side of this report
+
+
+END IMPORT_OP_RES_GEN_CR_DETAILS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_FTR_AUCTION
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_FTR_AUCTION_TBL_MSRS;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_FTR_AUCTION(TRUNC(p_MONTH,'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_FTR_AUCTION(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_FTR_AUCTION;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_ARR_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_ARR_SUMMARY_TBL_MSRS;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_ARR_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                               LAST_DAY(p_MONTH),
+											   p_LOGGER,
+											   p_CRED,
+											   p_LOG_ONLY,
+                                               v_RECORDS,
+                                               p_STATUS,
+                                               p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+      IMPORT_ARR_SUMMARY(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_ARR_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REACTIVE_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_REACTIVE_SUMMARY_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_REACTIVE_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_REACTIVE_SUMMARY(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_REACTIVE_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REACTIVE_SERV_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_REACTIVE_SERV_SUMM_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_REACTIVE_SERV_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+      IMPORT_REACTIVE_SERV_SUMMARY(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_REACTIVE_SERV_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REGULATION_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_REGL_SUMMARY_MSRS_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_REGULATION_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                        LAST_DAY(p_MONTH),
+                                        p_LOGGER,
+                                        p_CRED,
+                                        p_LOG_ONLY,
+                                        v_RECORDS,
+                                        p_STATUS,
+                                        p_MESSAGE);
+     IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_REGULATION_SUMMARY(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_REGULATION_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REGULATION_CREDITS
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_REGULATION_CREDIT_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_REGULATION_CREDITS(TRUNC(p_MONTH,'MM'),
+                                        LAST_DAY(p_MONTH),
+                                        p_LOGGER,
+                                        p_CRED,
+                                        p_LOG_ONLY,
+                                        v_RECORDS,
+                                        p_STATUS,
+                                        p_MESSAGE);
+     IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_REGULATION_CREDITS(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_REGULATION_CREDITS;
+----------------------------------------------------------------------------------------------------
+--FIX  COMMENTED SECTIONS
+PROCEDURE IMPORT_FTR_TARGET_CREDITS
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_WORK_ID NUMBER(9);
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    UT.GET_RTO_WORK_ID(v_WORK_ID);
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_FTR_TARGET_CREDITS(
+			                            v_WORK_ID,
+			                            TRUNC(p_MONTH,'MM'),
+                                        LAST_DAY(p_MONTH),
+                                        p_LOGGER,
+                                        p_CRED,
+                                        p_LOG_ONLY,
+                                        p_STATUS,
+                                        p_MESSAGE);
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_FTR_TARGET_CREDITS(v_WORK_ID, p_STATUS);
+    END IF;
+
+
+
+	-- Clean up the Congestion Summary information that we cached.
+	--DELETE RTO_WORK WHERE WORK_ID = g_FTR_CONG_CRED_WK_ID;
+
+--EXCEPTION
+	--WHEN OTHERS THEN
+		-- Clean up the Congestion Summary information that we cached.
+		--DELETE RTO_WORK WHERE WORK_ID = g_FTR_CONG_CRED_WK_ID;
+		--RAISE;
+END IMPORT_FTR_TARGET_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_BLACK_START_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_BLACKSTART_SUMMARY_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_BLACK_START_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+      IMPORT_BLACK_START_SUMMARY(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_BLACK_START_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_RAMAPO_PAR_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_RAMAPO_PAR_SUMMARY_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_RAMAPO_PAR_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+      IMPORT_RAMAPO_PAR_SUMMARY(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_RAMAPO_PAR_SUMMARY;
+----------------------------------------------------------------------------------------------------
+--FIX? WASN'T LOOPING THRU CREDENTIALS
+PROCEDURE IMPORT_SYNC_RES_T2_CHG_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_SYNC_RES_T2_CHG_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            p_STATUS,
+                                            p_MESSAGE);
+		--this report has no corresponding MM side import
+END IMPORT_SYNC_RES_T2_CHG_SUMMARY;
+----------------------------------------------------------------------------------------------------
+--FIX? WASN'T LOOPING THRU CREDENTIALS
+PROCEDURE IMPORT_SYNC_RES_T1_CHG_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_SYNC_RES_T1_CHG_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    --this report has no corresponding MM side import
+
+END IMPORT_SYNC_RES_T1_CHG_SUMMARY;
+----------------------------------------------------------------------------------------------------
+--FIX? WASN'T LOOPING THRU CREDENTIALS
+PROCEDURE IMPORT_SYNC_RES_OBL
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_SYNC_RES_OBL(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            p_STATUS,
+                                            p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_SYNC_RES_OBL(p_STATUS);
+    END IF;
+END IMPORT_SYNC_RES_OBL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_DA_DAILY_TX
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_DAILY_TX_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_ESCHED.FETCH_DAILY_TRANS_RPT_MSRS(
+                                            TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_CRED,
+                                            p_LOGGER,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+      IMPORT_DA_DAILY_TX(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_DA_DAILY_TX;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_RT_DAILY_TX
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_DAILY_TX_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_ESCHED.FETCH_REAL_TIME_DAILY_TX_MSRS(
+                                            TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_CRED,
+                                            p_LOGGER,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_RT_DAILY_TX(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_RT_DAILY_TX;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_EXPLICIT_CONGESTION
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_EXPLICIT_CONGESTION(TRUNC(p_MONTH,'MM'),
+                                        LAST_DAY(p_MONTH),
+                                        p_LOGGER,
+                                        p_CRED,
+                                        p_LOG_ONLY,
+                                        p_STATUS,
+                                        p_MESSAGE);
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_EXPLICIT_CONGESTION(p_STATUS);
+    END IF;
+
+END IMPORT_EXPLICIT_CONGESTION;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_EXPLICIT_LOSSES
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_EXPLICIT_LOSS(TRUNC(p_MONTH,'MM'),
+                                        LAST_DAY(p_MONTH),
+                                        p_LOGGER,
+                                        p_CRED,
+                                        p_LOG_ONLY,
+                                        p_STATUS,
+                                        p_MESSAGE);
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_EXPLICIT_LOSSES(p_STATUS);
+    END IF;
+
+END IMPORT_EXPLICIT_LOSSES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_TRANS_LOSS_CREDITS
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_TRANS_LOSS_CREDIT(TRUNC(p_MONTH,'MM'),
+                                    LAST_DAY(p_MONTH),
+                                    p_LOGGER,
+                                    p_CRED,
+                                    p_LOG_ONLY,
+                                    p_STATUS,
+                                    p_MESSAGE);
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_TRANS_LOSS_CREDITS(p_STATUS);
+    END IF;
+
+END IMPORT_TRANS_LOSS_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_INADVERTENT_INTERCHANGE
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_INADV_INTERCHG_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                    LAST_DAY(p_MONTH),
+                                    p_LOGGER,
+                                    p_CRED,
+                                    p_LOG_ONLY,
+                                    p_STATUS,
+                                    p_MESSAGE);
+
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_INADVERTENT_INTERCHANGE(p_STATUS);
+    END IF;
+
+END IMPORT_INADVERTENT_INTERCHANGE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_FIRM_TRANS_SERV_CHARGES
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_TRAN_SERv_CHG_TBL_MSRS;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_FIRM_TRANS_SERV_CHARGES(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_FIRM_TRANS_SERV_CHARGES(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_FIRM_TRANS_SERV_CHARGES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NON_FM_TRANS_SV_CHARGES
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_NFIRM_TRAN_CH_TBL_MSRS;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_NON_FM_TRANS_SV_CHARGES(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+     IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_NON_FM_TRANS_SV_CHARGES(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_NON_FM_TRANS_SV_CHARGES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_NON_FM_TRANS_SV_CREDITS
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_NON_FIRM_TRAN_CRED_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_NON_FM_TRANS_SV_CREDITS(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+     IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_NON_FM_TRANS_SV_CREDITS(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_NON_FM_TRANS_SV_CREDITS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNCH_CONDENS_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_SYNCH_CONDENS_MSRS_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_SYNCH_CONDENS_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+	IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+		IMPORT_SYNCH_CONDENS_SUMMARY(v_RECORDS, p_STATUS);
+	END IF;
+
+END IMPORT_SYNCH_CONDENS_SUMMARY;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SCHED_9_10_RECON
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_SCHED_9_10_RECON_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_SCHED_9_10_RECON(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_SCHED_9_10_RECON(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_SCHED_9_10_RECON;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SCHEDULE1A_RECONCILE
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_SCHEDULE1A_SUMMARY_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_SCHEDULE1A_RECONCILE(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_SCHEDULE1A_RECONCILE(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_SCHEDULE1A_RECONCILE;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_ENERGY_CH_RECONCIL
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_ENERGY_CHARGES_RECONCIL(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            p_STATUS,
+                                            p_MESSAGE);
+     IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_ENERGY_CH_RECONCIL(p_STATUS);
+    END IF;
+
+END IMPORT_ENERGY_CH_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_CONG_LOSS_LOAD_RECONCIL
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_CONG_LOSS_LOAD_RECONCIL(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_CONG_LOSS_LOAD_RECONCIL(p_STATUS);
+    END IF;
+
+END IMPORT_CONG_LOSS_LOAD_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REGULATION_CH_RECONCIL
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_RECON_CHRGS_MSRS_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_REG_CHARGES_RECONCIL(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_REGULATION_CH_RECONCIL(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_REGULATION_CH_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNC_CONDENSE_RECONCIL
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_RECON_CHRGS_MSRS_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_SYNC_CONDENSE_RECONCIL(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_SYNC_CONDENSE_RECONCIL(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_SYNC_CONDENSE_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_REACT_SERVICES_RECONCIL
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_RECON_CHRGS_MSRS_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_REACT_SERVICES_RECONCIL(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_REACT_SERVICES_RECONCIL(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_REACT_SERVICES_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_SYNC_RES_CH_RECONCIL
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_RECON_CHRGS_MSRS_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_SYNC_RES_CH_RECONCIL(TRUNC(p_MONTH,'MM'),
+                                            LAST_DAY(p_MONTH),
+                                            p_LOGGER,
+                                            p_CRED,
+                                            p_LOG_ONLY,
+                                            v_RECORDS,
+                                            p_STATUS,
+                                            p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_SYNC_RES_CH_RECONCIL(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_SYNC_RES_CH_RECONCIL;
+----------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_TRANS_LOSS_CR_RECONCIL
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_RECON_CHRGS_MSRS_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_TRANS_LOSS_CR_RECONCIL(TRUNC(p_MONTH,'MM'),
+                                        LAST_DAY(p_MONTH),
+                                        p_LOGGER,
+                                        p_CRED,
+                                        p_LOG_ONLY,
+                                        v_RECORDS,
+                                        p_STATUS,
+                                        p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_TRANS_LOSS_CR_RECONCIL(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_TRANS_LOSS_CR_RECONCIL;
+---------------------------------------------------------------------------------------------
+--fix? not looping thru credentials
+PROCEDURE IMPORT_TRANS_LOSS_CHARGES
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_TRANS_LOSS_CHARGE(TRUNC(p_MONTH,'MM'),
+                                        LAST_DAY(p_MONTH),
+                                        p_LOGGER,
+                                        p_CRED,
+                                        p_LOG_ONLY,
+                                        p_STATUS,
+                                        p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_TRANS_LOSS_CHARGES(p_STATUS);
+    END IF;
+
+END IMPORT_TRANS_LOSS_CHARGES;
+----------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_LOC_RELIABILITY_SUMM
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_RECONCIL_CHARGES_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_LOC_RELIABILITY_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                        LAST_DAY(p_MONTH),
+                                        p_LOGGER,
+                                        p_CRED,
+                                        p_LOG_ONLY,
+                                        v_RECORDS,
+                                        p_STATUS,
+                                        p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_LOC_RELIABILITY_SUMM(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_LOC_RELIABILITY_SUMM;
+----------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_CAP_TRANSFER_CREDITS
+	(
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+	) AS
+v_RECORDS MEX_PJM_CAP_TRANSFER_RIGHT_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_CAP_TRANSFER_CREDITS(TRUNC(p_MONTH,'MM'),
+                                        LAST_DAY(p_MONTH),
+                                        p_LOGGER,
+                                        p_CRED,
+                                        p_LOG_ONLY,
+                                        v_RECORDS,
+                                        p_STATUS,
+                                        p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_CAP_TRANSFER_CREDITS(v_RECORDS, p_STATUS);
+    END IF;
+END IMPORT_CAP_TRANSFER_CREDITS;
+----------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_RPM_AUCTION_SUMMARY
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+v_RECORDS MEX_PJM_RPM_AUCTION_TBL;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    MEX_PJM_SETTLEMENT_MSRS.FETCH_RPM_AUCTION_SUMMARY(TRUNC(p_MONTH,'MM'),
+                                        LAST_DAY(p_MONTH),
+                                        p_LOGGER,
+                                        p_CRED,
+                                        p_LOG_ONLY,
+                                        v_RECORDS,
+                                        p_STATUS,
+                                        p_MESSAGE);
+    IF p_STATUS = MEX_UTIL.g_SUCCESS THEN
+        IMPORT_RPM_AUCTION_SUMMARY(v_RECORDS, p_STATUS);
+    END IF;
+
+END IMPORT_RPM_AUCTION_SUMMARY;
+----------------------------------------------------------------------------------
+PROCEDURE IMPORT_CONGESTION_AND_LOSS_RPT
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    IMPORT_HR_TRANS_CONG_CREDITS(p_CRED,
+                                p_MONTH,
+                                p_LOG_ONLY,
+                                p_STATUS,
+                                p_MESSAGE,
+                                p_LOGGER);
+    IMPORT_CONGESTION_SUMMARY(p_CRED,
+                                p_MONTH,
+                                p_LOG_ONLY,
+                                p_STATUS,
+                                p_MESSAGE,
+                                p_LOGGER);
+    IMPORT_TRANS_LOSS_CHARGES(p_CRED,
+                                p_MONTH,
+                                p_LOG_ONLY,
+                                p_STATUS,
+                                p_MESSAGE,
+                                p_LOGGER);
+
+END IMPORT_CONGESTION_AND_LOSS_RPT;
+----------------------------------------------------------------------------------------------------
+/*PROCEDURE IMPORT_CONGESTION_AND_LOSS_RPT
+(
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE   IN DATE,
+    p_STATUS     OUT NUMBER,
+    p_MESSAGE    OUT VARCHAR2
+) AS
+v_EXT_CREDS EXTERNAL_CREDENTIAL_TBL;
+v_DATE DATE;
+BEGIN
+    v_EXT_CREDS := MM_PJM_UTIL.GET_CREDENTIALS(TRUE);
+    v_DATE := TRUNC(p_BEGIN_DATE, 'MM');
+    FOR I IN 1 .. v_EXT_CREDS.COUNT LOOP
+        WHILE v_DATE <= LAST_DAY(p_BEGIN_DATE) LOOP
+            --the congestion reports need to be called in a proper order
+            --Implicit Loss and Charge Details can only be requested for one day
+            --at a time, so all these reports need to be downloaded per day
+            IMPORT_IMPLICIT_CONG_LOSS_CH(v_DATE,
+                                            v_DATE,
+                                            v_EXT_CREDS(I).USER_ID,
+                                            v_EXT_CREDS(I).PROXY_USER_ID,
+                                            v_EXT_CREDS(I).PROXY_PASSWORD,
+                                            v_EXT_CREDS(I).ISO_USER_ID,
+                                            v_EXT_CREDS(I).ISO_PASSWORD,
+                                            v_EXT_CREDS(I).URL,
+                                            p_STATUS,
+                                            p_MESSAGE);
+            IMPORT_HR_TRANS_CONG_CREDITS(v_DATE,
+                                            v_DATE,
+                                            v_EXT_CREDS(I).USER_ID,
+                                            v_EXT_CREDS(I).PROXY_USER_ID,
+                                            v_EXT_CREDS(I).PROXY_PASSWORD,
+                                            v_EXT_CREDS(I).ISO_USER_ID,
+                                            v_EXT_CREDS(I).ISO_PASSWORD,
+                                            v_EXT_CREDS(I).URL,
+                                            p_STATUS,
+                                            p_MESSAGE);
+            IMPORT_CONGESTION_SUMMARY(v_DATE,
+                                            v_DATE,
+                                            v_EXT_CREDS(I).USER_ID,
+                                            v_EXT_CREDS(I).PROXY_USER_ID,
+                                            v_EXT_CREDS(I).PROXY_PASSWORD,
+                                            v_EXT_CREDS(I).ISO_USER_ID,
+                                            v_EXT_CREDS(I).ISO_PASSWORD,
+                                            v_EXT_CREDS(I).URL,
+                                            p_STATUS,
+                                            p_MESSAGE);
+            IMPORT_TRANS_LOSS_CHARGES(v_DATE,
+                                            v_DATE,
+                                            v_EXT_CREDS(I).USER_ID,
+                                            v_EXT_CREDS(I).PROXY_USER_ID,
+                                            v_EXT_CREDS(I).PROXY_PASSWORD,
+                                            v_EXT_CREDS(I).ISO_USER_ID,
+                                            v_EXT_CREDS(I).ISO_PASSWORD,
+                                            v_EXT_CREDS(I).URL,
+                                            p_STATUS,
+                                            p_MESSAGE);
+            v_DATE := v_DATE + 1;
+        END LOOP;
+     END LOOP;
+
+END IMPORT_CONGESTION_AND_LOSS_RPT;*/
+----------------------------------------------------------------------------------------------------
+--fix?
+PROCEDURE IMPORT_SYNC_RESERVE_REPORTS
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    IMPORT_SYNC_RES_T1_CHG_SUMMARY(p_CRED,
+                            p_MONTH,
+                            p_LOG_ONLY,
+                            p_STATUS,
+                            p_MESSAGE,
+                            p_LOGGER);
+    IMPORT_SYNC_RES_T2_CHG_SUMMARY(p_CRED,
+                            p_MONTH,
+                            p_LOG_ONLY,
+                            p_STATUS,
+                            p_MESSAGE,
+                            p_LOGGER);
+    IMPORT_SYNC_RES_OBL(p_CRED,
+                        p_MONTH,
+                        p_LOG_ONLY,
+                        p_STATUS,
+                        p_MESSAGE,
+                        p_LOGGER);
+
+END IMPORT_SYNC_RESERVE_REPORTS;
+---------------------------------------------------------------------------------------------
+--fix?
+PROCEDURE IMPORT_OP_RESERVE_REPORTS
+    (
+    p_CRED IN MEX_CREDENTIALS,
+    p_MONTH IN DATE,
+    p_LOG_ONLY IN BINARY_INTEGER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR2,
+    p_LOGGER IN OUT MM_LOGGER_ADAPTER
+    ) AS
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    IMPORT_OP_RES_CHG_SUMMARY(p_CRED,
+                                p_MONTH,
+                                p_LOG_ONLY,
+                                p_STATUS,
+                                p_MESSAGE,
+                                p_LOGGER);
+
+	IMPORT_REG_OPER_RES_CHG_SUMM(p_CRED,
+                                p_MONTH,
+                                p_LOG_ONLY,
+                                p_STATUS,
+                                p_MESSAGE,
+                                p_LOGGER);                                             
+
+    IF MM_PJM_UTIL.HAS_ESUITE_ACCESS(g_EMKT_GEN_ATTR, p_CRED.EXTERNAL_ACCOUNT_NAME) THEN
+        IMPORT_OP_RES_GEN_CR_DETAILS(p_CRED,
+                                    p_MONTH,
+                                    p_LOG_ONLY,
+                                    p_STATUS,
+                                    p_MESSAGE,
+                                    p_LOGGER);
+        IMPORT_GEN_CREDIT_SUMMARY(p_CRED,
+                                    p_MONTH,
+                                    p_LOG_ONLY,
+                                    p_STATUS,
+                                    p_MESSAGE,
+                                    p_LOGGER);
+        IMPORT_OP_RES_LOST_OPP_COST(p_CRED,
+                                    p_MONTH,
+                                    p_LOG_ONLY,
+                                    p_STATUS,
+                                    p_MESSAGE,
+                                    p_LOGGER);
+    END IF;
+
+	IMPORT_SYNCH_CONDENS_SUMMARY(p_CRED,
+                                    p_MONTH,
+                                    p_LOG_ONLY,
+                                    p_STATUS,
+                                    p_MESSAGE,
+                                    p_LOGGER);
+
+    IF MM_PJM_UTIL.HAS_ESUITE_ACCESS(g_EMKT_GEN_ATTR, p_CRED.EXTERNAL_ACCOUNT_NAME) THEN
+        IMPORT_GEN_CREDIT_PORTFOLIO(p_CRED,
+                                    p_MONTH,
+                                    p_LOG_ONLY,
+                                    p_STATUS,
+                                    p_MESSAGE,
+                                    p_LOGGER);
+    END IF;
+
+END IMPORT_OP_RESERVE_REPORTS;
+------------------------------------------------------------------------------------------------------
+-- This routine is meant to be a one stop shop to import the entire billing statement and its details
+------------------------------------------------------------------------------------------------------
+PROCEDURE IMPORT_ENTIRE_STATEMENT
+	(
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_LOG_ONLY IN NUMBER,
+	p_LOG_TYPE IN NUMBER,
+	p_TRACE_ON IN NUMBER,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR2,
+	p_EXCHANGE_TYPE IN VARCHAR2 := g_ET_IMP_SETTLEMENT_STMT
+	) AS
+
+v_CREDS	MM_CREDENTIALS_SET;
+v_CRED	MEX_CREDENTIALS;
+v_LOGGER MM_LOGGER_ADAPTER;
+
+v_MONTHLY_BILLING_STATEMENT BOOLEAN := TRUE;
+v_MONTH_TO_DATE_BILL BOOLEAN := FALSE;
+v_SPOT_MKT_ENERGY_SUMMARY BOOLEAN := TRUE;
+v_CONGESTION_AND_LOSS BOOLEAN := TRUE;
+v_SCHEDULE_9_AND_10_SUMMARY BOOLEAN := TRUE;
+v_NET_TRANS_SERV_CHG_SUMMARY BOOLEAN := TRUE;
+v_NET_TRANS_SERV_CR_SUMMARY BOOLEAN := TRUE;
+v_NET_TRANS_SERV_OFFSET_SUMM BOOLEAN := TRUE;
+v_EXP_COST_RECOVERY_CHARGES BOOLEAN := TRUE;
+v_REACTIVE_SERVICES_SUMMARY BOOLEAN := TRUE;
+v_OPER_RESERVES_REPORTS BOOLEAN := TRUE;
+v_REGULATION_SUMMARY BOOLEAN := TRUE;
+v_REGULATION_CREDITS BOOLEAN := TRUE;
+v_FTR_TARGET_ALLOCATIONS BOOLEAN := TRUE;
+v_FTR_AUCTION BOOLEAN := TRUE;
+v_BLACK_START_SUMMARY BOOLEAN := TRUE;
+v_ARR_SUMMARY BOOLEAN := TRUE;
+v_REACTIVE_SUMMARY BOOLEAN := TRUE;
+v_SYNC_RESERVE_REPORTS BOOLEAN := TRUE;
+v_EXP_CONGESTION_CHARGES BOOLEAN := TRUE;
+v_FIRM_TRANS_SERVICE_CHAR BOOLEAN := TRUE;
+v_NON_FIRM_TRANS_SER_CHAR BOOLEAN := TRUE;
+v_TOSSCD_CHARGES BOOLEAN := TRUE;
+v_ENERGY_CHAR_RECON BOOLEAN := TRUE;
+v_REGULATION_RECON BOOLEAN := TRUE;
+v_SYNC_RESERVE_RECON BOOLEAN := TRUE;
+v_EXPLICIT_LOSS_SUMMARY BOOLEAN := TRUE;
+v_TRANS_LOSS_CREDIT_SUMMARY BOOLEAN := TRUE;
+v_INADVERT_INTER_SUMMARY BOOLEAN := TRUE;
+v_DAY_AHEAD_DAILY_TRANS BOOLEAN := TRUE;
+v_REAL_TIME_DLY_TRANS BOOLEAN := TRUE;
+v_RPM_AUCTION_SUMMARY BOOLEAN := TRUE;
+v_LOC_RELIABILITY_SUMMARY BOOLEAN := TRUE;
+v_RAMAPO_PAR_SUMMARY BOOLEAN := TRUE;
+v_RTO_STARTUP_COST BOOLEAN := TRUE;
+v_SCHEDULE_1A_RECON BOOLEAN := TRUE;
+v_TRANS_LOSSES_CRED_RECON BOOLEAN := TRUE;
+v_CONG_LOSS_RECON BOOLEAN := TRUE;
+v_SCHED9_10_RECON BOOLEAN := TRUE;
+v_REACT_SERV_RECON BOOLEAN := TRUE;
+BEGIN
+	p_STATUS := 0;
+
+	IF p_EXCHANGE_TYPE = g_ET_IMP_SETTLEMENT_STMT THEN
+		-- download the monthly lmp's, real-time and day-ahead
+		MM_PJM_LMP.MARKET_EXCHANGE(TRUNC(p_BEGIN_DATE, 'MM'), TRUNC(p_END_DATE, 'MM'), MM_PJM_LMP.g_ET_REAL_TIME_LMP_MONTH,
+			p_LOG_TYPE, p_TRACE_ON,p_STATUS,p_MESSAGE);
+		MM_PJM_LMP.MARKET_EXCHANGE(TRUNC(p_BEGIN_DATE, 'MM'), TRUNC(p_END_DATE, 'MM'), MM_PJM_LMP.g_ET_DAY_AHEAD_LMP_MONTH,
+			p_LOG_TYPE, p_TRACE_ON,p_STATUS,p_MESSAGE);
+
+		--get reconciliation data
+		MM_PJM_ESCHED.MARKET_EXCHANGE(p_BEGIN_DATE,
+										   p_END_DATE,
+										   MM_PJM_ESCHED.g_ET_QUERY_RECON_DATA,
+										   NULL, --Entity List
+										   NULL, -- Entity List Delimitor
+										   p_LOG_ONLY,
+										   p_LOG_TYPE,
+										   p_TRACE_ON,
+										   p_STATUS,
+										   p_MESSAGE);
+	ELSE
+		v_MONTHLY_BILLING_STATEMENT 		:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_MONTHLY_BILLING_STATEMENT;
+        v_MONTH_TO_DATE_BILL                := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_MONTH_TO_DATE_BILL;
+		v_SPOT_MKT_ENERGY_SUMMARY 			:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_SPOT_MKT_ENERGY_SUMMARY;
+        v_CONGESTION_AND_LOSS               := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_CONGESTION_SUMMARY;
+		v_SCHEDULE_9_AND_10_SUMMARY 		:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_SCHEDULE_9_AND_10_SUMMARY;
+		v_NET_TRANS_SERV_CHG_SUMMARY 	    := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_NET_TRANS_SERV_CHG_SUMM;
+        v_NET_TRANS_SERV_CR_SUMMARY 	    := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_NET_TRANS_SERV_CRED_SUMM;
+        v_NET_TRANS_SERV_OFFSET_SUMM 	    := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_NET_TRANS_OFFSET_CHG_SUMM;
+		v_EXP_COST_RECOVERY_CHARGES 		:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_EXP_COST_RECOVERY_CHARGES;
+		v_REACTIVE_SERVICES_SUMMARY 		:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_REACTIVE_SERVICES_SUMMARY;
+		v_OPER_RESERVES_REPORTS 			:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_OPER_RESERVES_SUMMARY;
+		v_REGULATION_SUMMARY 				:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_REGULATION_SUMMARY;
+        v_REGULATION_CREDITS 				:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_REGULATION_CRED_SUMMARY;
+		v_FTR_TARGET_ALLOCATIONS 			:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_FTR_TARGET_CREDITS;
+		v_FTR_AUCTION 						:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_FTR_AUCTION_SUMMARY;
+		v_BLACK_START_SUMMARY 				:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_BLACK_START_SUMMARY;
+		v_ARR_SUMMARY 						:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_ARR_TARGET_CREDITS;
+		v_REACTIVE_SUMMARY 					:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_REACTIVE_CHARGE_SUMMARY;
+        v_SYNC_RESERVE_REPORTS              := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_SYNC_RESERVE_OBLIG_DETAIL;
+
+		v_EXP_CONGESTION_CHARGES 			:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_EXPLICIT_CONGESTION_SUMM;
+		v_FIRM_TRANS_SERVICE_CHAR 			:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_FIRM_TRANSMISSION_SERVICE;
+		v_NON_FIRM_TRANS_SER_CHAR			:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_NONFIRM_TRANSMISSION_SERV;
+		v_TOSSCD_CHARGES 			    	:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_SCHED_1A_CHARGE_SUMMARY;
+		v_EXPLICIT_LOSS_SUMMARY 			:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_EXPLICIT_LOSS_CHARGES;
+		v_TRANS_LOSS_CREDIT_SUMMARY 		:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_TRANSMISSION_LOSS_CREDITS;
+		v_INADVERT_INTER_SUMMARY 			:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_INADVERTENT_INTERCHANGE;
+        v_RPM_AUCTION_SUMMARY 				:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_RPM_AUCTION_SUMMARY;
+        v_LOC_RELIABILITY_SUMMARY           := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_LOC_RELIABILITY_SUMM;
+        v_RAMAPO_PAR_SUMMARY                := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_RAMAPO_PAR_CHG_SUMMARY;
+        v_RTO_STARTUP_COST                  := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_RTO_COST_RECOVERY_CHARGES;
+
+		v_DAY_AHEAD_DAILY_TRANS				:= p_EXCHANGE_TYPE = MEX_PJM_ESCHED.g_ET_DAY_AHEAD_DAILY_TRAN_MSRS;
+		v_REAL_TIME_DLY_TRANS				:= p_EXCHANGE_TYPE = MEX_PJM_ESCHED.g_ET_REAL_TIME_DLY_TRANS_MSRS;
+
+        v_ENERGY_CHAR_RECON 				:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_ENERGY_INADVERT_LD_RECON;
+        v_SCHEDULE_1A_RECON                 := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_SCHED_1A_LOAD_RECON;
+        v_REGULATION_RECON				    := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_REGULATION_LOAD_RECON;
+		v_SYNC_RESERVE_RECON 				:= p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_SYNCH_RESERVE_LOAD_RECON;
+        v_TRANS_LOSSES_CRED_RECON           := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_TRANS_LOSS_CREDIT_RECON;
+        v_CONG_LOSS_RECON                   := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_CONGES_LOSS_LOAD_RECON;
+        v_SCHED9_10_RECON                   := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_SCHED_9_10_LOAD_RECON;
+        v_REACT_SERV_RECON                  := p_EXCHANGE_TYPE = MEX_PJM_SETTLEMENT_MSRS.g_ET_REACTIVE_SERV_LOAD_RECON;
+
+	END IF;
+
+
+	MM_UTIL.INIT_MEX(p_EXTERNAL_SYSTEM_ID => EC.ES_PJM,
+		p_PROCESS_NAME => 'PJM:SETTLEMENT',
+		p_EXCHANGE_NAME => 'IMPORT_ENTIRE_STATEMENT', -- Replaced by IMPORT procedures
+		p_LOG_TYPE => p_LOG_TYPE,
+		p_TRACE_ON => p_TRACE_ON,
+		p_CREDENTIALS => v_CREDS,
+		p_LOGGER => v_LOGGER);
+
+	MM_UTIL.START_EXCHANGE(FALSE, v_LOGGER);
+
+	WHILE v_CREDS.HAS_NEXT LOOP
+		v_CRED := v_CREDS.GET_NEXT;
+	    IF v_MONTH_TO_DATE_BILL 	    THEN IMPORT_MONTH_TO_DATE_BILL(v_CRED, p_BEGIN_DATE,p_LOG_ONLY, p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_MONTH_TO_DATE_BILL || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+		IF v_MONTHLY_BILLING_STATEMENT 	THEN IMPORT_MONTHLY_STATEMENT(v_CRED, p_BEGIN_DATE,p_LOG_ONLY, p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_MONTHLY_BILLING_STATEMENT || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+		IF v_SPOT_MKT_ENERGY_SUMMARY   	THEN IMPORT_SPOT_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_SPOT_MKT_ENERGY_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+
+        --the import below imports three reports: hourly transmission congestion credits, congestion summary and transmission loss charges
+        IF v_CONGESTION_AND_LOSS 	   	THEN IMPORT_CONGESTION_AND_LOSS_RPT(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_CONGESTION_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+
+        IF v_SCHEDULE_9_AND_10_SUMMARY 	THEN IMPORT_SCHEDULE9_10_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_SCHEDULE_9_AND_10_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+		IF v_NET_TRANS_SERV_CHG_SUMMARY THEN IMPORT_NITS_CHARGE_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_NET_TRANS_SERV_CHG_SUMM || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_NET_TRANS_SERV_CR_SUMMARY THEN IMPORT_NITS_CREDIT_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_NET_TRANS_SERV_CRED_SUMM || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_NET_TRANS_SERV_OFFSET_SUMM THEN IMPORT_NITS_OFFSET_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_NET_TRANS_OFFSET_CHG_SUMM || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+
+        --the import below imports all op reserve reports: op res charge summary, gen credit portfolio, gen credit details, lost opp cost,
+        -- gen credit summary and synchronous condensing summary
+        IF v_OPER_RESERVES_REPORTS 	   	THEN IMPORT_OP_RESERVE_REPORTS(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_OPER_RESERVES_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+
+		IF v_FTR_TARGET_ALLOCATIONS THEN IMPORT_FTR_TARGET_CREDITS(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_FTR_TARGET_CREDITS || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_EXPLICIT_LOSS_SUMMARY 		THEN IMPORT_EXPLICIT_LOSSES(v_CRED, p_BEGIN_DATE, p_LOG_ONLY,p_STATUS, p_MESSAGE,v_LOGGER); END IF;
+            IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_EXPLICIT_LOSS_CHARGES || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_INADVERT_INTER_SUMMARY 	THEN IMPORT_INADVERTENT_INTERCHANGE(v_CRED, p_BEGIN_DATE,p_LOG_ONLY, p_STATUS, p_MESSAGE,v_LOGGER); END IF;
+            IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_INADVERTENT_INTERCHANGE || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_TRANS_LOSS_CREDIT_SUMMARY 	THEN IMPORT_TRANS_LOSS_CREDITS(v_CRED, p_BEGIN_DATE, p_LOG_ONLY,p_STATUS, p_MESSAGE,v_LOGGER); END IF;
+            IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_TRANSMISSION_LOSS_CREDITS || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+		IF v_FTR_AUCTION 				THEN IMPORT_FTR_AUCTION(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_FTR_AUCTION_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+
+		IF v_DAY_AHEAD_DAILY_TRANS 		THEN IMPORT_DA_DAILY_TX(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_ESCHED.g_ET_DAY_AHEAD_DAILY_TRAN_MSRS || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+		IF v_REAL_TIME_DLY_TRANS 		THEN IMPORT_RT_DAILY_TX(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_ESCHED.g_ET_REAL_TIME_DLY_TRANS_MSRS || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+
+		IF v_EXP_CONGESTION_CHARGES 	THEN IMPORT_EXPLICIT_CONGESTION(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_EXPLICIT_CONGESTION_SUMM || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+		IF v_FIRM_TRANS_SERVICE_CHAR 	THEN IMPORT_FIRM_TRANS_SERV_CHARGES(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_FIRM_TRANSMISSION_SERVICE  || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+		IF v_BLACK_START_SUMMARY 		THEN IMPORT_BLACK_START_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_BLACK_START_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+		IF v_ARR_SUMMARY 				THEN IMPORT_ARR_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_ARR_TARGET_CREDITS || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+
+        --the import below imports three reports: sync reserve tier1 charges, sync reserve tier2 charges and sync reserve obligation
+        IF v_SYNC_RESERVE_REPORTS 	   	THEN IMPORT_SYNC_RESERVE_REPORTS(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_SYNC_RESERVE_OBLIG_DETAIL|| ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+
+		IF v_REACTIVE_SERVICES_SUMMARY 	THEN IMPORT_REACTIVE_SERV_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_REACTIVE_SERVICES_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+		IF v_REGULATION_SUMMARY 		THEN IMPORT_REGULATION_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_REGULATION_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+		IF v_REGULATION_CREDITS 		THEN IMPORT_REGULATION_CREDITS(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_REGULATION_CRED_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_NON_FIRM_TRANS_SER_CHAR 	THEN IMPORT_NON_FM_TRANS_SV_CHARGES(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_NONFIRM_TRANSMISSION_SERV || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_REACTIVE_SUMMARY           THEN IMPORT_REACTIVE_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_REACTIVE_CHARGE_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+		IF v_EXP_COST_RECOVERY_CHARGES 	THEN IMPORT_EXPANSION_COST_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_EXP_COST_RECOVERY_CHARGES || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+		IF v_TOSSCD_CHARGES             THEN IMPORT_TOSSCD_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_SCHED_1A_CHARGE_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+
+        IF v_SCHEDULE_1A_RECON 		    THEN IMPORT_SCHEDULE1A_RECONCILE(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_SCHED_1A_LOAD_RECON || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_ENERGY_CHAR_RECON 	THEN IMPORT_ENERGY_CH_RECONCIL(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_ENERGY_INADVERT_LD_RECON || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_REGULATION_RECON 		    THEN IMPORT_REGULATION_CH_RECONCIL(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_REGULATION_LOAD_RECON || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_SYNC_RESERVE_RECON 		THEN IMPORT_SYNC_RES_CH_RECONCIL(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_SYNCH_RESERVE_LOAD_RECON || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_TRANS_LOSSES_CRED_RECON    THEN IMPORT_TRANS_LOSS_CR_RECONCIL(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_TRANS_LOSS_CREDIT_RECON || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_RPM_AUCTION_SUMMARY 		THEN IMPORT_RPM_AUCTION_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_RPM_AUCTION_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_LOC_RELIABILITY_SUMMARY    THEN IMPORT_LOC_RELIABILITY_SUMM(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_LOC_RELIABILITY_SUMM || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_RAMAPO_PAR_SUMMARY         THEN IMPORT_RAMAPO_PAR_SUMMARY(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_RAMAPO_PAR_CHG_SUMMARY || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_RTO_STARTUP_COST           THEN IMPORT_RTO_STARTUP_COST_SUMM(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_RTO_COST_RECOVERY_CHARGES || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_CONG_LOSS_RECON            THEN IMPORT_CONG_LOSS_LOAD_RECONCIL(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_CONGES_LOSS_LOAD_RECON || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_SCHED9_10_RECON            THEN IMPORT_SCHED_9_10_RECON(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_SCHED_9_10_LOAD_RECON || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+        IF v_REACT_SERV_RECON           THEN IMPORT_REACT_SERVICES_RECONCIL(v_CRED, p_BEGIN_DATE,p_LOG_ONLY,p_STATUS,p_MESSAGE,v_LOGGER); END IF;
+			IF(p_STATUS <> MEX_UTIL.g_SUCCESS) THEN v_LOGGER.LOG_ERROR(MEX_PJM_SETTLEMENT_MSRS.g_ET_REACTIVE_SERV_LOAD_RECON || ': ' || p_MESSAGE); p_STATUS := 0; p_MESSAGE := NULL; END IF;
+
+	END LOOP;
+
+	IF p_MESSAGE IS NOT NULL THEN
+		v_LOGGER.LOG_ERROR(p_MESSAGE);
+	END IF;
+	MM_UTIL.STOP_EXCHANGE(v_LOGGER, p_STATUS, p_MESSAGE, p_MESSAGE);
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_MESSAGE := UT.GET_FULL_ERRM;
+		p_STATUS  := SQLCODE;
+		MM_UTIL.STOP_EXCHANGE(v_LOGGER, p_STATUS, p_MESSAGE, p_MESSAGE);
+END IMPORT_ENTIRE_STATEMENT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE MARKET_EXCHANGE
+	(
+	p_BEGIN_DATE            	IN DATE,
+	p_END_DATE              	IN DATE,
+	p_EXCHANGE_TYPE  			IN VARCHAR2,
+	p_ENTITY_LIST           	IN VARCHAR2,
+	p_ENTITY_LIST_DELIMITER 	IN CHAR,
+	p_LOG_ONLY					IN NUMBER :=0,
+	p_LOG_TYPE 					IN NUMBER,
+	p_TRACE_ON 					IN NUMBER,
+	p_STATUS                	OUT NUMBER,
+	p_MESSAGE               	OUT VARCHAR2) AS
+
+BEGIN
+	IMPORT_ENTIRE_STATEMENT(p_BEGIN_DATE, p_END_DATE, NVL(p_LOG_ONLY, 0), p_LOG_TYPE, p_TRACE_ON, p_STATUS, p_MESSAGE, p_EXCHANGE_TYPE);
+END MARKET_EXCHANGE;
+----------------------------------------------------------------------------------------------------
+BEGIN
+	ID.ID_FOR_ENTITY_ATTRIBUTE('PJM: eMKT Gen', 'INTERCHANGE_CONTRACT', 'String', TRUE, g_EMKT_GEN_ATTR);
+END MM_PJM_SETTLEMENT_MSRS;
+/
