@@ -1,0 +1,24 @@
+CREATE OR REPLACE PROCEDURE GET_ACCOUNT_DISPLAY_NAME
+	(
+	p_ACCOUNT_ID IN NUMBER,
+	p_DISPLAY_NAME OUT VARCHAR
+	) AS
+--Revision: $Revision: 1.16 $
+
+-- Answer the name used to identify a Account.  Installation may override base behavior.
+
+BEGIN
+
+	SELECT ACCOUNT_NAME
+	INTO p_DISPLAY_NAME
+	FROM ACCOUNT
+	WHERE ACCOUNT_ID = p_ACCOUNT_ID;
+
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		p_DISPLAY_NAME := 'No Display Name Found';
+	WHEN OTHERS THEN
+		RAISE;
+
+END GET_ACCOUNT_DISPLAY_NAME;
+/

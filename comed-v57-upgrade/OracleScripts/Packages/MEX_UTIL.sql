@@ -1,0 +1,79 @@
+CREATE OR REPLACE PACKAGE MEX_UTIL IS
+
+-- Generic Market Exchange Utilities for use by both MarketManager and Monaco.
+-- Most of the generic MM_UTIL procedures should be moved to this package.
+-- These procedures can be called by both Monaco and MarketManager procedures,
+-- therefore this package should not reference any tables or procedures
+-- specific to MarketManager, RetailOffice, or Monaco.
+-- The tables referenced by this package should become part of
+-- a more generic multi-product Market Exchange setup.
+
+TYPE PARAMETER_MAP IS TABLE OF VARCHAR2(4000) INDEX BY VARCHAR2(256);
+
+v_HTTP_VER CONSTANT VARCHAR2(3) := '1.1';
+
+g_RVW_STATUS_ACCEPTED CONSTANT VARCHAR2(16):= 'Accepted';
+g_SUBMIT_STATUS_PENDING CONSTANT VARCHAR2(16):= 'Pending';
+g_SUBMIT_STATUS_SUBMITTED CONSTANT VARCHAR2(16):= 'Submitted';
+g_SUBMIT_STATUS_FAILED CONSTANT VARCHAR2(16):= 'Rejected';
+g_MKT_STATUS_PENDING CONSTANT VARCHAR2(16):= 'Pending';
+g_MKT_STATUS_ACCEPTED CONSTANT VARCHAR2(16):= 'Accepted';
+g_MKT_STATUS_REJECTED CONSTANT VARCHAR2(16):= 'Rejected';
+
+g_LOW_DATE CONSTANT DATE := TO_DATE('01-JAN-1900','DD-MON-YYYY');
+g_HIGH_DATE CONSTANT DATE := TO_DATE('31-DEC-9999', 'DD-MON-YYYY');
+
+g_SUCCESS CONSTANT NUMBER(1) := 0;
+g_FAILURE CONSTANT NUMBER(2) := -2;
+---------------------------------------------------------------------------------------------------
+
+TYPE REF_CURSOR IS REF CURSOR;
+
+FUNCTION WHAT_VERSION RETURN VARCHAR;
+
+PROCEDURE DUMP_CLOB_TO_CHUNKS
+	(
+    p_CLOB IN CLOB,
+	p_CHUNKS OUT CLOB_CHUNK_TABLE
+    );
+
+FUNCTION GET_MARKET_MESSAGE_ID
+    (
+    p_REALM IN VARCHAR2,
+    p_EFFECTIVE_DATE IN DATE,
+    p_TERMINATION_DATE IN DATE,
+    p_PRIORITY IN NUMBER,
+    p_TEXT     IN VARCHAR2
+    ) RETURN NUMBER;
+
+PROCEDURE INSERT_MARKET_MESSAGE(
+	p_MARKET_OPERATOR IN VARCHAR2,
+	p_MESSAGE_DATE IN DATE,
+	p_REALM IN VARCHAR2,
+	p_EFFECTIVE_DATE IN DATE,
+	p_TERMINATION_DATE IN DATE,
+	p_PRIORITY IN NUMBER,
+	p_MESSAGE_SOURCE IN VARCHAR2,
+	p_MESSAGE_DESTINATION IN VARCHAR2,
+	p_TEXT IN VARCHAR2
+	);
+
+PROCEDURE GET_MARKET_MESSAGES
+	(
+	p_MARKET_OPERATOR IN VARCHAR2,
+	p_SHOW_TERMINATED IN NUMBER,
+	p_CURSOR IN OUT REF_CURSOR
+	);
+
+PROCEDURE SEND_MESSAGE
+	(
+	p_MARKET IN VARCHAR2,
+	p_ACTION IN VARCHAR2,
+	p_EXTERNAL_SYSTEM_ID IN NUMBER,
+	p_EXTERNAL_ACCOUNT_NAME IN VARCHAR2 := NULL,
+	p_REQUEST_CLOB IN CLOB
+	);
+
+
+END MEX_UTIL;
+/

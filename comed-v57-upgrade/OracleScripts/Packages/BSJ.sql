@@ -1,0 +1,1036 @@
+CREATE OR REPLACE PACKAGE BSJ AS
+--Revision $Revision: 1.17 $
+
+-- Billing Statement Package
+
+FUNCTION WHAT_VERSION RETURN VARCHAR;
+
+PROCEDURE BILLING_SUMMARY
+	(
+    p_CALLING_MODULE IN VARCHAR,
+    p_MODEL_ID IN NUMBER,
+    p_STATEMENT_DATE IN DATE,
+    p_STATEMENT_END_DATE IN DATE,
+    p_INTERVAL IN VARCHAR,
+    p_SHOW_INTERVAL IN NUMBER,
+	p_ENTITY_ID IN VARCHAR,
+    p_SHOW_ENTITY_DETAIL IN NUMBER,
+    p_PRODUCTS_COMPONENTS IN VARCHAR,
+    p_PRODUCT_ID IN VARCHAR,
+    p_COMPONENT_ID IN VARCHAR,
+    p_SHOW_PRODUCT_ID IN NUMBER,
+    p_SHOW_COMPONENT_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+    p_SHOW_BILL_AMOUNT IN NUMBER,
+    p_SHOW_CHARGE_AMOUNT IN NUMBER,
+	p_TIME_ZONE IN VARCHAR,
+	p_AS_OF_DATE IN DATE,
+    p_BILLING_PERIOD OUT VARCHAR,
+    p_LAST_UPDATE OUT VARCHAR,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+    );
+
+PROCEDURE BILLING_COMPARISON
+	(
+    p_CALLING_MODULE IN VARCHAR,
+    p_MODEL_ID IN NUMBER,
+	p_STATEMENT_DATE IN DATE,
+	p_STATEMENT_END_DATE IN DATE,
+    p_INTERVAL IN VARCHAR,
+    p_SHOW_INTERVAL IN NUMBER,
+	p_ENTITY_ID IN VARCHAR,
+    p_SHOW_ENTITY_DETAIL IN NUMBER,
+    p_PRODUCTS_COMPONENTS IN VARCHAR DEFAULT NULL,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT_ID IN NUMBER,
+    p_SHOW_PRODUCT_ID IN NUMBER,
+    p_SHOW_COMPONENT_ID IN NUMBER,
+	p_STATEMENT_TYPE1 IN NUMBER,
+	p_STATEMENT_STATE1 IN NUMBER,
+	p_STATEMENT_TYPE2 IN NUMBER,
+	p_STATEMENT_STATE2 IN NUMBER,
+    p_SHOW_BILL_AMOUNT IN NUMBER,
+    p_SHOW_CHARGE_AMOUNT IN NUMBER,
+	p_TIME_ZONE IN VARCHAR,
+	p_AS_OF_DATE IN DATE,
+    p_PERIOD_DATE_STRING OUT VARCHAR,
+    p_LAST_UPDATE OUT VARCHAR,
+	p_MESSAGE OUT VARCHAR,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+    );
+
+PROCEDURE GET_CHARGE_DETAILS
+	(
+	p_CALLING_MODULE IN VARCHAR2,
+	p_MODEL_ID IN NUMBER,
+	p_STATEMENT_DATE IN DATE,
+	p_STATEMENT_END_DATE IN DATE,
+	p_ENTITY_ID IN NUMBER,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+	p_TIME_ZONE IN VARCHAR2,
+	p_AS_OF_DATE IN DATE,
+    p_SHOW_BILL_AMOUNT IN NUMBER,
+    p_SHOW_CHARGE_AMOUNT IN NUMBER,
+	p_CHARGE_VIEW_TYPE IN VARCHAR2,
+	p_ENTITY_NAME OUT VARCHAR2,
+	p_PRODUCT_NAME OUT VARCHAR2,
+	p_COMPONENT_NAME OUT VARCHAR2,
+	p_STATEMENT_TYPE_NAME OUT VARCHAR2,
+	p_STATEMENT_DATE_RANGE OUT VARCHAR2,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE SCHEDULE_BY_TRANSMISSION
+    (
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_TRANSACTION_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT_ID IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR,
+	p_AS_OF_DATE IN DATE,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE DAILY_IMBALANCE_SUMMARY
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_ENTITY_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_TIME_ZONE IN VARCHAR,
+	p_AS_OF_DATE IN DATE,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE GET_DISPUTE_STATUS_MASTER
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT_ID IN NUMBER,
+	p_STATUS_FILTER IN VARCHAR,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE GET_DISPUTE_STATUS_DETAIL
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT_ID IN NUMBER,
+	p_STATUS_FILTER IN VARCHAR,
+	p_STATEMENT_TYPE IN NUMBER,
+    p_STATEMENT_DATE IN DATE,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE DAILY_IMBALANCE
+    (
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_ENTITY_ID IN NUMBER,
+	p_SERVICE_POINT_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_TIME_ZONE IN VARCHAR,
+	p_AS_OF_DATE IN DATE,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE GET_INVOICE_REPORT_RECORDS
+	(
+    p_CALLING_MODULE IN VARCHAR,
+    p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+	p_INVOICE_DATE IN VARCHAR,
+	p_AS_OF_DATE IN DATE,
+    p_INVOICE_CATEGORY IN VARCHAR,
+    p_INVOICE_ID OUT NUMBER,
+	p_ENTITY_NAME OUT VARCHAR2,
+	p_INVOICE_TITLE OUT VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+    );
+
+PROCEDURE GET_INVOICE_LINE_ITEMS_REPORT
+    (
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+    p_STATEMENT_STATE IN NUMBER,
+	p_INVOICE_DATE IN VARCHAR,
+    p_AS_OF_DATE IN DATE,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+/*
+PROCEDURE GET_INVOICE_LINE_ITEMS
+    (
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+	p_INVOICE_DATE IN DATE,
+	p_INVOICE_ID IN NUMBER,
+	p_IS_INVOICE_DETAIL OUT NUMBER,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+*/
+
+PROCEDURE GET_INVOICE_LINE_ITEM
+    (
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+    p_STATEMENT_STATE IN NUMBER,
+	p_INVOICE_DATE IN DATE,
+	p_INVOICE_ID IN NUMBER,
+	p_LINE_ITEM_NAME IN VARCHAR,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE GET_INVOICE_LINE_ITEM_TYPES
+    (
+	p_IS_MANUAL_LINE_ITEM IN VARCHAR,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE PUT_INVOICE_LINE_ITEM
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+    p_STATEMENT_STATE IN NUMBER,
+	p_INVOICE_DATE IN DATE,
+    p_INVOICE_DATE_STRING IN VARCHAR,
+	p_INVOICE_ID IN NUMBER,
+	p_OLD_LINE_ITEM_NAME IN VARCHAR,
+	p_LINE_ITEM_NAME IN VARCHAR,
+    p_LINE_ITEM_CATEGORY IN VARCHAR,
+	p_LINE_ITEM_TYPE IN CHAR,
+	p_LINE_ITEM_QUANTITY IN NUMBER,
+	p_LINE_ITEM_RATE IN NUMBER,
+	p_LINE_ITEM_AMOUNT IN NUMBER,
+	p_LINE_ITEM_BILL_AMOUNT IN NUMBER,
+    p_DEFAULT_DISPLAY IN VARCHAR,
+    p_INVOICE_GROUP_ID IN NUMBER,
+    p_INVOICE_GROUP_ORDER IN NUMBER,
+    p_EXCLUDE_FROM_INVOICE_TOTAL IN NUMBER,
+    p_IS_TAXED IN NUMBER,
+    p_TAX_COMPONENT_ID IN NUMBER,
+    p_TAX_GEOGRAPHY_ID IN NUMBER,
+	p_STATUS OUT NUMBER
+	);
+
+PROCEDURE PUT_INVOICE_USER_LINE_ITEM
+	(
+	p_INVOICE_USER_LINE_ITEM IN OUT INVOICE_USER_LINE_ITEM%ROWTYPE
+	);
+
+PROCEDURE DELETE_INVOICE_LINE_ITEM
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+	p_INVOICE_DATE IN DATE,
+	p_INVOICE_DATE_STRING IN VARCHAR,
+	p_INVOICE_ID IN NUMBER,
+	p_LINE_ITEM_NAME IN VARCHAR,
+	p_STATUS OUT NUMBER
+	);
+
+PROCEDURE GET_INVOICE_DATA
+	(
+	p_CALLING_MODULE IN VARCHAR,
+    p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+	p_INVOICE_DATE IN VARCHAR,
+	p_AS_OF_DATE IN DATE,
+    p_INVOICE_CATEGORY IN VARCHAR,
+    p_INVOICE_ID OUT NUMBER,
+    p_INVOICE_STATUS OUT VARCHAR,
+    p_INVOICE_APPROVAL_STATUS OUT VARCHAR,
+    p_INVOICE_DUE_DATE OUT DATE,
+	p_STATUS OUT NUMBER
+    );
+
+PROCEDURE PUT_INVOICE_DATA
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_INVOICE_ID IN NUMBER,
+    p_DUE_DATE IN DATE,
+	p_INVOICE_STATUS IN VARCHAR,
+	p_STATUS OUT NUMBER
+	);
+
+PROCEDURE PUT_INVOICE_STATUS
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_INVOICE_ID IN NUMBER,
+	p_INVOICE_STATUS IN VARCHAR,
+	p_STATUS OUT NUMBER
+	);
+
+PROCEDURE PUT_INVOICE_DUE_DATE
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_INVOICE_ID IN NUMBER,
+	p_DUE_DATE IN DATE,
+	p_STATUS OUT NUMBER
+	);
+
+PROCEDURE EXPORT_BILLING
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_AS_OF_DATE IN DATE,
+	p_STATUS OUT NUMBER
+	);
+
+PROCEDURE EDC_IMBALANCE
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_TIME_ZONE IN VARCHAR,
+	p_AS_OF_DATE IN DATE,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE SERVICE_POINT_FOR_COMPONENT
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_COMPONENT_ID IN NUMBER,
+	p_SERVICE_POINT_ID OUT NUMBER,
+	p_SERVICE_POINT_NAME OUT VARCHAR2,
+	p_STATUS OUT NUMBER
+	);
+
+PROCEDURE BILL_ENTITY_NAMES
+   (
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE BILL_ENTITY_NAMES_INCL_ALL
+   	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE INVOICE_ENTITY_NAMES
+    (
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE BILL_ENTITY_NAMES_TO_CALC
+   (
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_LABEL OUT VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE BILL_ENTITY_NAMES_BY_INTERVAL
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+    p_INTERVAL IN VARCHAR,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE PSE_NAMES
+    (
+	 p_STATUS OUT NUMBER,
+	 p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE BILL_PARTY_NAMES
+    (
+	 p_STATUS OUT NUMBER,
+	 p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE BILL_CYCLE_NAMES
+    	(
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE GET_CHARGE_VIEW_TYPE
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+	p_STATEMENT_DATE IN DATE,
+	p_AS_OF_DATE IN DATE,
+	p_CHARGE_VIEW_TYPE IN VARCHAR,
+	p_NEW_CHARGE_VIEW_TYPE OUT VARCHAR,
+	p_KEY_COLUMNS OUT VARCHAR,
+	p_STATUS OUT NUMBER
+	);
+
+PROCEDURE GET_BILLING_CHARGE_DISPUTES
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+	p_STATEMENT_DATE IN DATE,
+	p_DISPUTE_DATES IN VARCHAR,
+	p_TIME_ZONE IN VARCHAR,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE GET_CHARGE_DISPUTE_DETAILS
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT_ID IN NUMBER,
+	p_STATEMENT_TYPE1 IN NUMBER,
+	p_STATEMENT_STATE1 IN NUMBER,
+	p_STATEMENT_TYPE2 IN NUMBER,
+	p_STATEMENT_STATE2 IN NUMBER,
+	p_STATEMENT_DATE IN DATE,
+	p_STATEMENT_END_DATE IN DATE,
+	p_CHARGE_DATE IN STRING_COLLECTION,
+	p_TIME_ZONE IN VARCHAR,
+	p_AS_OF_DATE IN DATE,
+    p_SHOW_CHARGE_AMOUNT IN NUMBER,
+	p_ITERATOR1	STRING_COLLECTION,
+  	p_ITERATOR2 STRING_COLLECTION,
+  	p_ITERATOR3 STRING_COLLECTION,
+  	p_ITERATOR4 STRING_COLLECTION,
+  	p_ITERATOR5 STRING_COLLECTION,
+  	p_ITERATOR6 STRING_COLLECTION,
+  	p_ITERATOR7 STRING_COLLECTION,
+ 	p_ITERATOR8 STRING_COLLECTION,
+  	p_ITERATOR9 STRING_COLLECTION,
+  	p_ITERATOR10 STRING_COLLECTION,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE PUT_BILLING_CHARGE_DISPUTE
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+	p_STATEMENT_DATE IN DATE,
+	p_DISPUTE_DATE IN VARCHAR,
+	p_TIME_ZONE IN VARCHAR,
+	p_DISPUTE_STATUS IN VARCHAR,
+	p_MARKET_STATUS IN VARCHAR,
+	p_SUBMIT_STATUS IN VARCHAR,
+	p_BILLED_AMOUNT IN NUMBER,
+	p_CORRECT_AMOUNT IN NUMBER,
+	p_BILLED_QUANTITY IN NUMBER,
+	p_CORRECT_QUANTITY IN NUMBER,
+	p_DESCR IN VARCHAR,
+	p_ITERATOR1	IN VARCHAR2,
+  	p_ITERATOR2 IN VARCHAR2,
+  	p_ITERATOR3 IN VARCHAR2,
+  	p_ITERATOR4 IN VARCHAR2,
+  	p_ITERATOR5 IN VARCHAR2,
+  	p_ITERATOR6 IN VARCHAR2,
+  	p_ITERATOR7 IN VARCHAR2,
+ 	p_ITERATOR8 IN VARCHAR2,
+  	p_ITERATOR9 IN VARCHAR2,
+  	p_ITERATOR10 IN VARCHAR2,
+	p_STATUS OUT NUMBER
+	);
+
+PROCEDURE GET_STATEMENT_STATUS
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_AS_OF_DATE IN DATE,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE GET_STATEMENT_STATUS_DETAILS
+	(
+    p_CALLING_MODULE IN VARCHAR,
+    p_MODEL_ID IN NUMBER,
+    p_ENTITY_ID IN NUMBER,
+    p_STATEMENT_DATE IN DATE,
+    p_STATEMENT_TYPE IN NUMBER,
+    p_STATEMENT_STATE IN NUMBER,
+    p_AS_OF_DATE IN DATE,
+    p_CURSOR IN OUT GA.REFCURSOR,
+    p_STATUS OUT NUMBER
+    );
+
+PROCEDURE PUT_STATEMENT_STATUS
+	(
+    p_CALLING_MODULE IN VARCHAR,
+    p_MODEL_ID IN NUMBER,
+    p_ENTITY_ID IN NUMBER,
+    p_STATEMENT_DATE IN DATE,
+    p_STATEMENT_TYPE IN NUMBER,
+    p_STATEMENT_STATE IN NUMBER,
+    p_AS_OF_DATE IN DATE,
+    p_REVIEW_STATUS IN VARCHAR,
+    p_NOTES IN VARCHAR,
+    p_STATUS OUT NUMBER
+    );
+
+PROCEDURE PRODUCT_NAMES
+	(
+	p_STATEMENT_TYPE IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_AS_OF_DATE IN DATE,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE COMPONENT_NAMES
+	(
+	p_STATEMENT_TYPE IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_AS_OF_DATE IN DATE,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE COMPONENT_CATEGORIES
+	(
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE GET_INVOICE_COMPARISON
+	(
+    p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_INVOICE_DATE IN VARCHAR2,
+	p_AS_OF_DATE IN DATE,
+    p_INVOICE_CATEGORY IN VARCHAR,
+    p_COMPARISON_STATES_ID IN VARCHAR,
+    p_DISPLAY_OPTION IN NUMBER,
+    p_BILLING_PERIOD OUT VARCHAR,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+PROCEDURE GET_INVOICE_VALIDATION
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_INVOICE_DATE IN VARCHAR2,
+	p_AS_OF_DATE IN DATE,
+    p_INVOICE_CATEGORY IN VARCHAR,
+    p_STATEMENT_TYPE IN NUMBER,
+    p_STATEMENT_STATE IN NUMBER,
+	p_DISPLAY_OPTION IN NUMBER,
+    p_PERIOD_DATE_STRING OUT VARCHAR,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+FUNCTION GET_FORMAT_FROM_INTERVAL
+	(
+	p_INTERVAL IN VARCHAR
+	) RETURN VARCHAR;
+
+PROCEDURE GET_EXPORT_SUMMARY_UI
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+    p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE IN DATE,
+    p_AS_OF_DATE IN DATE,
+    p_ID_PAIRS OUT STRING_COLLECTION,
+	p_BEGIN_DATE_OUT OUT DATE,
+	p_END_DATE_OUT OUT DATE,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR,
+	p_CURSOR IN OUT GA.REFCURSOR
+    );
+
+PROCEDURE GET_EXPORT_SUMMARY
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+	p_BEGIN_DATE IN OUT DATE,
+	p_END_DATE IN OUT DATE,
+    p_AS_OF_DATE IN DATE,
+    p_ID_PAIRS OUT STRING_COLLECTION,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR,
+	p_CURSOR IN OUT GA.REFCURSOR
+    );
+
+PROCEDURE GET_EXPORT_DETAIL
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_ENTITY_ID IN NUMBER,
+    p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE IN DATE,
+    p_AS_OF_DATE IN DATE,
+    p_TIME_ZONE IN VARCHAR,
+    p_ID_PAIRS IN OUT STRING_COLLECTION,
+    p_USE_NORMAL_DETAIL OUT NUMBER,
+    p_PRODUCT_ID OUT NUMBER,
+    p_COMPONENT_ID OUT NUMBER,
+    p_HEADER_ROWS OUT NUMBER,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR,
+	p_CURSOR IN OUT GA.REFCURSOR
+    );
+
+PROCEDURE GET_EXPORT_ENTITIES
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+    p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE IN DATE,
+    p_AS_OF_DATE IN DATE,
+	p_LABEL OUT VARCHAR2,
+    p_STATUS OUT NUMBER,
+    p_MESSAGE OUT VARCHAR,
+	p_CURSOR IN OUT GA.REFCURSOR
+    );
+
+PROCEDURE TAX_COMPONENTS
+	(
+    p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+    );
+
+PROCEDURE GET_ENTITY_TIME_ZONE
+	(
+    p_CALLING_MODULE IN VARCHAR,
+    p_MODEL_ID IN NUMBER,
+    p_ENTITY_ID IN NUMBER,
+    p_TIME_ZONE OUT VARCHAR2,
+    p_STATUS OUT NUMBER
+    );
+
+PROCEDURE GET_END_DAY
+	(
+    p_DATE IN DATE,
+    p_INTERVAL IN VARCHAR,
+    p_RESULT OUT DATE
+    );
+
+PROCEDURE GET_INVOICE_CATEGORIES
+	(
+    p_ENTITY_ID IN NUMBER,
+    p_INVOICE_DATE IN VARCHAR2,
+    p_USING_ALL IN NUMBER,
+    p_STATUS OUT NUMBER,
+    p_CURSOR IN OUT GA.REFCURSOR
+    );
+
+PROCEDURE APPROVE_INVOICE
+	(
+	p_CALLING_MODULE IN VARCHAR,
+	p_MODEL_ID IN NUMBER,
+	p_INVOICE_ID IN NUMBER,
+	p_STATUS OUT NUMBER
+	);
+
+FUNCTION EXPORT_TX_TITLE
+	(
+	p_TX_SERVICE_TYPE IN VARCHAR
+	) RETURN VARCHAR;
+
+FUNCTION EXPORT_TX_LABEL
+	(
+	p_TX_SERVICE_TYPE IN VARCHAR
+	) RETURN VARCHAR;
+
+PROCEDURE UPDATE_INVOICE_STATUS_SENT
+	(
+	p_INVOICE_ID IN NUMBER
+	);
+
+PROCEDURE GET_INVOICE_DATES
+	(
+	p_ENTITY_ID IN NUMBER,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER,
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE IN DATE,
+	p_STATUS OUT NUMBER,
+    p_CURSOR IN OUT GA.REFCURSOR
+    );
+
+PROCEDURE GET_INV_COMP_STATEMENT_TYPES
+    (
+	p_STATUS OUT NUMBER,
+    p_CURSOR IN OUT GA.REFCURSOR
+    );
+
+FUNCTION GET_INVOICE_DATE_RANGE
+	(
+	p_ENTITY_ID IN VARCHAR2,
+	p_STATEMENT_DATE IN DATE,
+	p_INTERVAL IN VARCHAR2,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_STATEMENT_STATE IN NUMBER
+	) RETURN VARCHAR2;
+
+-- Bulk exports invoices. The cursor will have two columns: FILE_NAME (a VARCHAR2) and
+-- FILE_CONTENTS (a BLOB). The file names are generated based on the invoice details
+-- using the patterns defined in the System Dictionary:
+--   Global -> Billing -> Invoice -> Batch Export Invoice Name
+--	Default: ${entity_name}/${statement_type}-${begin_date}-Invoice.${ext}
+--   Global -> Billing -> Invoice -> Batch Export Attachment Name
+-- 	Default: ${entity_name}/${statement_type}-${begin_date}-Attachment${num}.${ext}
+-- In addition to being called from the UI, this procedure can be used from scheduled
+-- tasks to perform batch exports.
+-- %param p_INVOICE_IDs	The list of invoices to export.
+-- %param p_EXPORT_FMT	The report format in which to generate the main invoice
+--				file. This should be one of the constants defined in the
+--				header of the CRYSTAL_REPORTS package.
+-- %param p_CURSOR		The set of results. The cursor will have one or more row
+--				for each invoice ID specified, and the cursor will return
+--				results in the same order as IDs are found in
+--				p_INVOICE_IDs.
+PROCEDURE EXPORT_INVOICES
+	(
+	p_INVOICE_IDs	IN NUMBER_COLLECTION,
+	p_EXPORT_FMT	IN NUMBER,
+	p_CURSOR		IN OUT GA.REFCURSOR
+	);
+
+-- Sends invoices via e-mail. This sends all specified invoice IDs via e-mail. This
+-- procedure starts a process and commits the current transaction.
+-- %param p_INVOICE_IDs	The list of invoices to send
+-- %param p_EXPORT_FMT	The report format in which to generate the main invoice
+--				file. This should be one of the constants defined in the
+--				header of the CRYSTAL_REPORTS package.
+-- %param p_PROCESS_STATUS	The status of the process. This will be one of the
+--				constants defined in the LOGS package.
+-- %param p_MESSAGE		The finish message of the process.
+
+PROCEDURE EMAIL_INVOICES
+	(
+	p_INVOICE_IDs		IN NUMBER_COLLECTION,
+	p_EXPORT_FMT		IN NUMBER,
+	p_PROCESS_STATUS	OUT NUMBER,
+	p_MESSAGE			OUT VARCHAR2
+	);
+
+-- Sends all approved invoices via e-mail. This procedure invokes EMAIL_INVOICES which
+-- means that it starts a process and commits the current transaction. This will
+-- exclude approved invoices that have already been sent (i.e. INVOICE_STATUS like
+-- `%SENT%').
+-- %param p_EXPORT_FMT	The report format in which to generate the main invoice
+--				file. This should be one of the constants defined in the
+--				header of the CRYSTAL_REPORTS package.
+-- %param p_PROCESS_STATUS	The status of the process. This will be one of the
+--				constants defined in the LOGS package.
+-- %param p_MESSAGE		The finish message of the process.
+PROCEDURE EMAIL_ALL_APPROVED_INVOICES
+	(
+	p_EXPORT_FMT		IN PLS_INTEGER,
+	p_PROCESS_STATUS	OUT NUMBER,
+	p_MESSAGE		OUT VARCHAR2
+	);
+
+-- Retrieves a list of invoices that can be exported or e-mailed. This finds all
+-- invoices that match specified criteria and for PSEs to which the current user has
+-- Select PSE Billing privilege.
+-- %param p_STATEMENT_TYPE		The statement type of invoices to return.
+-- %param p_STATEMENT_STATE	The statement state of invoices to return.
+-- %param p_BEGIN_DATE		Begin date of the date range. Invoices returned will
+--					overlap the specified date range.
+-- %param p_END_DATE		End date of the date range. Invoices returned will
+--					overlap the specified date range.
+-- %param p_CURSOR			The results, which will include the following
+-- 					columns: INVOICE_ID, PSE_NAME (based on ENTITY_ID),
+--					INVOICE_PERIOD (based on BEGIN_DATE and END_DATE),
+--					APPROVAL_TEXT (based on APPROVED_BY and
+--					APPROVED_WHEN), ATTACHMENT_COUNT (count of associated
+--					records in INVOICE_ATTACHMENT table).
+PROCEDURE GET_INVOICES_TO_SEND
+	(
+	p_STATEMENT_TYPE	IN NUMBER,
+	p_STATEMENT_STATE	IN NUMBER,
+	p_BEGIN_DATE		IN DATE,
+	p_END_DATE		IN DATE,
+	p_CURSOR		OUT GA.REFCURSOR
+	);
+
+-- Retrieves records for invoice Crystal Report template. The logic in
+-- GET_INVOICE_REPORT_RECORDS will be moved into here. That method will simply look-up - an INVOICE_ID and then call this new method.
+-- %param p_INVOICE_ID	The ID of the invoice to retrieve
+-- %param p_CURSOR		The invoice data
+-- %raise	An exception will be raised if the current user does not have 'Select PSE
+-- 		Billing privileges for the invoice's entity.
+PROCEDURE GET_INVOICE_RPT_RECS_BY_ID
+	(
+    p_INVOICE_CATEGORY IN VARCHAR,
+    p_INVOICE_ID IN NUMBER,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT GA.REFCURSOR
+	);
+
+-- Approves multiple invoices.
+-- %param p_INVOICE_IDs	The list of invoice IDs to approve
+-- %param p_MESSAGE		A message that will indicate which invoices could not be
+--				approved due to insufficient privileges.
+PROCEDURE APPROVE_INVOICES
+	(
+	p_INVOICE_ID	IN NUMBER_COLLECTION,
+	p_MESSAGE		OUT VARCHAR2
+	);
+
+-- Retrieve attachment details for an invoice.
+-- %param p_INVOICE_ID	The ID of the invoice whose attachments will be viewed.
+-- %param p_CURSOR		The list of attachments, which will include the following
+--	columns: FILE_NAME, FILE_MIME_TYPE, USER_NAME (based on
+--	USER_ID), FILE_SIZE (based on FILE_CONTENTS), and
+--	ENTRY_DATE
+-- %raise	An exception will be raised if the current user does not have `Select PSE
+-- 		Billing privileges for the invoice's entity.
+PROCEDURE GET_INVOICE_ATTACHMENTS
+	(
+	p_INVOICE_ID	IN NUMBER,
+	p_CURSOR	OUT GA.REFCURSOR
+	);
+
+-- Upload an attachment for an invoice. The mime type of the attachment will be
+-- determined based on the extension in the file name.
+-- %param p_INVOICE_ID	The ID of the invoice for which to upload an attachment.
+-- %param p_FILE_NAME	The name of the file being attached.
+-- %param p_FILE_CONTENTS	The contents of the file being attached.
+-- %raise	An exception will be raised if the current user does not have both
+--		`Select PSE Billing and `Update Invoice Attachments privileges for the
+--		invoice's entity.
+PROCEDURE ADD_INVOICE_ATTACHMENT
+	(
+	p_INVOICE_ID		IN NUMBER,
+	p_FILE_NAME			IN VARCHAR2,
+	p_FILE_CONTENTS		IN BLOB,
+	p_MIME_TYPE			IN VARCHAR2 := NULL
+	);
+
+-- Retrieve an attachment for an invoice.
+-- %param p_INVOICE_ID	The ID of the invoice containing the attachment.
+-- %param p_FILE_NAME	The name of the attached file.
+-- %param p_FILE_CONTENTS	The contents of the attached file.
+PROCEDURE DOWNLOAD_INVOICE_ATTACHMENT
+	(
+	p_INVOICE_ID		IN NUMBER,
+	p_FILE_NAME			IN VARCHAR2,
+	p_FILE				OUT BLOB
+	);
+
+-- Removes an attachment from an invoice.
+-- %param p_INVOICE_ID	The ID of the invoice containing the attachment.
+-- %param p_FILE_NAME	The name of the attached file.
+-- %raise	An exception will be raised if the current user does not have both
+--		`Select PSE Billing and `Update Invoice Attachments privileges for the
+--		invoices entity.
+PROCEDURE REMOVE_INVOICE_ATTACHMENT
+	(
+	p_INVOICE_ID	IN NUMBER,
+	p_FILE_NAME	IN VARCHAR2
+	);
+
+-- A warning procedure. It will return a message that details insufficient privilege too attach 
+-- the specified file to the specified invoices.
+-- %param p_INVOICE_IDs		The list of invoice IDs to which the file will be
+-- 					attached.
+-- %param p_WARNING_MESSAGE	The message that will be shown to the user. This will
+--					be NULL if there are no warnings to convey
+PROCEDURE ADD_ATTACHMENT_PRIV_WARNING
+	(
+	p_INVOICE_ID		IN NUMBER_COLLECTION,
+	p_WARNING_MESSAGE	OUT VARCHAR2
+	);
+
+-- A warning procedure. It will return a message that details possible overwriting of
+-- existing attachments for attaching
+-- the specified file to the specified invoices.
+-- %param p_INVOICE_IDs		The list of invoice IDs to which the file will be
+-- 					attached.
+-- %param p_FILE_NAME		The name of the file to attach.
+-- %param p_WARNING_MESSAGE	The message that will be shown to the user. This will
+--					be NULL if there are no warnings to convey (i.e.
+--					none of the specified invoices have
+--					already have an attachment with the specified name)
+PROCEDURE ADD_ATTACHMENT_OVR_WARNING
+	(
+	p_INVOICE_ID		IN NUMBER_COLLECTION,
+	p_FILE_NAME			IN VARCHAR2,
+	p_WARNING_MESSAGE	OUT VARCHAR2
+	) ;
+
+-- Attaches a file to multiple invoices. If any of the specified invoices already have
+-- a file with the same name attached, the attachment will be overwritten. If the user
+-- does not have sufficient privileges to attach a file to an invoice, that invoice
+-- will be skipped.
+-- %param p_INVOICE_ID	The list of invoice IDs to which to attach the file.
+-- %param p_FILE_NAME	The name of the file being attached to the invoices.
+-- %param p_IMPORT_FILE	The contents of the attached file.
+-- %raise	An exception will be raised if an attachment with the specified name
+--		already exists.
+PROCEDURE ADD_ATTACHMENT_TO_INVOICES
+	(
+	p_FILE_NAME 	IN VARCHAR2,
+	p_FILE_CONTENTS	IN BLOB,
+	p_INVOICE_ID	IN NUMBER_COLLECTION
+	) ;
+	
+-- Enumerates recipient e-mail addresses for an invoice.
+-- %param p_INVOICE_ID	The ID of the invoice for which to retrieve the list of
+--				recipients.
+-- %param p_CURSOR		The list of recipient e-mail addresses.
+-- %raise	An exception will be raised if the current user does not permission to
+-- 		send the specified invoice.
+PROCEDURE RECIPIENT_EMAIL_ADDRESSES
+	(
+	p_INVOICE_ID	IN NUMBER,
+	p_CURSOR		IN OUT GA.REFCURSOR
+	);
+
+-- A warning procedure. It will return a message that details which of the specified
+-- invoices cannot be sent due to either the invoice not being approved or due to the
+-- current user not having permission to send the invoice.
+-- %param p_INVOICE_IDs		The list of invoices that will be sent.
+-- %param p_WARNING_MESSAGE	The message that will be shown to the user. This will
+-- 					be NULL if all specified invoices are approved and
+--					current user has permission to send all specified
+--					invoices.
+PROCEDURE SEND_INVOICES_APPROV_WARNING
+	(
+	p_INVOICE_ID		IN NUMBER_COLLECTION,
+	p_WARNING_MESSAGE	OUT VARCHAR2
+	);
+
+-- A warning procedure. It will return a message that details which of the specified
+-- invoices cannot be sent due to the
+-- current user not having permission to send the invoice.
+-- %param p_INVOICE_IDs		The list of invoices that will be sent.
+-- %param p_WARNING_MESSAGE	The message that will be shown to the user. This will
+-- 					be NULL if all specified invoices are approved and
+--					current user has permission to send all specified
+--					invoices.
+PROCEDURE SEND_INVOICES_PRIV_WARNING
+	(
+	p_INVOICE_ID		IN NUMBER_COLLECTION,
+	p_WARNING_MESSAGE	OUT VARCHAR2
+	);
+
+-- Returns export formats for the UI
+PROCEDURE EXPORT_FORMATS
+	(
+	p_CURSOR OUT GA.REFCURSOR
+	);
+
+g_ALL_STRING VARCHAR(16) := '<ALL>';
+g_DOMAIN_NAME VARCHAR(16) := 'BILLING';
+g_APP_NAME VARCHAR(16) := 'RetailOffice';
+g_EVENT_TEXT VARCHAR(128);
+g_SHORT_DATE_FORMAT VARCHAR2(16) := 'YYYY/MM/DD';
+g_LONG_DATE_FORMAT VARCHAR2(20) := 'YYYY/MM/DD HH24:MI';
+
+g_PSE CHAR(3) := 'PSE';
+g_POOL CHAR(4) := 'POOL';
+g_BILL_PARTY CHAR(10) := 'BILL_PARTY';
+
+-- Calling Modules.
+g_POSITION_AND_BILLING CHAR(1) := 'P';
+g_SCHEDULING CHAR(1) := 'B';
+g_GAS_DELIVERY CHAR(1) := 'G';
+
+END BSJ;
+/

@@ -1,0 +1,36 @@
+CREATE OR REPLACE FUNCTION CORRECTED_AS_OF_DATE
+	(
+	p_AS_OF_DATE IN DATE,
+	p_VERSION_DOMAIN IN VARCHAR := NULL
+	) RETURN DATE IS
+--Revision: $Revision: 1.19 $
+
+-- Answer the Actual As Of Date of a particular Version.
+
+v_RETURN DATE := LOW_DATE;
+BEGIN
+
+--If no domain is defined then return the As Of Date.
+	IF p_VERSION_DOMAIN IS NULL THEN
+		IF p_AS_OF_DATE = CURRENT_VERSION_DATE THEN
+			v_RETURN := SYSDATE;
+		ELSE 
+			v_RETURN := p_AS_OF_DATE;
+		END IF;
+	ELSE
+-- Answer the Actual As Of Date that is less than or equal to the specified Input As Of Date.
+		SELECT MAX(AS_OF_DATE)
+		INTO v_RETURN
+		FROM VERSION
+		WHERE UPPER(VERSION_DOMAIN) = UPPER(LTRIM(RTRIM(p_VERSION_DOMAIN)))
+			AND AS_OF_DATE <= p_AS_OF_DATE;
+	END IF;
+	
+	RETURN v_RETURN;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		RETURN v_RETURN;
+
+END CORRECTED_AS_OF_DATE;
+/

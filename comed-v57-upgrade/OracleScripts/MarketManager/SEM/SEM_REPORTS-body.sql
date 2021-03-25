@@ -1,0 +1,4230 @@
+CREATE OR REPLACE PACKAGE BODY SEM_REPORTS IS
+
+  c_MI30_INTERVAL               CONSTANT VARCHAR2(4) := 'MI30';
+
+	g_SHORT_DATE_FORMAT VARCHAR2(16) := 'YYYY/MM/DD';
+	g_ALL NUMBER(9) := -1;
+	g_ALL_STRING VARCHAR2(8) := '<ALL>';
+  g_RESOURCE_TYPE_ATT_ID        ENTITY_ATTRIBUTE.ATTRIBUTE_ID%TYPE;
+----------------------------------------------------------------------------
+PROCEDURE NULL_CURSOR(p_CURSOR IN OUT REF_CURSOR) AS
+BEGIN
+    OPEN p_CURSOR FOR
+        SELECT NULL
+        FROM DUAL;
+END NULL_CURSOR;
+----------------------------------------------------------------------------
+FUNCTION WHAT_VERSION RETURN VARCHAR IS
+BEGIN
+    RETURN '$Revision: 1.29 $';
+END WHAT_VERSION;
+----------------------------------------------------------------------------
+   FUNCTION GET_PERIODICITY_VALS
+   		(
+		p_PERIODICITY IN VARCHAR2,
+		p_DELIMITER IN VARCHAR2 := c_COMMA
+		) RETURN STRING_COLLECTION IS
+	v_RET STRING_COLLECTION;
+	v_IDX BINARY_INTEGER;
+	v_CHR VARCHAR2(1);
+	v_SUFFIX VARCHAR2(1);
+   BEGIN
+   	UT.STRING_COLLECTION_FROM_STRING(p_PERIODICITY, p_DELIMITER, v_RET);
+	v_IDX := v_RET.FIRST;
+	WHILE v_RET.EXISTS(v_IDX) LOOP
+		IF SUBSTR(v_RET(v_IDX),1,3) = 'Ex-' THEN
+			v_CHR := SUBSTR(v_RET(v_IDX),4,1);
+			v_SUFFIX := SUBSTR(v_RET(v_IDX),LENGTH(v_RET(v_IDX)),1);
+			v_RET(v_IDX) := 'DA-E'||v_CHR|| CASE WHEN v_CHR='P' THEN v_SUFFIX ELSE '' END;
+		ELSIF INSTR(v_RET(v_IDX), 'LOLP') > 0 THEN  --translate Monthly LOLP Forecast and Daily Forecast Ex-Post LOLP into M or D
+            v_RET(v_IDX) :=  SUBSTR(v_RET(v_IDX),1,1);
+		ELSIF SUBSTR(v_RET(v_IDX),1,1) = 'D' THEN
+		    IF SUBSTR(v_RET(v_IDX),LENGTH(v_RET(v_IDX))-2,2) = '15' THEN
+            	v_RET(v_IDX) :=  SUBSTR(v_RET(v_IDX),1,1) || SUBSTR(v_RET(v_IDX),LENGTH(v_RET(v_IDX))-2,2);
+        	ELSE
+			    v_RET(v_IDX) := SUBSTR(v_RET(v_IDX),1,1) || SUBSTR(v_RET(v_IDX),LENGTH(v_RET(v_IDX))-1,1);
+			END IF;
+		ELSE
+			v_RET(v_IDX) := SUBSTR(v_RET(v_IDX),1,1);
+		END IF;
+		v_IDX := v_RET.NEXT(v_IDX);
+	END LOOP;
+	RETURN v_RET;
+   END GET_PERIODICITY_VALS;
+---------------------------------------
+  PROCEDURE PUT_RO_REPORT_FILTERS
+   (p_STRING_VAL                IN RO_REPORT_FILTERS.STRING_VAL%TYPE,
+    p_FILTER_TYPE               IN RO_REPORT_FILTERS.FILTER_TYPE%TYPE,
+    p_DELIMITER                 IN CHAR DEFAULT ',',
+    p_TRUNCATE_TABLE            IN BOOLEAN DEFAULT TRUE)
+  IS
+
+    t_STRING                    GA.STRING_TABLE;
+
+  BEGIN
+
+    IF p_TRUNCATE_TABLE THEN
+
+       EXECUTE IMMEDIATE 'TRUNCATE TABLE RO_REPORT_FILTERS DROP STORAGE';
+
+    END IF;
+
+    UT.TOKENS_FROM_STRING(RTRIM(p_STRING_VAL, p_DELIMITER), p_DELIMITER, t_STRING);
+
+    FORALL i IN 1..t_STRING.COUNT
+    INSERT INTO RO_REPORT_FILTERS
+    VALUES(t_STRING(i), p_FILTER_TYPE);
+
+    IF t_STRING.EXISTS(1) THEN
+
+       t_STRING.DELETE;
+
+    END IF;
+
+  END PUT_RO_REPORT_FILTERS;
+---------------------------------------
+  PROCEDURE SERVICE_POINT_NAME
+    (p_PSE_IDs                   IN VARCHAR2,
+     p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    OUT REF_CURSOR)
+  IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_PSE_IDs					ID_TABLE;
+
+  BEGIN
+
+      p_STATUS := GA.SUCCESS;
+
+      IF p_PSE_IDs IS NOT NULL THEN
+	  	UT.ID_TABLE_FROM_STRING(p_PSE_IDs, c_COMMA, v_PSE_IDs);
+	  ELSE
+	    v_PSE_IDs := ID_TABLE(ID_TYPE(-1));
+	  END IF;
+
+         UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+         OPEN p_CURSOR FOR
+              SELECT DISTINCT SP.SERVICE_POINT_NAME, SP.SERVICE_POINT_ID
+              FROM   SERVICE_POINT SP,
+                     SEM_LOSS_FACTOR SLF,
+					 TABLE(CAST(v_PSE_IDs AS ID_TABLE)) P
+              WHERE  SP.SERVICE_POINT_ID = SLF.POD_ID
+              AND    P.ID IN (SLF.PSE_ID , -1)
+              AND    SLF.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+              ORDER BY 1;
+
+  END SERVICE_POINT_NAME;
+---------------------------------------
+  PROCEDURE POD_NAMES_DISP
+    (p_PSE_IDs                   IN VARCHAR2,
+     p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    OUT REF_CURSOR)
+  IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_PSE_IDs					ID_TABLE;
+
+  BEGIN
+
+      p_STATUS := GA.SUCCESS;
+
+      IF p_PSE_IDs IS NOT NULL THEN
+	  	UT.ID_TABLE_FROM_STRING(p_PSE_IDs, c_COMMA, v_PSE_IDs);
+	  ELSE
+	    v_PSE_IDs := ID_TABLE(ID_TYPE(-1));
+	  END IF;
+
+         UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+         OPEN p_CURSOR FOR
+              SELECT DISTINCT SP.SERVICE_POINT_NAME, SP.SERVICE_POINT_ID
+              FROM   SERVICE_POINT SP,
+                     SEM_DISPATCH_INSTR SD,
+					 TABLE(CAST(v_PSE_IDs AS ID_TABLE)) P
+              WHERE  SP.SERVICE_POINT_ID = SD.POD_ID
+              AND    P.ID IN (SD.PSE_ID , -1)
+              AND    SD.INSTRUCTION_TIME_STAMP BETWEEN v_BEGIN_DATE AND v_END_DATE
+              ORDER BY 1;
+
+  END POD_NAMES_DISP;
+---------------------------------------
+  PROCEDURE PSE_NAME
+    (p_JURISDICTIONS             IN VARCHAR2,
+     p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    OUT REF_CURSOR)
+  IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_JURISDICTIONS			STRING_COLLECTION;
+
+  BEGIN
+
+      p_STATUS := GA.SUCCESS;
+
+      IF p_JURISDICTIONS IS NOT NULL THEN
+	  	UT.STRING_COLLECTION_FROM_STRING(p_JURISDICTIONS, c_COMMA, v_JURISDICTIONS);
+	  ELSE
+	    v_JURISDICTIONS := STRING_COLLECTION('%');
+	  END IF;
+
+         UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+         OPEN p_CURSOR FOR
+              SELECT DISTINCT PSE.PSE_NAME, PSE.PSE_ID
+              FROM   PURCHASING_SELLING_ENTITY PSE,
+                     SEM_GEN_FORECAST SGF,
+					 TABLE(CAST(v_JURISDICTIONS AS STRING_COLLECTION)) J
+              WHERE  PSE.PSE_ID = SGF.PSE_ID
+              AND    SGF.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+              AND    SGF.JURISDICTION LIKE J.COLUMN_VALUE
+              ORDER BY 1;
+
+  END PSE_NAME;
+---------------------------------------
+  PROCEDURE PSE_NAMES_TLAF
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    OUT REF_CURSOR)
+  IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+
+  BEGIN
+
+      p_STATUS := GA.SUCCESS;
+
+         UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+         OPEN p_CURSOR FOR
+              SELECT DISTINCT PSE.PSE_NAME, PSE.PSE_ID
+              FROM   PURCHASING_SELLING_ENTITY PSE,
+                     SEM_LOSS_FACTOR SLF
+              WHERE  PSE.PSE_ID = SLF.PSE_ID
+              AND    SLF.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+              ORDER BY 1;
+
+  END PSE_NAMES_TLAF;
+---------------------------------------
+  PROCEDURE PSE_NAMES_IC
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+	 p_POD_ID					IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    OUT REF_CURSOR)
+  IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_POD_IDs					ID_TABLE;
+
+  BEGIN
+
+      p_STATUS := GA.SUCCESS;
+
+         UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+		 IF p_POD_ID IS NULL THEN
+		 	v_POD_IDs := ID_TABLE(ID_TYPE(-1));
+		 ELSE
+		 	UT.ID_TABLE_FROM_STRING(p_POD_ID, c_COMMA, v_POD_IDs);
+		 END IF;
+
+         OPEN p_CURSOR FOR
+              SELECT DISTINCT PSE.PSE_NAME, PSE.PSE_ID
+              FROM   PURCHASING_SELLING_ENTITY PSE,
+                     SEM_IC_CAP_HOLDINGS SCH,
+					 TABLE(CAST(v_POD_IDs AS ID_TABLE)) P
+              WHERE  PSE.PSE_ID = SCH.PSE_ID
+              AND    SCH.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+			  AND	 P.ID IN (-1,SCH.POD_ID)
+              ORDER BY 1;
+
+  END PSE_NAMES_IC;
+---------------------------------------
+  PROCEDURE PSE_NAMES_ICNA
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+	 p_POD_ID					IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    OUT REF_CURSOR)
+  IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_POD_IDs					ID_TABLE;
+
+  BEGIN
+
+      p_STATUS := GA.SUCCESS;
+
+         UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+		 IF p_POD_ID IS NULL THEN
+		 	v_POD_IDs := ID_TABLE(ID_TYPE(-1));
+		 ELSE
+		 	UT.ID_TABLE_FROM_STRING(p_POD_ID, c_COMMA, v_POD_IDs);
+		 END IF;
+
+         OPEN p_CURSOR FOR
+              SELECT DISTINCT PSE.PSE_NAME, PSE.PSE_ID
+              FROM   PURCHASING_SELLING_ENTITY PSE,
+                     SEM_IC_NET_ACTUAL SNA,
+					 TABLE(CAST(v_POD_IDs AS ID_TABLE)) P
+              WHERE  PSE.PSE_ID = SNA.PSE_ID
+              AND    SNA.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+			  AND	 P.ID IN (-1,SNA.POD_ID)
+              ORDER BY 1;
+
+  END PSE_NAMES_ICNA;
+---------------------------------------
+  PROCEDURE PSE_NAMES_DISP
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    OUT REF_CURSOR) IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+
+  BEGIN
+
+      p_STATUS := GA.SUCCESS;
+
+         UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+         OPEN p_CURSOR FOR
+              SELECT DISTINCT PSE.PSE_NAME, PSE.PSE_ID
+              FROM   PURCHASING_SELLING_ENTITY PSE,
+                     SEM_DISPATCH_INSTR SD
+              WHERE  PSE.PSE_ID = SD.PSE_ID
+              AND    SD.INSTRUCTION_TIME_STAMP BETWEEN v_BEGIN_DATE AND v_END_DATE
+              ORDER BY 1;
+
+  END PSE_NAMES_DISP;
+---------------------------------------
+  PROCEDURE PSE_NAMES_FREQUENCY
+  (
+      p_BEGIN_DATE IN DATE,
+      p_END_DATE   IN DATE,
+      p_TIME_ZONE  IN VARCHAR2,
+      p_STATUS     OUT NUMBER,
+      p_CURSOR     OUT REF_CURSOR
+  ) IS
+
+      v_BEGIN_DATE DATE;
+      v_END_DATE   DATE;
+
+  BEGIN
+
+      p_STATUS := GA.SUCCESS;
+
+      UT.CUT_DATE_RANGE(p_BEGIN_DATE,
+                        p_END_DATE,
+                        p_TIME_ZONE,
+                        v_BEGIN_DATE,
+                        v_END_DATE);
+
+      OPEN p_CURSOR FOR
+          SELECT DISTINCT PSE.PSE_NAME, PSE.PSE_ID
+          FROM PURCHASING_SELLING_ENTITY PSE, SEM_SYSTEM_FREQUENCY SSF
+          WHERE PSE.PSE_ID = SSF.PSE_ID
+          AND SSF.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+          ORDER BY 1;
+
+  END PSE_NAMES_FREQUENCY;
+----------------------------------------
+  PROCEDURE PSE_NAMES_SETTL
+  (
+   p_STATUS OUT NUMBER,
+   p_CURSOR OUT REF_CURSOR
+  ) IS
+
+  BEGIN
+      p_STATUS := GA.SUCCESS;
+
+      OPEN p_CURSOR FOR
+		  SELECT DISTINCT PSE.PSE_NAME, PSE.PSE_ID
+          FROM PURCHASING_SELLING_ENTITY PSE, SEM_SERVICE_POINT_PSE A
+          WHERE PSE.PSE_ID = A.PSE_ID
+          ORDER BY 1;
+
+  END PSE_NAMES_SETTL;
+-----------------------------------------
+  PROCEDURE POD_NAMES_METER
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+	 p_JURISDICTIONS				 IN VARCHAR2,
+	 p_RESOURCE_TYPE			 IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    OUT REF_CURSOR)
+  IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_JURISDICTIONs			STRING_COLLECTION;
+	 v_RESOURCE_TYPEs			STRING_COLLECTION;
+
+  BEGIN
+
+      p_STATUS := GA.SUCCESS;
+
+         UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+		 UT.STRING_COLLECTION_FROM_STRING(p_JURISDICTIONS, c_COMMA, v_JURISDICTIONs);
+		 UT.STRING_COLLECTION_FROM_STRING(p_RESOURCE_TYPE, c_COMMA, v_RESOURCE_TYPEs);
+
+         OPEN p_CURSOR FOR
+              SELECT DISTINCT SP.SERVICE_POINT_NAME, SP.SERVICE_POINT_ID
+              FROM   SERVICE_POINT SP,
+                     SEM_METER_DETAIL SMD,
+					 TABLE(CAST(v_JURISDICTIONs as STRING_COLLECTION)) J,
+					 TABLE(CAST(v_RESOURCE_TYPEs as STRING_COLLECTION)) R
+              WHERE  SP.SERVICE_POINT_ID = SMD.POD_ID
+              AND    SMD.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+			  AND	 SMD.JURISDICTION = J.COLUMN_VALUE
+			  AND 	 SMD.RESOURCE_TYPE = R.COLUMN_VALUE
+              ORDER BY 1;
+
+  END POD_NAMES_METER;
+---------------------------------------
+  PROCEDURE POD_NAMES_OUTAGES
+    (p_REPORT_SOURCE				IN VARCHAR2,
+	p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    OUT REF_CURSOR)
+	AS
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	BEGIN
+      p_STATUS := GA.SUCCESS;
+
+         UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+		 OPEN p_CURSOR FOR
+		 	SELECT DISTINCT SP.SERVICE_POINT_NAME, SP.SERVICE_POINT_ID
+			FROM SEM_OUTAGE_SCHEDULE SOS,
+				SERVICE_POINT SP
+			WHERE SOS.REPORT_SOURCE = p_REPORT_SOURCE
+				AND SOS.BEGIN_TIME <= v_END_DATE
+				AND SOS.END_TIME >= v_BEGIN_DATE
+				AND SOS.POD_ID = SP.SERVICE_POINT_ID
+			ORDER BY 1;
+	END POD_NAMES_OUTAGES;
+---------------------------------------
+  PROCEDURE OUTAGE_RPT_SOURCES
+    (p_STATUS                    OUT NUMBER,
+     p_CURSOR                    OUT REF_CURSOR)
+	IS
+	BEGIN
+	      p_STATUS := GA.SUCCESS;
+		OPEN p_CURSOR FOR
+			SELECT DISTINCT REPORT_SOURCE
+			FROM SEM_OUTAGE_SCHEDULE SOS
+			ORDER BY 1;
+	END OUTAGE_RPT_SOURCES;
+---------------------------------------
+  PROCEDURE IC_NAMES
+    (p_STATUS                    OUT NUMBER,
+     p_CURSOR                    OUT REF_CURSOR)
+	IS
+	BEGIN
+		p_STATUS := GA.SUCCESS;
+		OPEN p_CURSOR FOR
+		SELECT DISTINCT SERVICE_POINT_NAME, SERVICE_POINT_ID
+		FROM SERVICE_POINT SP,
+			TEMPORAL_ENTITY_ATTRIBUTE RT
+		WHERE RT.ATTRIBUTE_ID = g_RESOURCE_TYPE_ATT_ID
+			AND RT.OWNER_ENTITY_ID = SP.SERVICE_POINT_ID
+			AND RT.ATTRIBUTE_VAL = 'I'
+		ORDER BY 1;
+	END IC_NAMES;
+---------------------------------------
+  PROCEDURE RAR_COUNTERPARTY_IDs
+  	(
+	p_ENTITY_ID IN NUMBER,
+	p_STATUS OUT NUMBER,
+	p_CURSOR OUT REF_CURSOR
+	) IS
+  BEGIN
+  	p_STATUS := GA.SUCCESS;
+
+	OPEN p_CURSOR FOR
+		SELECT g_ALL_STRING, g_ALL
+		FROM DUAL
+		UNION ALL
+		SELECT PSE_NAME, PSE_ID
+		FROM (SELECT DISTINCT PSE.PSE_NAME, PSE.PSE_ID
+    		FROM SEM_SRA S, PURCHASING_SELLING_ENTITY PSE
+    		WHERE S.ENTITY_ID = p_ENTITY_ID
+    			AND PSE.PSE_ID = S.COUNTERPARTY_ID
+    		ORDER BY 1);
+  END RAR_COUNTERPARTY_IDs;
+---------------------------------------
+  PROCEDURE RAR_AGREEMENT_NAMES
+  	(
+	p_ENTITY_ID IN NUMBER,
+	p_COUNTERPARTY_ID IN NUMBER,
+	p_STATUS OUT NUMBER,
+	p_CURSOR OUT REF_CURSOR
+	) IS
+  BEGIN
+  	p_STATUS := GA.SUCCESS;
+
+	OPEN p_CURSOR FOR
+		SELECT g_ALL_STRING
+		FROM DUAL
+		UNION ALL
+		SELECT AGREEMENT_NAME
+		FROM (SELECT DISTINCT S.AGREEMENT_NAME
+    		FROM SEM_SRA S, PURCHASING_SELLING_ENTITY PSE
+    		WHERE S.ENTITY_ID = p_ENTITY_ID
+    			AND p_COUNTERPARTY_ID IN (g_ALL,S.COUNTERPARTY_ID)
+    		ORDER BY 1);
+  END RAR_AGREEMENT_NAMES;
+---------------------------------------
+  PROCEDURE PIR_RESOURCE_NAMES
+  	(
+	p_ENTITY_ID IN NUMBER,
+	p_STATUS OUT NUMBER,
+	p_CURSOR OUT REF_CURSOR
+	) IS
+  BEGIN
+  	p_STATUS := GA.SUCCESS;
+
+	OPEN p_CURSOR FOR
+     SELECT g_ALL_STRING AS RESOURCE_NAME
+       FROM DUAL
+     UNION ALL
+     SELECT RESOURCE_NAME
+       FROM (SELECT SP.SERVICE_POINT_NAME AS RESOURCE_NAME
+               FROM PURCHASING_SELLING_ENTITY PSE,
+                    SERVICE_POINT             SP,
+                    SEM_SERVICE_POINT_PSE     SSPP,
+                    SEM_SETTLEMENT_ENTITY     SSE
+              WHERE PSE.PSE_ID             = p_ENTITY_ID
+                AND SSE.SETTLEMENT_PSE_ID  = PSE.PSE_ID
+                AND SSE.PARTICIPANT_PSE_ID = SSPP.PSE_ID
+                AND SP.SERVICE_POINT_ID    = SSPP.POD_ID
+              ORDER BY 1);
+  END PIR_RESOURCE_NAMES;
+---------------------------------------
+  PROCEDURE PIR_VARIABLE_TYPES
+  	(
+	p_STATUS OUT NUMBER,
+	p_CURSOR OUT REF_CURSOR
+	) IS
+  BEGIN
+  	p_STATUS := GA.SUCCESS;
+
+	OPEN p_CURSOR FOR
+      SELECT g_ALL_STRING AS VARIABLE_TYPE
+        FROM DUAL
+      UNION ALL
+      SELECT S.VALUE AS VARIABLE_TYPE
+        FROM SYSTEM_LABEL S
+       WHERE S.MODEL_ID      = GA.ELECTRIC_MODEL
+         AND UPPER(S.MODULE) = 'MARKETEXCHANGE'
+         AND UPPER(S.KEY1)   = 'SEM'
+         AND UPPER(S.KEY2)   = 'SETTLEMENT'
+         AND UPPER(S.KEY3)   = 'PIRVARIABLES'
+       ORDER BY 1;
+
+  END PIR_VARIABLE_TYPES;
+---------------------------------------
+   PROCEDURE INTERCONNECTOR_DETAILS
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_POD_ID        			 IN VARCHAR2,
+  	 p_PSE_ID 					 IN VARCHAR2,
+	 p_RUN_TYPE					 IN VARCHAR2,
+	 p_SHOW_ATC					 IN NUMBER,
+	 p_SHOW_REV_ATC				 IN NUMBER,
+	 p_SHOW_INDIC				 IN NUMBER,
+	 p_SHOW_INIT				 IN NUMBER,
+	 p_SHOW_NOMS				 IN NUMBER,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+     v_POD_IDs					ID_TABLE;
+	 v_PSE_IDS        			ID_TABLE;
+	 v_RUN_TYPEs				STRING_TABLE;
+   BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+	 UT.ID_TABLE_FROM_STRING(p_POD_ID, c_COMMA, v_POD_IDs);
+	 UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+	 UT.STRING_TABLE_FROM_STRING(p_RUN_TYPE, c_COMMA, v_RUN_TYPEs);
+
+     OPEN p_CURSOR FOR
+          SELECT  SP.SERVICE_POINT_NAME,
+		  		FROM_CUT_AS_HED(SD.SCHEDULE_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+				  EI.GET_ENTITY_NAME(EC.ED_PSE, SD.PSE_ID) PARTICIPANT,
+				  SD.RUN_TYPE RUN_TYPE,
+                  CASE WHEN p_SHOW_ATC = 0 THEN NULL ELSE SD.MAXIMUM_EXPORT_MW END as MAXIMUM_EXPORT_MW,
+                  CASE WHEN p_SHOW_ATC = 0 THEN NULL ELSE SD.MAXIMUM_IMPORT_MW END as MAXIMUM_IMPORT_MW,
+                  CASE WHEN p_SHOW_REV_ATC = 0 THEN NULL ELSE SD.REV_MAXIMUM_EXPORT_MW END as REV_MAXIMUM_EXPORT_MW,
+                  CASE WHEN p_SHOW_REV_ATC = 0 THEN NULL ELSE SD.REV_MAXIMUM_IMPORT_MW END as REV_MAXIMUM_IMPORT_MW,
+                  CASE WHEN p_SHOW_INDIC = 0 THEN NULL ELSE SD.INDICATIVE_NET_FLOW END as INDICATIVE_NET_FLOW,
+                  CASE WHEN p_SHOW_INDIC = 0 THEN NULL ELSE SD.INDICATIVE_RESIDUAL_CAPACITY END as INDICATIVE_RESIDUAL_CAPACITY,
+                  CASE WHEN p_SHOW_INIT = 0 THEN NULL ELSE SD.INITIAL_NET_FLOW END as INITIAL_NET_FLOW,
+                  CASE WHEN p_SHOW_INIT = 0 THEN NULL ELSE SD.INITIAL_RESIDUAL_CAPACITY END as INITIAL_RESIDUAL_CAPACITY,
+                  CASE WHEN p_SHOW_NOMS = 0 THEN NULL ELSE SD.UNIT_NOMINATION END as UNIT_NOMINATION
+          FROM    SEM_IC_DATA SD,
+		  		  SERVICE_POINT SP,
+				  TABLE(CAST(v_POD_IDs as ID_TABLE)) P,
+				  TABLE(CAST(v_PSE_IDs AS ID_TABLE)) Q,
+				  TABLE(CAST(v_RUN_TYPEs AS STRING_TABLE)) R
+          WHERE   SD.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+	  	  AND 	  SD.POD_ID = P.ID
+          AND     SP.SERVICE_POINT_ID = SD.POD_ID
+		  AND 	  (Q.ID = SD.PSE_ID OR Q.ID = g_ALL)
+		  AND	  (R.STRING_VAL = SD.RUN_TYPE OR UPPER(R.STRING_VAL) = UPPER(g_ALL_STRING))
+          ORDER BY 2, 4, 3, 1;
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+   END INTERCONNECTOR_DETAILS;
+---------------------------------------
+PROCEDURE INTERCONNECTOR_NET_ACTUALS
+    (p_BEGIN_DATE IN DATE,
+    p_END_DATE    IN DATE,
+    p_TIME_ZONE   IN VARCHAR2,
+    p_PSE_ID		    IN VARCHAR2,
+    p_POD_ID      IN VARCHAR2,
+    p_RUN_TYPE		  IN VARCHAR2,
+    p_GATE_WINDOW IN VARCHAR2,
+    p_STATUS      OUT NUMBER,
+    p_CURSOR      IN OUT REF_CURSOR)
+IS
+    v_BEGIN_DATE       DATE;
+    v_END_DATE         DATE;
+    v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER('MI30');
+    v_PSE_IDS          ID_TABLE;
+    v_POD_IDs          ID_TABLE;
+    v_RUN_TYPEs 	      STRING_TABLE;
+    v_GATE_WINDOWs 	   STRING_TABLE;
+BEGIN
+
+	UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+	UT.ID_TABLE_FROM_STRING(p_POD_ID, c_COMMA, v_POD_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_RUN_TYPE, c_COMMA, v_RUN_TYPEs);
+	UT.STRING_TABLE_FROM_STRING(p_GATE_WINDOW, c_COMMA, v_GATE_WINDOWs);
+ -- Make sure we have data in the SYSTEM_DATE_TIME table.  Return an error if not.
+	SP.CHECK_SYSTEM_DATE_TIME(p_TIME_ZONE, p_BEGIN_DATE, p_END_DATE);
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	OPEN p_CURSOR FOR
+    WITH
+        ST_ORDER AS (
+                    SELECT I.EXTERNAL_IDENTIFIER,
+                         ST.STATEMENT_TYPE_ORDER
+                    FROM EXTERNAL_SYSTEM_IDENTIFIER I,
+                         STATEMENT_TYPE ST
+                    WHERE I.ENTITY_DOMAIN_ID = EC.ED_STATEMENT_TYPE
+                          AND I.EXTERNAL_SYSTEM_ID = EC.ES_SEM
+                          AND I.IDENTIFIER_TYPE = MM_SEM_UTIL.g_STATEMENT_TYPE_RUN_TYPE
+                          AND ST.STATEMENT_TYPE_ID = I.ENTITY_ID
+                    )
+        SELECT SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+            CASE WHEN A.PARTICIPANT_NAME IS NOT NULL AND A.RESOURCE_NAME IS NOT NULL
+            THEN A.PARTICIPANT_NAME || ':' || A.RESOURCE_NAME
+            ELSE NULL END AS PARTICIPANT_IC,
+            A.RUN_TYPE_DISPLAY_ORDER,
+            A.RUN_TYPE,
+			CASE WHEN A.RUN_TYPE IS NULL THEN NULL ELSE A.RUN_TYPE || ' (Run Type)' END RUN_TYPE_DISPLAY,
+            A.GATE_WINDOW_DISPLAY_ORDER,
+            A.GATE_WINDOW,
+			CASE WHEN A.GATE_WINDOW IS NULL THEN NULL ELSE A.GATE_WINDOW || ' (Gate)' END GATE_WINDOW_DISPLAY,
+            A.SCHEDULE_MW
+        FROM SYSTEM_DATE_TIME SDT,
+             (SELECT E.EXTERNAL_IDENTIFIER AS PARTICIPANT_NAME,
+                       SP.SERVICE_POINT_NAME AS RESOURCE_NAME,
+                       B.*,
+                       RUN_TYPE_ORDER.STATEMENT_TYPE_ORDER AS RUN_TYPE_DISPLAY_ORDER,
+                       GATE_WINDOW_ORDER.STATEMENT_TYPE_ORDER AS GATE_WINDOW_DISPLAY_ORDER
+             FROM PSE,
+               SERVICE_POINT SP,
+               EXTERNAL_SYSTEM_IDENTIFIER E,
+               SEM_IC_NET_ACTUAL B,
+               TABLE(CAST(v_PSE_IDs as ID_TABLE)) P,
+               TABLE(CAST(v_POD_IDs as ID_TABLE)) R,
+               TABLE(CAST(v_RUN_TYPEs AS STRING_TABLE)) RT,
+               TABLE(CAST(v_GATE_WINDOWs AS STRING_TABLE)) GW,
+               ST_ORDER RUN_TYPE_ORDER,
+               ST_ORDER GATE_WINDOW_ORDER
+             WHERE PSE.PSE_ID = E.ENTITY_ID
+                 AND E.EXTERNAL_SYSTEM_ID = EC.ES_SEM
+                 AND E.ENTITY_DOMAIN_ID = EC.ED_PSE
+                 AND E.IDENTIFIER_TYPE = 'Default'
+                 AND B.PSE_ID = PSE.PSE_ID
+                 AND B.POD_ID = SP.SERVICE_POINT_ID
+                 AND (P.ID = PSE.PSE_ID OR P.ID = g_ALL)
+                 AND (R.ID = SP.SERVICE_POINT_ID OR R.ID = g_ALL)
+                 AND (RT.STRING_VAL = B.RUN_TYPE OR UPPER(RT.STRING_VAL) = UPPER(g_ALL_STRING))
+                 AND (GW.STRING_VAL = B.GATE_WINDOW OR UPPER(GW.STRING_VAL) = UPPER(g_ALL_STRING))
+                 AND RUN_TYPE_ORDER.EXTERNAL_IDENTIFIER = B.RUN_TYPE
+                 AND GATE_WINDOW_ORDER.EXTERNAL_IDENTIFIER = B.GATE_WINDOW) A
+        WHERE SDT.TIME_ZONE = p_TIME_ZONE
+            AND SDT.DATA_INTERVAL_TYPE = 1
+            AND SDT.DAY_TYPE = '1'
+            AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+            AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+            AND A.SCHEDULE_DATE(+) = SDT.CUT_DATE
+        ORDER BY SDT.NO_ROLLUP_YYYY_MM_DD, PARTICIPANT_IC, A.RUN_TYPE, A.GATE_WINDOW;
+
+EXCEPTION
+    WHEN OTHERS THEN
+    p_STATUS := SQLCODE;
+END INTERCONNECTOR_NET_ACTUALS;
+---------------------------------------
+   PROCEDURE TRANS_ADJ_LOSS_FACTORS
+    (p_MODEL_ID                  IN NUMBER,
+     p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_PSE_ID                  IN VARCHAR2,
+     p_SERVICE_POINT_ID        IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_PSE_IDs					ID_TABLE;
+	 v_SP_IDs					ID_TABLE;
+
+   BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     UT.CUT_DATE_RANGE(p_MODEL_ID, p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	 UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+
+	 IF p_SERVICE_POINT_ID IS NULL THEN
+	 	v_SP_IDs := ID_TABLE(ID_TYPE(-1));
+ 	 ELSE
+	 	UT.ID_TABLE_FROM_STRING(p_SERVICE_POINT_ID, c_COMMA, v_SP_IDs);
+	 END IF;
+
+
+     OPEN p_CURSOR FOR
+          SELECT  PSE.PSE_NAME,
+		 		  SP.SERVICE_POINT_NAME,
+				  FROM_CUT_AS_HED(SLF.SCHEDULE_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SLF.LOSS_FACTOR
+          FROM    SEM_LOSS_FACTOR SLF,
+		  		  PURCHASING_SELLING_ENTITY PSE,
+				  SERVICE_POINT SP,
+				  TABLE(CAST(v_SP_IDs AS ID_TABLE)) S,
+				  TABLE(CAST(v_PSE_IDs AS ID_TABLE)) P
+          WHERE   SLF.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		  AND	  SLF.PSE_ID = P.ID
+		  AND 	  S.ID IN (SLF.POD_ID, -1)
+		  AND 	  SP.SERVICE_POINT_ID = SLF.POD_ID
+		  AND     PSE.PSE_ID = SLF.PSE_ID
+          ORDER BY 1, 2, 3;
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+   END TRANS_ADJ_LOSS_FACTORS;
+---------------------------------------
+   PROCEDURE DISPATCH_INSTR
+    (p_REPORT_TYPE               IN VARCHAR2,
+     p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_PSE_ID                    IN VARCHAR2,
+     p_SERVICE_POINT_ID          IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+    v_BEGIN_DATE                DATE;
+    v_END_DATE                  DATE;
+    v_PSE_IDs					ID_TABLE;
+    v_SP_IDs					ID_TABLE;
+
+   BEGIN
+
+    p_STATUS := GA.SUCCESS;
+
+    UT.CUT_DATE_RANGE(GA.DEFAULT_MODEL, p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+    UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+    UT.ID_TABLE_FROM_STRING(p_SERVICE_POINT_ID, c_COMMA, v_SP_IDs);
+
+	 -- 26-nov-2007, jbc: added INSTRUCTION_COMBINATION_CODE field to return cursor;
+	 -- part of fix for BZ 15100.
+    OPEN p_CURSOR FOR
+    SELECT PSE.PSE_NAME,
+        SP.SERVICE_POINT_NAME,
+        FROM_CUT(SD.INSTRUCTION_TIME_STAMP,p_TIME_ZONE) as INSTRUCTION_TIME_STAMP,
+        FROM_CUT(SD.INSTRUCTION_ISSUE_TIME,p_TIME_ZONE) as INSTRUCTION_ISSUE_TIME,
+        SD.DISPATCH_INSTRUCTION,
+        SD.RAMP_UP_RATE,
+        SD.RAMP_DOWN_RATE,
+        SD.INSTRUCTION_CODE,
+        SD.INSTRUCTION_COMBINATION_CODE
+    FROM SEM_DISPATCH_INSTR SD,
+        PURCHASING_SELLING_ENTITY PSE,
+        SERVICE_POINT SP
+    WHERE SD.REPORT_TYPE = p_REPORT_TYPE
+        AND SD.INSTRUCTION_TIME_STAMP BETWEEN v_BEGIN_DATE AND v_END_DATE
+        AND SD.PSE_ID IN (SELECT ID FROM TABLE(CAST(v_PSE_IDs AS ID_TABLE)))
+        AND SD.POD_ID IN (SELECT ID FROM TABLE(CAST(v_SP_IDs AS ID_TABLE)))
+        AND SP.SERVICE_POINT_ID = SD.POD_ID
+        AND PSE.PSE_ID = SD.PSE_ID
+    ORDER BY 1, 2, 3, 4, 5, 6;
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+   END DISPATCH_INSTR;
+---------------------------------------
+   PROCEDURE METER_DATA_SUMMARY
+   (
+       p_BEGIN_DATE  IN DATE,
+       p_END_DATE    IN DATE,
+       p_TIME_ZONE   IN VARCHAR2,
+       p_PERIODICITY IN VARCHAR2,
+       p_STATUS      OUT NUMBER,
+       p_CURSOR      IN OUT REF_CURSOR
+   ) IS
+
+       v_BEGIN_DATE          DATE;
+       v_END_DATE            DATE;
+       v_PERIODS             STRING_COLLECTION;
+       v_MIN_INTERVAL_NUMBER NUMBER(2) := GET_INTERVAL_NUMBER(c_MI30_INTERVAL);
+   BEGIN
+
+       p_STATUS := GA.SUCCESS;
+
+       UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE,p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+       v_PERIODS := GET_PERIODICITY_VALS(p_PERIODICITY);
+
+       OPEN p_CURSOR FOR
+           SELECT CASE SMD.PERIODICITY
+                      WHEN 'D1' THEN 'Daily (D+1)'
+                      WHEN 'D3' THEN 'Daily (D+3)'
+                  END PERIODICITY,
+                  FROM_CUT_AS_HED(X.CUT_DATE, p_TIME_ZONE, c_MI30_INTERVAL) SCHEDULE_DATE,
+                  SMD.TOTAL_GEN,
+                  SMD.TOTAL_LOAD
+           FROM (SELECT SDT.CUT_DATE, P.COLUMN_VALUE PERIODICITY
+                   FROM SYSTEM_DATE_TIME SDT,
+                        TABLE(CAST(v_PERIODs AS STRING_COLLECTION)) P
+                  WHERE SDT.TIME_ZONE = p_TIME_ZONE
+                    AND SDT.DATA_INTERVAL_TYPE = 1
+                    AND SDT.DAY_TYPE = '1'
+                    AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+                    AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUMBER) X,
+                SEM_METER_SUMMARY SMD
+           WHERE X.CUT_DATE = SMD.SCHEDULE_DATE(+)
+           AND X.PERIODICITY = SMD.PERIODICITY(+)
+           ORDER BY 1, 2;
+
+       /*OPEN p_CURSOR FOR
+       SELECT  CASE SMD.PERIODICITY
+                     WHEN 'D1' THEN 'Daily (D+1)'
+                     WHEN 'D3' THEN 'Daily (D+3)'
+                     END PERIODICITY,
+                 FROM_CUT_AS_HED(SMD.SCHEDULE_DATE,
+                               p_TIME_ZONE,
+                               c_MI30_INTERVAL)  SCHEDULE_DATE,
+               SMD.TOTAL_GEN,
+               SMD.TOTAL_LOAD
+       FROM    SEM_METER_SUMMARY SMD,
+                 TABLE(CAST(v_PERIODs AS STRING_COLLECTION)) P,
+                 SYSTEM_DATE_TIME SDT
+       WHERE   SDT.TIME_ZONE = p_TIME_ZONE
+         AND     SDT.DATA_INTERVAL_TYPE = 1
+         AND   SDT.DAY_TYPE = '1'
+         AND   SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+         AND   SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUMBER
+         AND   SMD.SCHEDULE_DATE(+) = SDT.CUT_DATE_SCHEDULING
+         AND     SMD.PERIODICITY = P.COLUMN_VALUE
+
+       ORDER BY 1,2;*/
+
+
+   EXCEPTION
+       WHEN OTHERS THEN
+           p_STATUS := SQLCODE;
+
+   END METER_DATA_SUMMARY;
+---------------------------------------
+   PROCEDURE METER_DATA_DETAIL
+    (
+     p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+	 p_PERIODICITY				  IN VARCHAR2,
+	 p_POD_ID					 IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_PERIODS					STRING_COLLECTION;
+	 v_POD_IDs					ID_TABLE;
+   BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+	 v_PERIODS := GET_PERIODICITY_VALS(p_PERIODICITY);
+	 UT.ID_TABLE_FROM_STRING(p_POD_ID, c_COMMA, v_POD_IDs);
+
+     OPEN p_CURSOR FOR
+          SELECT  CASE SMD.PERIODICITY
+		  				WHEN 'D1' THEN 'Daily (D+1)'
+						WHEN 'D3' THEN 'Daily (D+3)'
+		  				END PERIODICITY,
+		  			FROM_CUT_AS_HED(SMD.SCHEDULE_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+					SMD.JURISDICTION,
+					SMD.RESOURCE_TYPE,
+					SP.SERVICE_POINT_NAME,
+                  SMD.METERED_MW,
+				  SMD.METER_TRANSMISSION_TYPE
+          FROM    SEM_METER_DETAIL SMD,
+					TABLE(CAST(v_PERIODs AS STRING_COLLECTION)) P,
+					TABLE(CAST(v_POD_IDs AS ID_TABLE)) R,
+					SERVICE_POINT SP
+          WHERE   SMD.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		  AND	  SMD.PERIODICITY = P.COLUMN_VALUE
+		  AND	  SMD.POD_ID = R.ID
+		  AND	  SP.SERVICE_POINT_ID = SMD.POD_ID
+          ORDER BY 1,2,3,4,5;
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+	END METER_DATA_DETAIL;
+---------------------------------------
+   PROCEDURE OUTAGE_SCHEDULES
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_REPORT_SOURCE             IN VARCHAR2,
+     p_POD_ID        IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_POD_IDs				ID_TABLE;
+
+   BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	 UT.ID_TABLE_FROM_STRING(p_POD_ID, c_COMMA, v_POD_IDs);
+
+     OPEN p_CURSOR FOR
+          SELECT  SOS.REPORT_SOURCE,
+		  		  SP.SERVICE_POINT_NAME,
+                  FROM_CUT(SOS.BEGIN_TIME,p_TIME_ZONE) as BEGIN_TIME,
+                  FROM_CUT(SOS.END_TIME,p_TIME_ZONE) as END_TIME,
+                  CASE SOS.OUTAGE_REASON_FLAG
+				  	WHEN 'P' THEN 'Planned'
+					WHEN 'F' THEN 'Forced'
+					WHEN 'C' THEN 'Consequential'
+					ELSE SOS.OUTAGE_REASON_FLAG
+					END as OUTAGE_REASON_FLAG,
+                  SOS.DERATE_MW,
+                  CASE SOS.EQUIPMENT_STATUS
+				  	WHEN 'O' THEN 'Out of Service'
+					WHEN 'I' THEN 'In Service'
+					WHEN 'D' THEN 'De-Rate'
+					ELSE SOS.EQUIPMENT_STATUS
+					END As EQUIPMENT_STATUS
+          FROM    SEM_OUTAGE_SCHEDULE SOS,
+                  SERVICE_POINT SP,
+				  TABLE(CAST(v_POD_IDs AS ID_TABLE)) P
+          WHERE   SOS.POD_ID = SP.SERVICE_POINT_ID
+          AND     SOS.REPORT_SOURCE = p_REPORT_SOURCE
+          AND     SOS.BEGIN_TIME <= v_END_DATE
+          AND     SOS.END_TIME >= v_BEGIN_DATE
+          AND     SOS.POD_ID = P.ID
+          ORDER BY 1, 2;
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+   END OUTAGE_SCHEDULES;
+---------------------------------------
+   PROCEDURE INTERCONNECTOR_CAP_HOLDINGS
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_PSE_ID                  IN VARCHAR2,
+     p_POD_ID					IN VARCHAR2,
+	 p_PERIODICITY				IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_PERIODS				STRING_COLLECTION;
+	 v_PSE_IDs				ID_TABLE;
+	 v_POD_IDs				ID_TABLE;
+
+   BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	 UT.STRING_COLLECTION_FROM_STRING(p_PERIODICITY, c_COMMA, v_PERIODS);
+	 IF p_PSE_ID IS NULL THEN
+	 	v_PSE_IDs := ID_TABLE(ID_TYPE(-1));
+	ELSE
+		 UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+	END IF;
+	 UT.ID_TABLE_FROM_STRING(p_POD_ID, c_COMMA, v_POD_IDs);
+
+     OPEN p_CURSOR FOR
+          SELECT  CASE PERIODICITY
+		  				WHEN 'A' THEN 'Annual'
+						WHEN 'M' THEN 'Monthly'
+						WHEN 'D' THEN 'Daily'
+						WHEN 'DA' THEN 'Daily Active'
+						END as PERIODICITY,
+		  			PSE.PSE_NAME,
+					SP.SERVICE_POINT_NAME,
+		  			FROM_CUT_AS_HED(SCH.SCHEDULE_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SCH.IC_EXPORT_CAPACITY,
+                  SCH.IC_IMPORT_CAPACITY
+          FROM    SEM_IC_CAP_HOLDINGS SCH,
+		  			PURCHASING_SELLING_ENTITY PSE,
+					SERVICE_POINT SP,
+					TABLE(CAST(v_PERIODS AS STRING_COLLECTION)) PERIODS,
+					TABLE(CAST(v_PSE_IDs as ID_TABLE)) P,
+					TABLE(CAST(v_POD_IDs as ID_TABLE)) R
+          WHERE   SCH.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+          AND     P.ID IN (SCH.PSE_ID, -1)
+		  AND		PSE.PSE_ID = SCH.PSE_ID
+		  AND		SCH.POD_ID = R.ID
+		  AND		SP.SERVICE_POINT_ID = SCH.POD_ID
+		  AND		SCH.PERIODICITY = CASE PERIODS.COLUMN_VALUE
+		  								WHEN 'Daily Active' THEN 'DA'
+										ELSE SUBSTR(PERIODS.COLUMN_VALUE,1,1)
+										END
+          ORDER BY 1, 2, 3, 4;
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+   END INTERCONNECTOR_CAP_HOLDINGS;
+---------------------------------------
+   PROCEDURE LOAD_FORECAST_ASSUMPTIONS
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_JURISDICTIONS             IN VARCHAR2,
+     p_PERIODICITY               IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_JURISDICTIONS			STRING_COLLECTION;
+	 v_PERIODS					STRING_COLLECTION;
+	 v_MIN_INTERVAL_NUMBER 		NUMBER(2) := GET_INTERVAL_NUMBER(c_MI30_INTERVAL);
+
+   BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	 UT.STRING_COLLECTION_FROM_STRING(p_JURISDICTIONS,c_COMMA,v_JURISDICTIONS);
+	 v_PERIODS := GET_PERIODICITY_VALS(p_PERIODICITY);
+
+
+	     OPEN p_CURSOR FOR
+          SELECT  X.JURISDICTION,
+		  		  CASE X.PERIODICITY
+				  	WHEN 'A' THEN 'Annual'
+					WHEN 'M' THEN 'Monthly'
+                    -- RSA -- 04/20/2007 -- (D+1)-(D+4) fix
+					WHEN 'D1' THEN 'Daily (D+1)'
+                    WHEN 'D2' THEN 'Daily (D+2)'
+                    WHEN 'D3' THEN 'Daily (D+3)'
+                    WHEN 'D4' THEN 'Daily (D+4)'
+					END PERIODICITY,
+				  FROM_CUT_AS_HED(X.CUT_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SLF.LOAD_MW,
+                  SLF.ASSUMPTIONS
+          FROM    (SELECT SDT.CUT_DATE, P.COLUMN_VALUE PERIODICITY, J.COLUMN_VALUE JURISDICTION
+                   FROM SYSTEM_DATE_TIME SDT,
+                        TABLE(CAST(v_PERIODs AS STRING_COLLECTION)) P,
+						TABLE(CAST(v_JURISDICTIONS AS STRING_COLLECTION)) J
+                  WHERE SDT.TIME_ZONE = p_TIME_ZONE
+                    AND SDT.DATA_INTERVAL_TYPE = 1
+                    AND SDT.DAY_TYPE = '1'
+                    AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+                    AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUMBER) X,
+		          SEM_LOAD SLF
+          WHERE   X.CUT_DATE = SLF.SCHEDULE_DATE(+)
+		  	AND   X.PERIODICITY = SLF.PERIODICITY(+)
+		  	AND   X.JURISDICTION = SLF.JURISDICTION(+)
+          ORDER BY 1,2,3;
+
+
+/*     OPEN p_CURSOR FOR
+          SELECT  SLF.JURISDICTION,
+		  		  CASE SLF.PERIODICITY
+				  	WHEN 'A' THEN 'Annual'
+					WHEN 'M' THEN 'Monthly'
+                    -- RSA -- 04/20/2007 -- (D+1)-(D+4) fix
+					WHEN 'D1' THEN 'Daily (D+1)'
+                    WHEN 'D2' THEN 'Daily (D+2)'
+                    WHEN 'D3' THEN 'Daily (D+3)'
+                    WHEN 'D4' THEN 'Daily (D+4)'
+					END PERIODICITY,
+				  FROM_CUT_AS_HED(SDT.CUT_DATE_SCHEDULING,--SLF.SCHEDULE_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SLF.LOAD_MW,
+                  SLF.ASSUMPTIONS
+          FROM    SYSTEM_DATE_TIME SDT,
+		          SEM_LOAD SLF,
+		  		  TABLE(CAST(v_JURISDICTIONS AS STRING_COLLECTION)) J,
+		  		  TABLE(CAST(v_PERIODS AS STRING_COLLECTION)) P
+          WHERE   SDT.CUT_DATE_SCHEDULING = SLF.SCHEDULE_DATE(+)
+		  	AND   SDT.TIME_ZONE = p_TIME_ZONE
+    		AND   SDT.DATA_INTERVAL_TYPE = 1
+    		AND   SDT.DAY_TYPE = '1'
+    		AND   SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+			AND   SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUMBER
+		  	AND   SLF.JURISDICTION = J.COLUMN_VALUE
+			AND   SLF.PERIODICITY = P.COLUMN_VALUE(+)
+          ORDER BY 1,2,3;*/
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+   END LOAD_FORECAST_ASSUMPTIONS;
+---------------------------------------
+   PROCEDURE LOAD_FORECAST_SUMMARY
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_JURISDICTIONS             IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+	IS
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_JURISDICTIONS			STRING_COLLECTION;
+	BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	 UT.STRING_COLLECTION_FROM_STRING(p_JURISDICTIONS,c_COMMA,v_JURISDICTIONS);
+
+     OPEN p_CURSOR FOR
+          SELECT  SLF.JURISDICTION,
+				  FROM_CUT_AS_HED(SLF.SCHEDULE_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SLF.LOAD_MW,
+                  SLF.ASSUMPTIONS,
+				  SLF.NET_MW
+          FROM    SEM_LOAD SLF,
+		  		  TABLE(CAST(v_JURISDICTIONS AS STRING_COLLECTION)) J
+          WHERE   SLF.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		  	AND   SLF.JURISDICTION = J.COLUMN_VALUE
+			AND   SLF.PERIODICITY = 'DS'
+          ORDER BY 1,2,3;
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+	END LOAD_FORECAST_SUMMARY;
+---------------------------------------
+   PROCEDURE ACTUAL_LOAD_SUMMARY
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_JURISDICTIONS             IN VARCHAR2,
+     p_RUN_TYPE               IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_JURISDICTIONS			STRING_COLLECTION;
+	 v_PERIODS					STRING_COLLECTION;
+
+   BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	 UT.STRING_COLLECTION_FROM_STRING(p_JURISDICTIONS,c_COMMA,v_JURISDICTIONS);
+	 v_PERIODS := GET_PERIODICITY_VALS(p_RUN_TYPE);
+
+     OPEN p_CURSOR FOR
+          SELECT  SLF.JURISDICTION,
+		  		  CASE SLF.PERIODICITY
+					WHEN 'DA-EA' THEN 'Ex-Ante'
+                    WHEN 'DA-EP1' THEN 'Ex-Post 1'
+                    WHEN 'DA-EP2' THEN 'Ex-Post 2'
+					END PERIODICITY,
+				  FROM_CUT_AS_HED(SLF.SCHEDULE_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SLF.LOAD_MW
+          FROM    SEM_LOAD SLF,
+		  		  TABLE(CAST(v_JURISDICTIONS AS STRING_COLLECTION)) J,
+		  		  TABLE(CAST(v_PERIODS AS STRING_COLLECTION)) P
+          WHERE   SLF.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		  	AND   SLF.JURISDICTION = J.COLUMN_VALUE
+			AND   SLF.PERIODICITY = P.COLUMN_VALUE
+          ORDER BY 1,2,3;
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+   END ACTUAL_LOAD_SUMMARY;
+---------------------------------------
+   PROCEDURE LOAD_ERROR_SUPPLY
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_JURISDICTIONS             IN VARCHAR2,
+     p_PERIODICITY               IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_JURISDICTIONS			STRING_COLLECTION;
+	 v_PERIODS					STRING_COLLECTION;
+
+   BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	 UT.STRING_COLLECTION_FROM_STRING(p_JURISDICTIONS,c_COMMA,v_JURISDICTIONS);
+	 v_PERIODS := GET_PERIODICITY_VALS(p_PERIODICITY);
+
+     OPEN p_CURSOR FOR
+          SELECT  SLF.JURISDICTION,
+		  		      CASE SLF.PERIODICITY
+					      WHEN 'D1-ES' THEN 'Daily (D+1)'
+                     WHEN 'D4-ES' THEN 'Daily (D+4)'
+					      WHEN 'D15-ES' THEN 'Daily (D+15)'
+					   END AS PERIODICITY,
+                  CASE
+                     WHEN SLF.REPORT_NAME LIKE 'PUB_D_JurisdictionErrorSupply%' THEN
+                       'JESU (MW)'
+                     WHEN SLF.REPORT_NAME LIKE 'PUB_D_ResidualErrorVolume%' THEN
+                       'REVLF (MWh)'
+                     ELSE
+                       NULL
+                  END AS REPORT_NAME,
+				      FROM_CUT_AS_HED(SLF.SCHEDULE_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SLF.LOAD_MW
+             FROM SEM_LOAD SLF,
+		  		      TABLE(CAST(v_JURISDICTIONS AS STRING_COLLECTION)) J,
+		  		      TABLE(CAST(v_PERIODS AS STRING_COLLECTION)) P
+            WHERE SLF.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		  	     AND SLF.JURISDICTION = J.COLUMN_VALUE
+		     	  AND SLF.PERIODICITY = P.COLUMN_VALUE||'-ES'
+            ORDER BY 1,2,4,3;
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+   END LOAD_ERROR_SUPPLY;
+---------------------------------------
+   PROCEDURE WIND_GEN_FORECAST
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_JURISDICTIONS             IN VARCHAR2,
+     p_PARTICIPANTS              IN VARCHAR2,
+     p_DAY_TYPE                  IN VARCHAR2,         -- RSA -- 04/20/2007 -- (D+1)-(D+4) fix
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_JURISDICTIONS			STRING_COLLECTION;
+	 v_PSE_IDs					ID_TABLE;
+     -- RSA -- 04/20/2007 -- (D+1)-(D+4) fix
+     v_DAY_TYPEs                 STRING_COLLECTION;
+	 v_MIN_INTERVAL_NUMBER 		NUMBER(2) := GET_INTERVAL_NUMBER(c_MI30_INTERVAL);
+
+   BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     -- RSA -- 04/20/2007 -- (D+1)-(D+4) fix
+     v_DAY_TYPEs := GET_PERIODICITY_VALS(p_DAY_TYPE);
+
+     UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	 UT.ID_TABLE_FROM_STRING(p_PARTICIPANTS, c_COMMA, v_PSE_IDs);
+	 UT.STRING_COLLECTION_FROM_STRING(p_JURISDICTIONS, c_COMMA, v_JURISDICTIONS);
+
+	      OPEN p_CURSOR FOR
+          SELECT  SGF.JURISDICTION,
+		  		  CASE SGF.PERIODICITY
+				  	WHEN 'A' THEN 'Annual'
+					WHEN 'M' THEN 'Monthly'
+                    -- RSA -- 04/20/2007 -- (D+1)-(D+4) fix
+					WHEN 'D1' THEN 'Daily (D+1)'
+                    WHEN 'D2' THEN 'Daily (D+2)'
+                    WHEN 'D3' THEN 'Daily (D+3)'
+                    WHEN 'D4' THEN 'Daily (D+4)'
+					END PERIODICITY,
+		  		  X.PSE_NAME,
+                  SP.SERVICE_POINT_NAME,
+				  FROM_CUT_AS_HED(X.CUT_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SGF.FORECAST_MW,
+                  SGF.ASSUMPTIONS
+          FROM    (SELECT SDT.CUT_DATE, D.COLUMN_VALUE PERIODICITY, J.COLUMN_VALUE JURISDICTION, P.ID, PSE.PSE_NAME
+                   FROM SYSTEM_DATE_TIME SDT,
+				   		TABLE(CAST(v_JURISDICTIONS AS STRING_COLLECTION)) J,
+						TABLE(CAST(v_DAY_TYPEs AS STRING_COLLECTION)) D,
+						TABLE(CAST(v_PSE_IDs AS ID_TABLE)) P,
+						PURCHASING_SELLING_ENTITY PSE
+                  WHERE SDT.TIME_ZONE = p_TIME_ZONE
+                    AND SDT.DATA_INTERVAL_TYPE = 1
+                    AND SDT.DAY_TYPE = '1'
+                    AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+                    AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUMBER
+					AND P.ID = PSE.PSE_ID) X,
+					SEM_GEN_FORECAST SGF,
+					SERVICE_POINT SP
+          WHERE   X.CUT_DATE = SGF.SCHEDULE_DATE(+)
+		  AND     X.JURISDICTION = SGF.JURISDICTION(+)
+		  AND     X.PERIODICITY = SGF.PERIODICITY(+)
+		  AND     X.ID = SGF.PSE_ID(+)
+		  AND     SGF.POD_ID = SP.SERVICE_POINT_ID(+)
+          ORDER BY 1,2,3;
+
+/*     OPEN p_CURSOR FOR
+          SELECT  SGF.JURISDICTION,
+		  		  CASE SGF.PERIODICITY
+				  	WHEN 'A' THEN 'Annual'
+					WHEN 'M' THEN 'Monthly'
+                    -- RSA -- 04/20/2007 -- (D+1)-(D+4) fix
+					WHEN 'D1' THEN 'Daily (D+1)'
+                    WHEN 'D2' THEN 'Daily (D+2)'
+                    WHEN 'D3' THEN 'Daily (D+3)'
+                    WHEN 'D4' THEN 'Daily (D+4)'
+					END PERIODICITY,
+		  		  PSE.PSE_NAME,
+                  SP.SERVICE_POINT_NAME,
+				  FROM_CUT_AS_HED(SGF.SCHEDULE_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SGF.FORECAST_MW,
+                  SGF.ASSUMPTIONS
+          FROM    SEM_GEN_FORECAST SGF,
+		  			PURCHASING_SELLING_ENTITY PSE,
+					TABLE(CAST(v_JURISDICTIONS AS STRING_COLLECTION)) J,
+					TABLE(CAST(v_PSE_IDs AS ID_TABLE)) P,
+					TABLE(CAST(v_DAY_TYPEs AS STRING_COLLECTION)) D,
+                    SERVICE_POINT SP,
+					SYSTEM_DATE_TIME SDT
+          WHERE   SDT.TIME_ZONE = p_TIME_ZONE
+		  AND	  SDT.DATA_INTERVAL_TYPE = 1
+		  AND     SDT.DAY_TYPE = '1'
+		  AND     SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		  AND     SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUMBER
+		  AND     SGF.SCHEDULE_DATE(+) = SDT.CUT_DATE_SCHEDULING
+          AND     SGF.JURISDICTION = J.COLUMN_VALUE
+          AND     SGF.PERIODICITY = D.COLUMN_VALUE       -- RSA -- 04/20/2007 -- (D+1)-(D+4) fix
+          AND     SGF.PSE_ID = PSE.PSE_ID
+		  AND 	  PSE.PSE_ID = P.ID
+          AND     SGF.POD_ID = SP.SERVICE_POINT_ID
+          ORDER BY 1,2,3;*/
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+   END WIND_GEN_FORECAST;
+---------------------------------------
+   PROCEDURE WIND_GEN_FORECAST_BY_JURIS
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_JURISDICTIONS             IN VARCHAR2,
+     p_DAY_TYPE                  IN VARCHAR2,         -- RSA -- 04/20/2007 -- (D+1)-(D+4) fix
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_JURISDICTIONS			STRING_COLLECTION;
+	 v_DAY_TYPEs                 STRING_COLLECTION;
+	 v_MIN_INTERVAL_NUMBER 		NUMBER(2) := GET_INTERVAL_NUMBER(c_MI30_INTERVAL);
+
+   BEGIN
+
+     v_DAY_TYPEs := GET_PERIODICITY_VALS(p_DAY_TYPE);
+
+     UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	 UT.STRING_COLLECTION_FROM_STRING(p_JURISDICTIONS, c_COMMA, v_JURISDICTIONS);
+
+	   OPEN p_CURSOR FOR
+          SELECT  SGF.JURISDICTION,
+		  		  CASE SGF.PERIODICITY
+				  	WHEN 'A' THEN 'Annual'
+					WHEN 'M' THEN 'Monthly'
+                    -- RSA -- 04/20/2007 -- (D+1)-(D+4) fix
+					WHEN 'D1' THEN 'Daily (D+1)'
+                    WHEN 'D2' THEN 'Daily (D+2)'
+                    WHEN 'D3' THEN 'Daily (D+3)'
+                    WHEN 'D4' THEN 'Daily (D+4)'
+					END PERIODICITY,
+		  		  FROM_CUT_AS_HED(X.CUT_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SGF.FORECAST_MW,
+                  SGF.ASSUMPTIONS
+          FROM    (SELECT SDT.CUT_DATE, D.COLUMN_VALUE PERIODICITY, J.COLUMN_VALUE JURISDICTION
+                   FROM SYSTEM_DATE_TIME SDT,
+                        TABLE(CAST(v_DAY_TYPEs AS STRING_COLLECTION)) D,
+						TABLE(CAST(v_JURISDICTIONS AS STRING_COLLECTION)) J
+                  WHERE SDT.TIME_ZONE = p_TIME_ZONE
+                    AND SDT.DATA_INTERVAL_TYPE = 1
+                    AND SDT.DAY_TYPE = '1'
+                    AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+                    AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUMBER) X,
+					SEM_GEN_FORECAST_AGG SGF
+          WHERE   X.CUT_DATE = SGF.SCHEDULE_DATE(+)
+          AND     X.JURISDICTION = SGF.JURISDICTION(+)
+          AND     X.PERIODICITY = SGF.PERIODICITY(+)
+          ORDER BY 1,2,3;
+
+
+/*     OPEN p_CURSOR FOR
+          SELECT  SGF.JURISDICTION,
+		  		  CASE SGF.PERIODICITY
+				  	WHEN 'A' THEN 'Annual'
+					WHEN 'M' THEN 'Monthly'
+                    -- RSA -- 04/20/2007 -- (D+1)-(D+4) fix
+					WHEN 'D1' THEN 'Daily (D+1)'
+                    WHEN 'D2' THEN 'Daily (D+2)'
+                    WHEN 'D3' THEN 'Daily (D+3)'
+                    WHEN 'D4' THEN 'Daily (D+4)'
+					END PERIODICITY,
+		  		  FROM_CUT_AS_HED(SGF.SCHEDULE_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SGF.FORECAST_MW,
+                  SGF.ASSUMPTIONS
+          FROM    SEM_GEN_FORECAST_AGG SGF,
+		  			TABLE(CAST(v_JURISDICTIONS AS STRING_COLLECTION)) J,
+					TABLE(CAST(v_DAY_TYPEs AS STRING_COLLECTION)) D,
+					SYSTEM_DATE_TIME SDT
+          WHERE   SDT.TIME_ZONE = p_TIME_ZONE
+		  AND	  SDT.DATA_INTERVAL_TYPE = 1
+		  AND     SDT.DAY_TYPE = '1'
+		  AND     SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		  AND     SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUMBER
+		  AND     SGF.SCHEDULE_DATE(+) = SDT.CUT_DATE_SCHEDULING
+          AND     SGF.JURISDICTION = J.COLUMN_VALUE
+          AND     SGF.PERIODICITY = D.COLUMN_VALUE       -- RSA -- 04/20/2007 -- (D+1)-(D+4) fix
+          ORDER BY 1,2,3;*/
+
+   END WIND_GEN_FORECAST_BY_JURIS;
+---------------------------------------
+  PROCEDURE NONWIND_GEN_FORECAST
+    (p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_JURISDICTIONS             IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+	IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_JURISDICTIONS			STRING_COLLECTION;
+
+   BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	 UT.STRING_COLLECTION_FROM_STRING(p_JURISDICTIONS, c_COMMA, v_JURISDICTIONS);
+
+     OPEN p_CURSOR FOR
+          SELECT  SLF.JURISDICTION,
+				  FROM_CUT_AS_HED(SLF.SCHEDULE_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SLF.LOAD_MW as FORECAST_MW,
+                  SLF.ASSUMPTIONS
+          FROM    SEM_LOAD SLF,
+					TABLE(CAST(v_JURISDICTIONS AS STRING_COLLECTION)) J
+          WHERE   SLF.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+          AND     SLF.JURISDICTION = J.COLUMN_VALUE
+          AND     SLF.PERIODICITY = 'DNWA'
+          ORDER BY 1,2;
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+	END NONWIND_GEN_FORECAST;
+---------------------------------------
+   PROCEDURE LOSS_LOAD_PROB_FORECAST
+    (p_MODEL_ID                  IN NUMBER,
+     p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+	 p_PERIODICITY               IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+	 v_PERIODICITY 				 STRING_COLLECTION;
+
+   BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     UT.CUT_DATE_RANGE(p_MODEL_ID, p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	 v_PERIODICITY := GET_PERIODICITY_VALS(p_PERIODICITY);
+
+     OPEN p_CURSOR FOR
+          SELECT  CASE SLLPF.PERIODICITY
+                    WHEN 'D' THEN 'Daily Forecast Ex-Post LOLP'
+                    WHEN 'M' THEN 'Monthly LOLP Forecast'
+                  END PERIODICITY,
+				  FROM_CUT_AS_HED(SLLPF.SCHEDULE_DATE,
+                                  p_TIME_ZONE,
+                                  c_MI30_INTERVAL)  SCHEDULE_DATE,
+                  SLLPF.LOSS_OF_LOAD_PROBABILITY
+          FROM    SEM_LOSS_LOAD_PROB_FORECAST SLLPF,
+		  			TABLE(CAST(v_PERIODICITY AS STRING_COLLECTION)) J
+          WHERE   SLLPF.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		            AND   SLLPF.PERIODICITY = J.COLUMN_VALUE
+          ORDER BY 1,2,3;
+
+   EXCEPTION
+     WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+   END LOSS_LOAD_PROB_FORECAST;
+---------------------------------------
+   PROCEDURE INTERCONNECTOR_ERR_UNIT_BAL
+    (p_MODEL_ID                  IN NUMBER,
+     p_BEGIN_DATE                IN DATE,
+     p_END_DATE                  IN DATE,
+     p_TIME_ZONE                 IN VARCHAR2,
+     p_SERVICE_POINT_NAME        IN VARCHAR2,
+     p_STATUS                    OUT NUMBER,
+     p_CURSOR                    IN OUT REF_CURSOR)
+   IS
+
+     v_BEGIN_DATE                DATE;
+     v_END_DATE                  DATE;
+
+   BEGIN
+
+     p_STATUS := GA.SUCCESS;
+
+     UT.CUT_DATE_RANGE(p_MODEL_ID, p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+     PUT_RO_REPORT_FILTERS(p_SERVICE_POINT_NAME, 'SERVICE_POINT_NAME', c_COMMA, TRUE);
+
+     OPEN p_CURSOR FOR
+          SELECT  SP.SERVICE_POINT_NAME,
+                  ERRUB.EFFECTIVE_DATE,
+                  ERRUB.EXPIRATION_DATE,
+                  ERRUB.INTERCONNECTOR_ADMINISTRATOR,
+                  ERRUB.INTERCONNECTOR_EXPORT_CAPACITY,
+                  ERRUB.INTERCONNECTOR_IMPORT_CAPACITY,
+                  ERRUB.MAXIMUM_EXPORT_CAPACITY,
+                  ERRUB.MAXIMUM_IMPORT_CAPACITY
+          FROM    SEM_IC_ERR_UNIT_BALANCE ERRUB,
+                  SERVICE_POINT SP
+          WHERE   ERRUB.POD_ID = SP.SERVICE_POINT_ID
+          AND     ERRUB.EFFECTIVE_DATE >= v_BEGIN_DATE
+          AND     ERRUB.EXPIRATION_DATE <= v_END_DATE
+          AND     SP.SERVICE_POINT_NAME IN (SELECT   RF.STRING_VAL
+                                            FROM     RO_REPORT_FILTERS RF)
+          ORDER BY 1, 2, 3;
+
+   END INTERCONNECTOR_ERR_UNIT_BAL;
+---------------------------------------
+	PROCEDURE GET_INACTIVE_PSEs
+	(
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	--p_REQ_TYPE IN VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_CURSOR OUT REF_CURSOR
+	) IS
+	BEGIN
+		-- 26.nov.2007, jbc: way back, SYSTEM_CID, USER_NAME, and REQUEST_TYPE
+		-- were taken out of this report. If we ain't gettin' it, we caint report it, cain we?
+		-- Part of fix for BZ 15072.
+		p_STATUS := GA.SUCCESS;
+
+		OPEN p_CURSOR FOR
+			SELECT --SIP.SYSTEM_CID as SYSTEM_NAME,
+				PSE.PSE_NAME,
+				--SIP.USER_NAME,
+				--SIP.REQUEST_TYPE,
+				SIP.EFF_DATE,
+				SIP.EXP_DATE
+			FROM SEM_INACTIVE_PART SIP,
+				PURCHASING_SELLING_ENTITY PSE
+			WHERE PSE.PSE_ID = SIP.PSE_ID
+				--AND UPPER(p_REQ_TYPE) IN ('BOTH',UPPER(SIP.REQUEST_TYPE))
+				AND NVL(EFF_DATE,LOW_DATE) <= p_END_DATE
+				AND NVL(EXP_DATE,HIGH_DATE) >= p_BEGIN_DATE
+			ORDER BY 1, 2, 3;
+	END GET_INACTIVE_PSEs;
+---------------------------------------
+	PROCEDURE GET_MSP_CANCELLATIONS
+	(
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_CURSOR IN OUT REF_CURSOR
+	) IS
+	BEGIN
+OPEN p_CURSOR FOR
+		SELECT TRADE_DATE, RUN_TYPE, CANCELLATION_DATETIME FROM SEM_MSP_CANCELLATION
+		WHERE TRADE_DATE BETWEEN p_BEGIN_DATE AND p_END_DATE
+		ORDER BY 1, 2, 3;
+	END GET_MSP_CANCELLATIONS;
+---------------------------------------
+	PROCEDURE GET_PIR_REPORT
+	(
+	p_ENTITY_ID IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR2,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_RESOURCE_NAME IN VARCHAR2,
+	p_VARIABLE_TYPE IN VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_CURSOR OUT REF_CURSOR
+	)
+	IS
+	BEGIN
+		p_STATUS := GA.SUCCESS;
+
+		OPEN p_CURSOR FOR
+			SELECT S.STATEMENT_DATE,
+				FROM_CUT_AS_HED(I.CHARGE_DATE,p_TIME_ZONE,'MI30') as CHARGE_DATE,
+				CASE WHEN I.RESOURCE_NAME = '?' THEN '*'
+					ELSE I.RESOURCE_NAME
+					END as RESOURCE_NAME,
+				CASE WHEN I.LOCATION_NAME = '?' THEN '*'
+					ELSE I.LOCATION_NAME
+					END as LOCATION_NAME,
+				I.VARIABLE_TYPE,
+				I.VARIABLE_NAME,
+				I.RESOLUTION,
+				I.CONTRACT,
+				I.UNIT,
+				I.VALUE
+			FROM SEM_MP_INFO I,
+				SEM_MP_STATEMENT S
+			WHERE S.ENTITY_ID = p_ENTITY_ID
+				AND S.STATEMENT_TYPE = p_STATEMENT_TYPE
+				AND S.STATEMENT_DATE BETWEEN p_BEGIN_DATE AND p_END_DATE
+				AND I.STATEMENT_ID = S.STATEMENT_ID
+				AND (p_RESOURCE_NAME IN (g_ALL_STRING,I.RESOURCE_NAME)
+					 OR I.RESOURCE_NAME = '?')
+				AND p_VARIABLE_TYPE IN (g_ALL_STRING,I.VARIABLE_TYPE)
+			ORDER BY 1, 2, 3, 4, 5, 6;
+
+	END GET_PIR_REPORT;
+---------------------------------------
+	PROCEDURE GET_RAR_REPORT
+	(
+	p_ENTITY_ID IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR2,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_COUNTERPARTY_ID IN NUMBER,
+	p_AGREEMENT_NAME IN VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_CURSOR OUT REF_CURSOR
+	)
+	IS
+	BEGIN
+		p_STATUS := GA.SUCCESS;
+
+		OPEN p_CURSOR FOR
+			SELECT S.BEGIN_DATE,
+				S.END_DATE,
+				PSE.PSE_NAME,
+				S.AGREEMENT_NAME,
+				FROM_CUT_AS_HED(S.CHARGE_DATE,p_TIME_ZONE,'MI30') as CHARGE_DATE,
+				S.UNIT,
+				S.SRA_AMOUNT,
+				S.IS_VALID,
+				S.REASON_INVALID
+			FROM SEM_SRA S, PURCHASING_SELLING_ENTITY PSE
+			WHERE S.ENTITY_ID = p_ENTITY_ID
+				AND S.STATEMENT_TYPE = p_STATEMENT_TYPE
+				AND S.BEGIN_DATE <= p_END_DATE
+				AND S.END_DATE >= p_BEGIN_DATE
+				AND p_COUNTERPARTY_ID IN (g_ALL,S.COUNTERPARTY_ID)
+				AND p_AGREEMENT_NAME IN (g_ALL_STRING,S.AGREEMENT_NAME)
+				AND PSE.PSE_ID = S.COUNTERPARTY_ID
+			ORDER BY 1, 2, 3, 4, 5;
+
+	END GET_RAR_REPORT;
+-------------------------------------------------------------------------------
+PROCEDURE SEM_STTL_ENTITY_LIST
+(
+    p_CURSOR IN OUT GA.REFCURSOR
+) IS
+BEGIN
+    OPEN p_CURSOR FOR
+        SELECT PSE.PSE_NAME, S.SETTLEMENT_PSE_ID
+        FROM SEM_SETTLEMENT_ENTITY S,
+            PSE
+        WHERE PSE.PSE_ID = S.SETTLEMENT_PSE_ID
+        ORDER BY 1;
+END SEM_STTL_ENTITY_LIST;
+---------------------------------------
+FUNCTION GET_INVOICE_ID
+	(
+	p_ENTITY_ID IN NUMBER,
+	p_INVOICE_DATE IN VARCHAR2,
+	p_STATEMENT_TYPE IN NUMBER,
+    p_AS_OF_DATE IN DATE
+) RETURN NUMBER IS
+    v_INVOICE_ID NUMBER(9);
+	v_INVOICE_BEGIN_DATE DATE;
+	BEGIN
+        IF p_INVOICE_DATE IS NULL THEN
+    		v_INVOICE_BEGIN_DATE := NULL;
+    	ELSE
+    		v_INVOICE_BEGIN_DATE := TO_DATE(SUBSTR(p_INVOICE_DATE,1,10), g_SHORT_DATE_FORMAT);
+    	END IF;
+
+        SELECT NVL(MAX(INVOICE_ID),-1) INTO v_INVOICE_ID
+        FROM INVOICE A
+        WHERE A.ENTITY_ID = p_ENTITY_ID
+    		AND A.STATEMENT_TYPE = p_STATEMENT_TYPE
+        AND A.STATEMENT_STATE = GA.EXTERNAL_STATE
+    		AND A.BEGIN_DATE <= v_INVOICE_BEGIN_DATE
+    		AND A.END_DATE >= v_INVOICE_BEGIN_DATE
+    		AND A.AS_OF_DATE = (SELECT MAX(AS_OF_DATE) FROM INVOICE
+    	                       	WHERE ENTITY_ID = A.ENTITY_ID
+    	                           	AND STATEMENT_TYPE = A.STATEMENT_TYPE
+    	                           	AND STATEMENT_STATE = A.STATEMENT_STATE
+    	                        	AND BEGIN_DATE = A.BEGIN_DATE
+    	                            AND AS_OF_DATE <= p_AS_OF_DATE);
+
+    RETURN v_INVOICE_ID;
+END GET_INVOICE_ID;
+---------------------------------------
+PROCEDURE SEM_INVOICE_ATTRIBUTES
+(
+    p_ENTITY_ID IN NUMBER,
+    p_INVOICE_DATE IN VARCHAR2,
+    p_STATEMENT_TYPE IN NUMBER,
+    p_AS_OF_DATE IN DATE,
+    p_CURSOR OUT GA.REFCURSOR
+) AS
+v_INVOICE_ID NUMBER;
+v_INVOICE_REC SEM_INVOICE%ROWTYPE;
+BEGIN
+    v_INVOICE_ID := GET_INVOICE_ID(p_ENTITY_ID, p_INVOICE_DATE, p_STATEMENT_TYPE, p_AS_OF_DATE);
+
+		SELECT * INTO v_INVOICE_REC
+		FROM SEM_INVOICE WHERE INVOICE_ID = v_INVOICE_ID;
+
+		OPEN p_CURSOR FOR
+			SELECT v_INVOICE_ID as INVOICE_ID,
+            'Invoice Number' FIELD_NAME,
+            v_INVOICE_REC.Invoice_Number as FIELD_VAL
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+            'Sender Address1' FIELD_NAME,
+            v_INVOICE_REC.SENDER_STREET
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+            'Sender Address2' FIELD_NAME,
+            v_INVOICE_REC.SENDER_CITY
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+            'Sender Phone' FIELD_NAME,
+            v_INVOICE_REC.SENDER_PHONE
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+            'Sender Fax' FIELD_NAME,
+            v_INVOICE_REC.SENDER_FAX
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+					'Sender Tax ID' FIELD_NAME,
+					v_INVOICE_REC.SENDER_TAX_ID as FIELD_VAL
+			FROM DUAL
+			UNION ALL
+			SELECT v_INVOICE_ID as INVOICE_ID,
+            'Receiver Name' FIELD_NAME,
+            v_INVOICE_REC.RECEIVER_NAME
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+            'Receiver Address1' FIELD_NAME,
+					v_INVOICE_REC.RECEIVER_STREET
+			FROM DUAL
+			UNION ALL
+			SELECT v_INVOICE_ID as INVOICE_ID,
+            'Receiver Address2' FIELD_NAME,
+					v_INVOICE_REC.RECEIVER_CITY
+			FROM DUAL
+			UNION ALL
+			SELECT v_INVOICE_ID as INVOICE_ID,
+					'Receiver GL' FIELD_NAME,
+					v_INVOICE_REC.RECEIVER_GL
+			FROM DUAL
+			UNION ALL
+			SELECT v_INVOICE_ID as INVOICE_ID,
+					'Invoice Type' FIELD_NAME,
+					v_INVOICE_REC.INVOICE_TYPE
+			FROM DUAL
+			UNION ALL
+			SELECT v_INVOICE_ID as INVOICE_ID,
+            'Due Date' FIELD_NAME,
+            TO_CHAR(v_INVOICE_REC.DUE_DATE, 'YYYY-MM-DD')
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+					'Invoice Header' FIELD_NAME,
+					v_INVOICE_REC.INVOICE_HEADER
+			FROM DUAL
+			UNION ALL
+			SELECT v_INVOICE_ID as INVOICE_ID,
+            'Invoice Comments' FIELD_NAME,
+            v_INVOICE_REC.INV_COMMENT
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+            'Signature' FIELD_NAME,
+            v_INVOICE_REC.SIGNATURE1
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+            'Unit' FIELD_NAME,
+            v_INVOICE_REC.UNIT
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+            'Invoice Date' FIELD_NAME,
+            TO_CHAR(v_INVOICE_REC.INVOICE_DATE, 'YYYY-MM-DD')
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+					'Calendar ID' FIELD_NAME,
+					v_INVOICE_REC.CALENDAR_ID
+			FROM DUAL
+			UNION ALL
+			SELECT v_INVOICE_ID as INVOICE_ID,
+            'Invoice Amount' FIELD_NAME,
+            TO_CHAR(v_INVOICE_REC.INVOICE_AMOUNT)
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+            'Market Name' FIELD_NAME,
+            v_INVOICE_REC.MARKET_NAME
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+					'Bill Period Name' FIELD_NAME,
+					v_INVOICE_REC.BILL_PERIOD_NAME
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+            'Receiver ID' FIELD_NAME,
+            v_INVOICE_REC.RECEIVER_ID
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+            'First Amount' FIELD_NAME,
+            TO_CHAR(v_INVOICE_REC.FIRST_AMOUNT)
+        FROM DUAL
+		UNION ALL
+		SELECT v_INVOICE_ID as INVOICE_ID,
+            'Exchange Rate' FIELD_NAME,
+            TO_CHAR(v_INVOICE_REC.EXCHANGE_RATE)
+        FROM DUAL
+		UNION ALL
+		SELECT v_INVOICE_ID as INVOICE_ID,
+            'VAT Jurisdiction' FIELD_NAME,
+            v_INVOICE_REC.VAT_JURISDICTION
+        FROM DUAL
+        UNION ALL
+        SELECT v_INVOICE_ID as INVOICE_ID,
+            'Version' FIELD_NAME,
+            v_INVOICE_REC.VERSION
+			FROM DUAL;
+END SEM_INVOICE_ATTRIBUTES;
+---------------------------------------
+PROCEDURE SEM_INVOICE_JOB_INFORMATION
+	(
+    p_ENTITY_ID IN NUMBER,
+    p_INVOICE_DATE IN VARCHAR2,
+    p_STATEMENT_TYPE IN NUMBER,
+    p_AS_OF_DATE IN DATE,
+    p_CURSOR OUT GA.REFCURSOR
+) AS
+v_INVOICE_ID NUMBER;
+v_INVOICE_REC SEM_INVOICE%ROWTYPE;
+	BEGIN
+    v_INVOICE_ID := GET_INVOICE_ID(p_ENTITY_ID, p_INVOICE_DATE, p_STATEMENT_TYPE, p_AS_OF_DATE);
+
+		OPEN p_CURSOR FOR
+			SELECT SETTLEMENT_DAY, JOB_ID, JOB_NAME,
+					JOB_NUMBER, JOB_VERSION,
+					JOB_STATE, JOB_STATUS,
+					TRUE_UP_BASED_ON,
+					STATEMENT_ID,
+					GLOBAL_PARTICIPANT_NAME
+			FROM SEM_INVOICE_JOB
+        WHERE INVOICE_ID = v_INVOICE_ID
+			ORDER BY 1, 2, 3;
+END SEM_INVOICE_JOB_INFORMATION;
+---------------------------------------
+PROCEDURE SEM_INVOICE_LINE_ITEMS
+	(
+    p_ENTITY_ID IN NUMBER,
+	p_INVOICE_DATE IN VARCHAR2,
+	p_STATEMENT_TYPE IN NUMBER,
+	p_AS_OF_DATE IN DATE,
+    p_INVOICE_NUMBER_LBL OUT VARCHAR2,
+    p_INVOICE_DATE_LBL OUT VARCHAR2,
+    p_DUE_DATE_LBL OUT VARCHAR2,
+    p_INVOICE_AMOUNT_LBL OUT VARCHAR2,
+    p_UNIT_LBL OUT VARCHAR2,
+    p_MARKET_NAME_LBL OUT VARCHAR2,
+    p_BILL_PERIOD_NAME_LBL OUT VARCHAR2,
+    p_RECEIVER_NAME_LBL OUT VARCHAR2,
+    p_RECEIVER_ID_LBL OUT VARCHAR2,
+    p_CURSOR OUT GA.REFCURSOR
+) AS
+	v_INVOICE_ID NUMBER;
+	BEGIN
+    v_INVOICE_ID := GET_INVOICE_ID(p_ENTITY_ID, p_INVOICE_DATE, p_STATEMENT_TYPE, p_AS_OF_DATE);
+
+    -- Get the Invoice Header fields
+    SELECT INVOICE_NUMBER,
+        TO_CHAR(INVOICE_DATE, 'YYYY-MM-DD'),
+        TO_CHAR(DUE_DATE, 'YYYY-MM-DD'),
+        INVOICE_AMOUNT,
+        UNIT,
+        MARKET_NAME,
+        BILL_PERIOD_NAME,
+        RECEIVER_NAME,
+        RECEIVER_ID
+    INTO p_INVOICE_NUMBER_LBL,
+        p_INVOICE_DATE_LBL,
+        p_DUE_DATE_LBL,
+        p_INVOICE_AMOUNT_LBL,
+        p_UNIT_LBL,
+        p_MARKET_NAME_LBL,
+        p_BILL_PERIOD_NAME_LBL,
+        p_RECEIVER_NAME_LBL,
+        p_RECEIVER_ID_LBL
+    FROM SEM_INVOICE
+    WHERE INVOICE_ID = v_INVOICE_ID;
+
+    OPEN p_CURSOR FOR
+        SELECT L.INVOICE_ID,
+           L.LINE_ITEM_NAME,
+           L.BILL_HEADING,
+           L.CHARGE_DESCRIPTION,
+           L.CHARGE_ID,
+           L.QUANTITY,
+           L.QTY_UNIT,
+           L.AMOUNT,
+           L.AMOUNT_UNIT,
+           L.BILL_ORDER,
+           L.CHARGE_TYPE,
+           L.TAX_AMOUNT,
+           L.TAX_VARTYPE_CODE,
+           L.TAX_VARTYPE_NAME,
+           L.TAX_PAY_OR_CHARGE,
+           L.TAX_PERCENT_TEXT,
+           L.PREV_AMOUNT,
+                   L.PREV_TAX_AMOUNT
+			FROM   SEM_INVOICE_LINE_ITEM L
+			WHERE  L.INVOICE_ID = v_INVOICE_ID
+			ORDER BY 1, 2, 3;
+END SEM_INVOICE_LINE_ITEMS;
+---------------------------------------
+PROCEDURE SEM_INVOICE_TAX_TOTALS
+(
+    p_ENTITY_ID IN NUMBER,
+    p_INVOICE_DATE IN VARCHAR2,
+    p_STATEMENT_TYPE IN NUMBER,
+    p_AS_OF_DATE IN DATE,
+    p_CURSOR OUT GA.REFCURSOR
+) AS
+v_INVOICE_ID NUMBER;
+BEGIN
+    v_INVOICE_ID := GET_INVOICE_ID(p_ENTITY_ID, p_INVOICE_DATE, p_STATEMENT_TYPE, p_AS_OF_DATE);
+
+    OPEN p_CURSOR FOR
+        SELECT T.TAX_PAY_OR_CHARGE, 
+		T.TAX_PERCENT_TEXT,
+            T.NET_AMOUNT,
+            T.TAX_TOTAL_AMOUNT,
+            T.GROSS_AMOUNT
+        FROM   SEM_INVOICE_TAX_SUM T
+        WHERE  T.INVOICE_ID = v_INVOICE_ID
+        ORDER BY 1;
+END SEM_INVOICE_TAX_TOTALS;
+--------------------------------------------------------------------------------
+PROCEDURE GET_SEM_SCHEDULES (
+   p_TRANSACTION_ID IN NUMBER,
+   p_BEGIN_DATE     IN DATE,
+   p_END_DATE       IN DATE,
+   p_TIME_ZONE      IN VARCHAR2,
+   p_STATUS         OUT NUMBER,
+   p_CURSOR         OUT REF_CURSOR
+   ) IS
+
+   v_INTERVAL_ABBR               VARCHAR2(32);
+   v_TXN_NAME                    INTERCHANGE_TRANSACTION.TRANSACTION_NAME%TYPE;
+   v_BEGIN_DATE                  DATE;
+   v_END_DATE                    DATE;
+   v_EXT_ID_TYPE                 EXTERNAL_SYSTEM_IDENTIFIER.IDENTIFIER_TYPE%TYPE;
+   v_MIN_INTRVL_NUM              NUMBER;
+   v_DATA_INTERVAL_TYPE			 SYSTEM_DATE_TIME.DATA_INTERVAL_TYPE%TYPE; -- RSA -- To join on the SDT for daily/sub-daily
+BEGIN
+   p_STATUS := GA.SUCCESS;
+
+   IF p_TRANSACTION_ID < 0 THEN
+       NULL_CURSOR(p_CURSOR);
+       RETURN;
+   END IF;
+
+   SP.CHECK_SYSTEM_DATE_TIME(p_TIME_ZONE, p_BEGIN_DATE, p_END_DATE);
+
+   SELECT GET_INTERVAL_ABBREVIATION(T.TRANSACTION_INTERVAL),
+          T.TRANSACTION_NAME,
+          CASE
+		  	  WHEN T.SC_ID <> MM_SEM_UTIL.SEM_SC_ID THEN
+			   NULL -- no need to show SEM statement type labels if this isn't a SEM transaction
+              WHEN T.TRANSACTION_TYPE = 'Nomination' THEN
+               MM_SEM_UTIL.g_STATEMENT_TYPE_USER_NOMS
+              ELSE
+               MM_SEM_UTIL.g_STATEMENT_TYPE_MKT_SCHED
+          END,
+		  -- Set the DATA_INTERVAL_TYPE
+		  CASE
+		  	WHEN T.TRANSACTION_INTERVAL IN (DATE_UTIL.c_NAME_HOUR, DATE_UTIL.c_NAME_30MIN,
+											DATE_UTIL.c_NAME_20MIN, DATE_UTIL.c_NAME_15MIN,
+											DATE_UTIL.c_NAME_10MIN, DATE_UTIL.c_NAME_5MIN)  THEN
+				1														-- Hourly/Sub-Daily
+			ELSE
+				2														-- Daily
+		  END
+     INTO v_INTERVAL_ABBR,
+          v_TXN_NAME,
+          v_EXT_ID_TYPE,
+		  v_DATA_INTERVAL_TYPE
+     FROM INTERCHANGE_TRANSACTION T
+    WHERE TRANSACTION_ID = p_TRANSACTION_ID;
+
+   UT.CUT_DATE_RANGE(v_DATA_INTERVAL_TYPE,
+					 p_BEGIN_DATE,
+                     p_END_DATE,
+                     p_TIME_ZONE,
+                     v_BEGIN_DATE,
+                     v_END_DATE);
+
+   v_MIN_INTRVL_NUM := GET_INTERVAL_NUMBER(v_INTERVAL_ABBR);
+
+   OPEN p_CURSOR FOR
+      SELECT v_TXN_NAME                      AS TRANSACTION_NAME,
+             SUBSTR(SDT.SCHEDULE_DATE, 1,10) AS SCHEDULE_DATE,
+             SUBSTR(SDT.SCHEDULE_DATE, 12)   AS SCHEDULE_TIME,
+             A.STATEMENT_TYPE_ORDER,
+             A.SCHEDULE_TYPE                 AS SCHEDULE_TYPE_ID,
+			 -- when there are multiple sequential statement types w/ same identifier,
+			 -- distinguish them by including their name
+             CASE
+                WHEN A.PREV_TYPE_IDENT = A.STATEMENT_TYPE_IDENT THEN
+                     A.STATEMENT_TYPE_IDENT || ' (' || A.STATEMENT_TYPE_NAME || ')'
+                ELSE
+                   A.STATEMENT_TYPE_IDENT
+             	END                         AS STATEMENT_TYPE_NAME,
+             A.AMOUNT                       AS AMOUNT
+       FROM (SELECT S.SCHEDULE_DATE         AS SCHEDULE_DATE,
+                    ST.STATEMENT_TYPE_ORDER AS STATEMENT_TYPE_ORDER,
+                    S.SCHEDULE_TYPE         AS SCHEDULE_TYPE,
+                    NVL(X.EXTERNAL_IDENTIFIER,ST.STATEMENT_TYPE_NAME) AS STATEMENT_TYPE_IDENT,
+                    ST.STATEMENT_TYPE_NAME,
+					-- include identifier and amount of "previous" statement type - for "collapsing" duplicate values w/ same identifier
+                    LAG(NVL(X.EXTERNAL_IDENTIFIER,ST.STATEMENT_TYPE_NAME), 1, '?') OVER(PARTITION BY S.SCHEDULE_DATE ORDER BY ST.STATEMENT_TYPE_ORDER) AS PREV_TYPE_IDENT,
+                    LAG(S.AMOUNT, 1, NULL) OVER(PARTITION BY S.SCHEDULE_DATE ORDER BY ST.STATEMENT_TYPE_ORDER) AS PREV_AMOUNT,
+                    S.AMOUNT                AS AMOUNT
+             FROM IT_SCHEDULE                S,
+                  STATEMENT_TYPE             ST,
+                  EXTERNAL_SYSTEM_IDENTIFIER X
+            WHERE S.TRANSACTION_ID     = p_TRANSACTION_ID
+              AND S.SCHEDULE_STATE     = GA.INTERNAL_STATE
+              AND S.AS_OF_DATE         = CONSTANTS.LOW_DATE
+              AND ST.STATEMENT_TYPE_ID = S.SCHEDULE_TYPE
+              AND X.EXTERNAL_SYSTEM_ID(+) = EC.ES_SEM
+              AND X.ENTITY_DOMAIN_ID(+)   = EC.ED_STATEMENT_TYPE
+              AND X.ENTITY_ID(+)          = ST.STATEMENT_TYPE_ID
+              AND X.IDENTIFIER_TYPE(+)    = v_EXT_ID_TYPE) A,
+            (SELECT T.CUT_DATE_SCHEDULING AS CUT_DATE_SCHEDULING,
+                          (CASE v_INTERVAL_ABBR
+                               WHEN 'DD' THEN
+                                  T.DAY_YYYY_MM_DD
+                               WHEN 'DY' THEN
+                                  T.WEEK_YYYY_MM_DD
+                               WHEN 'MM' THEN
+                                  T.MONTH_YYYY_MM_DD
+                               WHEN 'Q' THEN
+                                  T.QUARTER_YYYY_MM_DD
+                               WHEN 'YY' THEN
+                                  T.YEAR_YYYY_MM_DD
+							   ELSE
+                                  T.NO_ROLLUP_YYYY_MM_DD
+                          END) AS SCHEDULE_DATE
+				 FROM SYSTEM_DATE_TIME T
+				WHERE T.TIME_ZONE          = p_TIME_ZONE
+				  AND T.DATA_INTERVAL_TYPE = v_DATA_INTERVAL_TYPE
+				  AND T.DAY_TYPE           = '1'
+				  AND T.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+				  AND T.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTRVL_NUM) SDT
+			-- When there are multiple sequential statement types that have the same
+			-- identifier, and we have the same schedule value for them, only show
+			-- the first column (otherwise, it will look like a lot of redundant data)
+      WHERE (A.PREV_TYPE_IDENT <> A.STATEMENT_TYPE_IDENT	OR
+             NVL(A.PREV_AMOUNT, A.AMOUNT - 1) <> A.AMOUNT)
+        AND A.SCHEDULE_DATE(+) = SDT.CUT_DATE_SCHEDULING
+      ORDER BY 1, 2, 3, 4, 5, 6;
+
+END GET_SEM_SCHEDULES;
+
+--------------------------------------------------------------------------------
+PROCEDURE GET_EXANTE_IND_OP_SCHED
+	(
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR2,
+	p_RESOURCE_ID IN VARCHAR2,
+	p_PSE_ID IN VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT REF_CURSOR
+	) IS
+
+	v_BEGIN_DATE DATE;
+	v_END_DATE DATE;
+	v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER('MI30');
+
+	v_RESOURCE_IDs ID_TABLE;
+	v_PSE_IDs ID_TABLE;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+	UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE,
+						p_END_DATE,
+						p_TIME_ZONE,
+						v_BEGIN_DATE,
+						v_END_DATE);
+
+	OPEN p_CURSOR FOR
+		SELECT SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+			PSE_NAME,
+			SERVICE_POINT_NAME,
+			JURISDICTION,
+			SCHEDULE_MW,
+			POST_TIME
+		FROM (SELECT DISTINCT SOS.SCHEDULE_DATE,
+				PSE.PSE_NAME,
+				SP.SERVICE_POINT_NAME,
+				SOS.JURISDICTION,
+				SOS.SCHEDULE_MW,
+				SOS.POST_TIME
+			FROM SERVICE_POINT SP,
+				SEM_OPS_SCHEDULE SOS,
+				PURCHASING_SELLING_ENTITY PSE,
+				TABLE(CAST(v_RESOURCE_IDs AS ID_TABLE)) RID,
+				TABLE(CAST(v_PSE_IDs AS ID_TABLE)) PSEID
+			WHERE SOS.POD_ID = SP.SERVICE_POINT_ID
+				AND SOS.PSE_ID = PSE.PSE_ID
+				AND (RID.ID = g_ALL
+					OR SP.SERVICE_POINT_ID = RID.ID)
+				AND (PSEID.ID = g_ALL
+					OR SOS.PSE_ID = PSEID.ID)) MAIN,
+			SYSTEM_DATE_TIME SDT
+		WHERE MAIN.SCHEDULE_DATE(+) = SDT.CUT_DATE
+			AND SDT.TIME_ZONE = p_TIME_ZONE
+			AND SDT.DATA_INTERVAL_TYPE = 1
+			AND SDT.DAY_TYPE = '1'
+			AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+			AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		ORDER BY SCHEDULE_DATE,
+			PSE_NAME,
+			SERVICE_POINT_NAME,
+			JURISDICTION,
+			SCHEDULE_MW,
+			POST_TIME;
+
+END GET_EXANTE_IND_OP_SCHED;
+---------------------------------------
+PROCEDURE GET_PRCE_AFF_MTRD_DATA
+	(
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR2,
+	p_RESOURCE_ID IN VARCHAR2,
+	p_RESOURCE_TYPE IN VARCHAR2,
+	p_PSE_ID IN VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT REF_CURSOR
+	) IS
+
+	v_BEGIN_DATE DATE;
+	v_END_DATE DATE;
+	v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER('MI30');
+
+	v_RESOURCE_IDs ID_TABLE;
+	v_RESOURCE_TYPEs STRING_TABLE;
+	v_PSE_IDs ID_TABLE;
+
+BEGIN
+
+	p_STATUS := GA.SUCCESS;
+
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_RESOURCE_TYPE, c_COMMA, v_RESOURCE_TYPEs);
+	UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE,
+						p_END_DATE,
+						p_TIME_ZONE,
+						v_BEGIN_DATE,
+						v_END_DATE);
+
+	OPEN p_CURSOR FOR
+		SELECT SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+			PSE_NAME,
+			SERVICE_POINT_NAME,
+			RESOURCE_TYPE,
+			JURISDICTION,
+			METERED_MW,
+			METER_TRANSMISSION_TYPE
+		FROM (SELECT DISTINCT SMDP.SCHEDULE_DATE,
+				PSE.PSE_NAME,
+				SP.SERVICE_POINT_NAME,
+				SMDP.RESOURCE_TYPE,
+				SMDP.JURISDICTION,
+				SMDP.METERED_MW,
+				SMDP.METER_TRANSMISSION_TYPE
+			FROM SERVICE_POINT SP,
+				SEM_METER_DETAILS_PUB SMDP,
+				PURCHASING_SELLING_ENTITY PSE,
+				TABLE(CAST(v_RESOURCE_IDs AS ID_TABLE)) RID,
+				TABLE(CAST(v_RESOURCE_TYPEs AS STRING_TABLE)) RTYPE,
+				TABLE(CAST(v_PSE_IDs AS ID_TABLE)) PSEID
+			WHERE SMDP.POD_ID = SP.SERVICE_POINT_ID
+				AND SMDP.PSE_ID = PSE.PSE_ID
+				AND (RID.ID = g_ALL
+					OR SP.SERVICE_POINT_ID = RID.ID)
+				AND (RTYPE.STRING_VAL = g_ALL_STRING
+					OR TRIM(SMDP.RESOURCE_TYPE) = RTYPE.STRING_VAL)
+				AND (PSEID.ID = g_ALL
+					OR SMDP.PSE_ID = PSEID.ID)) MAIN,
+			SYSTEM_DATE_TIME SDT
+		WHERE MAIN.SCHEDULE_DATE(+) = SDT.CUT_DATE
+			AND SDT.TIME_ZONE = p_TIME_ZONE
+			AND SDT.DATA_INTERVAL_TYPE = 1
+			AND SDT.DAY_TYPE = '1'
+			AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+			AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		ORDER BY SCHEDULE_DATE,
+			PSE_NAME,
+			SERVICE_POINT_NAME,
+			RESOURCE_TYPE,
+			JURISDICTION,
+			METERED_MW,
+			METER_TRANSMISSION_TYPE;
+
+END GET_PRCE_AFF_MTRD_DATA;
+---------------------------------------
+PROCEDURE GET_MKT_SCHED_DETAIL
+	(
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR2,
+	p_RESOURCE_ID IN VARCHAR2,
+	p_RESOURCE_TYPE IN VARCHAR2,
+	p_SCHEDULE_ID IN VARCHAR2,
+    p_GATE_WINDOW_ID IN VARCHAR2,
+    p_PSE_ID IN VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT REF_CURSOR
+	) IS
+
+	v_BEGIN_DATE DATE;
+	v_END_DATE DATE;
+	v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER('MI30');
+
+	v_RESOURCE_IDs ID_TABLE;
+	v_RESOURCE_TYPEs STRING_TABLE;
+	v_SCHEDULE_IDs ID_TABLE;
+	v_GATE_WINDOW_IDs ID_TABLE;
+    v_PSE_IDs ID_TABLE;
+
+BEGIN
+
+    SP.CHECK_SYSTEM_DATE_TIME(p_TIME_ZONE, p_BEGIN_DATE, p_END_DATE);
+
+	p_STATUS := GA.SUCCESS;
+
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_RESOURCE_TYPE, c_COMMA, v_RESOURCE_TYPEs);
+	UT.ID_TABLE_FROM_STRING(p_SCHEDULE_ID, c_COMMA, v_SCHEDULE_IDs);
+	UT.ID_TABLE_FROM_STRING(p_GATE_WINDOW_ID, c_COMMA, v_GATE_WINDOW_IDs);
+	UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE,
+						p_END_DATE,
+						p_TIME_ZONE,
+						v_BEGIN_DATE,
+						v_END_DATE);
+
+	OPEN p_CURSOR FOR
+		SELECT SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+			SERVICE_POINT_NAME,
+			RESOURCE_TYPE,
+            PARTICIPANT_NAME,
+			RUN_TYPE,
+			CASE WHEN RUN_TYPE IS NULL THEN NULL ELSE RUN_TYPE || ' (Run Type)' END RUN_TYPE_DISPLAY,
+            GATE_WINDOW,
+			CASE WHEN GATE_WINDOW IS NULL THEN NULL ELSE GATE_WINDOW || ' (Gate)' END GATE_WINDOW_DISPLAY,
+			SCHEDULE_QUANTITY,
+			MAXIMUM_AVAILABILITY,
+			MINIMUM_GENERATION,
+			MINIMUM_OUTPUT,
+			ACTUAL_AVAILABILITY
+		FROM (SELECT DISTINCT SMDP.SCHEDULE_DATE,
+				SP.SERVICE_POINT_NAME,
+				SMDP.RESOURCE_TYPE,
+				EI.GET_ENTITY_IDENTIFIER_EXTSYS(EC.ED_PSE, SMDP.PSE_ID, EC.ES_SEM) PARTICIPANT_NAME,
+                EI.GET_ENTITY_IDENTIFIER_EXTSYS(EC.ED_STATEMENT_TYPE, ST_SCHEDID.STATEMENT_TYPE_ID, EC.ES_SEM, MM_SEM_UTIL.g_STATEMENT_TYPE_RUN_TYPE) RUN_TYPE,
+                EI.GET_ENTITY_IDENTIFIER_EXTSYS(EC.ED_STATEMENT_TYPE, ST_GATEWINID.STATEMENT_TYPE_ID, EC.ES_SEM, MM_SEM_UTIL.g_STATEMENT_TYPE_GATE_WINDOW) GATE_WINDOW,
+				SMDP.SCHEDULE_QUANTITY,
+				SMDP.MAXIMUM_AVAILABILITY,
+				SMDP.MINIMUM_GENERATION,
+				SMDP.MINIMUM_OUTPUT,
+				SMDP.ACTUAL_AVAILABILITY,
+                ST_SCHEDID.STATEMENT_TYPE_ORDER    STATEMENT_TYPE_ORDER_SCHEDID,    -- BZ 29918
+                ST_GATEWINID.STATEMENT_TYPE_ORDER    STATEMENT_TYPE_ORDER_GATEWINID
+			FROM SERVICE_POINT SP,
+				SEM_MKT_SCHED_DETAIL_PUB SMDP,
+                STATEMENT_TYPE ST_SCHEDID,
+                STATEMENT_TYPE ST_GATEWINID,
+				TABLE(CAST(v_RESOURCE_IDs AS ID_TABLE)) RID,
+				TABLE(CAST(v_RESOURCE_TYPEs AS STRING_TABLE)) RTYPE,
+                TABLE(CAST(v_SCHEDULE_IDs AS ID_TABLE)) SCHEDID,
+                TABLE(CAST(v_GATE_WINDOW_IDs AS ID_TABLE)) GATEWINID,
+                TABLE(CAST(v_PSE_IDs AS ID_TABLE)) PSE
+			WHERE SMDP.POD_ID = SP.SERVICE_POINT_ID
+                AND SMDP.SCHEDULE_TYPE = ST_SCHEDID.STATEMENT_TYPE_ID
+                AND SMDP.GATE_WINDOW_ID = ST_GATEWINID.STATEMENT_TYPE_ID
+				AND (RID.ID = g_ALL
+						OR SP.SERVICE_POINT_ID = RID.ID)
+				AND (RTYPE.STRING_VAL = g_ALL_STRING
+					OR TRIM(SMDP.RESOURCE_TYPE) = RTYPE.STRING_VAL)
+				AND (SCHEDID.ID = g_ALL
+                        OR SMDP.SCHEDULE_TYPE = SCHEDID.ID)
+                AND (GATEWINID.ID = g_ALL
+                        OR SMDP.GATE_WINDOW_ID = GATEWINID.ID)
+                AND (PSE.ID = g_ALL
+                        OR SMDP.PSE_ID = PSE.ID)) MAIN,
+			SYSTEM_DATE_TIME SDT
+		WHERE MAIN.SCHEDULE_DATE(+) = SDT.CUT_DATE
+			AND SDT.TIME_ZONE = p_TIME_ZONE
+			AND SDT.DATA_INTERVAL_TYPE = 1
+			AND SDT.DAY_TYPE = '1'
+			AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+			AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		ORDER BY SCHEDULE_DATE,
+            MAIN.STATEMENT_TYPE_ORDER_SCHEDID, -- changed from STATEMENT_TYPE_NAME per BZ 29918
+            MAIN.STATEMENT_TYPE_ORDER_GATEWINID,
+            MAIN.PARTICIPANT_NAME,
+            SERVICE_POINT_NAME;
+
+END GET_MKT_SCHED_DETAIL;
+---------------------------------------
+PROCEDURE GET_TECH_CHAR_EN_LTD
+	(
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR2,
+	p_RESOURCE_ID IN VARCHAR2,
+	p_RESOURCE_TYPE IN VARCHAR2,
+	p_PSE_ID IN VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT REF_CURSOR
+	) IS
+
+	v_BEGIN_DATE DATE;
+	v_END_DATE DATE;
+	v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER('DD');
+
+	v_RESOURCE_IDs ID_TABLE;
+	v_RESOURCE_TYPEs STRING_TABLE;
+	v_PSE_IDs ID_TABLE;
+
+BEGIN
+
+	p_STATUS := GA.SUCCESS;
+
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_RESOURCE_TYPE, c_COMMA, v_RESOURCE_TYPEs);
+	UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE,
+						p_END_DATE,
+						p_TIME_ZONE,
+						v_BEGIN_DATE,
+						v_END_DATE);
+
+	OPEN p_CURSOR FOR
+		SELECT SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+			PSE_NAME,
+			SERVICE_POINT_NAME,
+			RESOURCE_TYPE,
+			REDECLARED_ENERGY_LIMIT
+		FROM (SELECT DISTINCT STCEL.SCHEDULE_DATE,
+				PSE.PSE_NAME,
+				SP.SERVICE_POINT_NAME,
+				STCEL.RESOURCE_TYPE,
+				STCEL.REDECLARED_ENERGY_LIMIT
+			FROM SERVICE_POINT SP,
+				SEM_TECH_CHAR_EN_LTD STCEL,
+				PURCHASING_SELLING_ENTITY PSE,
+				TABLE(CAST(v_RESOURCE_IDs AS ID_TABLE)) RID,
+				TABLE(CAST(v_RESOURCE_TYPEs AS STRING_TABLE)) RTYPE,
+				TABLE(CAST(v_PSE_IDs AS ID_TABLE)) PSEID
+			WHERE STCEL.POD_ID = SP.SERVICE_POINT_ID
+				AND STCEL.PSE_ID = PSE.PSE_ID
+				AND (RID.ID = g_ALL
+					OR SP.SERVICE_POINT_ID = RID.ID)
+				AND (RTYPE.STRING_VAL = g_ALL_STRING
+					OR TRIM(STCEL.RESOURCE_TYPE) = RTYPE.STRING_VAL)
+				AND (PSEID.ID = g_ALL
+					OR STCEL.PSE_ID = PSEID.ID)) MAIN,
+			SYSTEM_DATE_TIME SDT
+		WHERE MAIN.SCHEDULE_DATE(+) = SDT.CUT_DATE_SCHEDULING
+			AND SDT.TIME_ZONE = p_TIME_ZONE
+			AND SDT.DATA_INTERVAL_TYPE = 2
+			AND SDT.DAY_TYPE = '1'
+			AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+			AND SDT.CUT_DATE_SCHEDULING BETWEEN v_BEGIN_DATE AND v_END_DATE
+		ORDER BY SCHEDULE_DATE,
+			PSE_NAME,
+			SERVICE_POINT_NAME,
+			RESOURCE_TYPE,
+			REDECLARED_ENERGY_LIMIT;
+
+END GET_TECH_CHAR_EN_LTD;
+---------------------------------------
+PROCEDURE GET_TECH_CHAR_GEN
+	(
+	p_SHOW_RESOURCES_ACROSS IN NUMBER,
+	p_BEGIN_DATE DATE,
+	p_END_DATE DATE,
+	p_TIME_ZONE IN VARCHAR2,
+	p_PSE_ID IN VARCHAR2,
+	p_RESOURCE_ID IN VARCHAR2,
+	p_RESOURCE_TYPE IN VARCHAR2,
+	p_ATTRIBUTE IN VARCHAR2,
+	p_CURSOR OUT REF_CURSOR
+	) IS
+	v_BEGIN_DATE       DATE;
+	v_END_DATE         DATE;
+	v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER('DD');
+
+	v_PSE_IDS        ID_TABLE;
+	v_RESOURCE_IDs   ID_TABLE;
+	v_RESOURCE_TYPEs STRING_TABLE;
+
+	v_ATTRIBUTES VARCHAR2(256);
+BEGIN
+	UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_RESOURCE_TYPE, c_COMMA, v_RESOURCE_TYPEs);
+
+	-- Use Cut Time Zone to initialize v_BEGIN_DATE and v_END_DATE for Daily Data
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	v_ATTRIBUTES := UPPER(p_ATTRIBUTE);
+
+	OPEN p_CURSOR FOR
+		SELECT ROWNUM,
+				A.PARTICIPANT_NAME,
+			   A.RESOURCE_NAME,
+			   SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+			   RESOURCE_TYPE,
+			   GMT_OFFSET,
+			   TO_CHAR(EFF_TIME, MM_SEM_UTIL.g_TIMESTAMP_FORMAT) EFF_TIME_STRING,
+			   TO_CHAR(ISSUE_TIME, MM_SEM_UTIL.g_TIMESTAMP_FORMAT) ISSUE_TIME_STRING,
+			   CASE INSTR(v_ATTRIBUTES, 'OUTTURN AVAILABILITY')
+				   WHEN 0 THEN
+					CASE p_SHOW_RESOURCES_ACROSS WHEN 1 THEN NULL ELSE OUTTURN_AVAILABILITY END
+				   ELSE
+					OUTTURN_AVAILABILITY
+			   END OUTTURN_AVAILABILITY,
+			   CASE INSTR(v_ATTRIBUTES, 'OUTTURN MINIMUM STABLE GEN')
+				   WHEN 0 THEN
+					CASE p_SHOW_RESOURCES_ACROSS WHEN 1 THEN NULL ELSE OUTTURN_MINIMUM_STABLE_GEN END
+				   ELSE
+					OUTTURN_MINIMUM_STABLE_GEN
+			   END OUTTURN_MINIMUM_STABLE_GEN,
+			   CASE INSTR(v_ATTRIBUTES, 'OUTTURN MINIMUM OUTPUT')
+				   WHEN 0 THEN
+					CASE p_SHOW_RESOURCES_ACROSS WHEN 1 THEN NULL ELSE OUTTURN_MINIMUM_OUTPUT END
+				   ELSE
+					OUTTURN_MINIMUM_OUTPUT
+			   END OUTTURN_MINIMUM_OUTPUT,
+			   EVENT_ID
+		FROM (SELECT PSE.PSE_NAME AS PARTICIPANT_NAME, SP.SERVICE_POINT_NAME AS RESOURCE_NAME, B.*
+			  FROM PSE,
+				   SERVICE_POINT SP,
+				   SEM_TECH_CHAR_GEN B,
+				   TABLE(CAST(v_PSE_IDs as ID_TABLE)) P,
+				   TABLE(CAST(v_RESOURCE_IDs as ID_TABLE)) R,
+				   TABLE(CAST(v_RESOURCE_TYPEs as STRING_TABLE)) RT
+			  WHERE B.PSE_ID = PSE.PSE_ID
+			  AND B.POD_ID = SP.SERVICE_POINT_ID
+			  AND (P.ID = PSE.PSE_ID OR P.ID = g_ALL)
+			  AND (R.ID = SP.SERVICE_POINT_ID OR R.ID = g_ALL)
+			  AND (RT.STRING_VAL = B.RESOURCE_TYPE OR RT.STRING_VAL = g_ALL_STRING)) A,
+			 SYSTEM_DATE_TIME SDT
+		WHERE SDT.TIME_ZONE = p_TIME_ZONE
+		AND SDT.DATA_INTERVAL_TYPE = 2
+		AND SDT.DAY_TYPE = '1'
+		AND SDT.CUT_DATE_SCHEDULING BETWEEN v_BEGIN_DATE AND (v_END_DATE - 1 / (24 * 60 * 60))
+		AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+		AND A.SCHEDULE_DATE(+) = SDT.CUT_DATE_SCHEDULING
+		ORDER BY SDT.NO_ROLLUP_YYYY_MM_DD, A.RESOURCE_NAME, A.RESOURCE_TYPE;
+
+END GET_TECH_CHAR_GEN;
+----------------------------------------------------------------------------------------------------
+  PROCEDURE SYSTEM_FREQUENCY
+  (
+      p_BEGIN_DATE IN DATE,
+      p_END_DATE   IN DATE,
+      p_TIME_ZONE  IN VARCHAR2,
+      p_PSE_ID     IN VARCHAR2,
+      p_STATUS     OUT NUMBER,
+      p_CURSOR     IN OUT REF_CURSOR
+  ) IS
+
+      v_BEGIN_DATE DATE;
+      v_END_DATE   DATE;
+      v_PSE_IDs    ID_TABLE;
+
+  BEGIN
+      p_STATUS := GA.SUCCESS;
+
+      UT.CUT_DATE_RANGE(p_BEGIN_DATE,
+                        p_END_DATE,
+                        p_TIME_ZONE,
+                        v_BEGIN_DATE,
+                        v_END_DATE);
+
+      UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+
+
+      OPEN p_CURSOR FOR
+          SELECT PSE.PSE_NAME,
+                 FROM_CUT_AS_HED(SSF.SCHEDULE_DATE,
+                                 p_TIME_ZONE,
+                                 c_MI30_INTERVAL) SCHEDULE_DATE,
+                 SSF.NORMAL_FREQUENCY,
+                 SSF.AVERAGE_FREQUENCY
+          FROM SEM_SYSTEM_FREQUENCY SSF,
+               PURCHASING_SELLING_ENTITY PSE,
+               TABLE(CAST(v_PSE_IDs AS ID_TABLE)) P
+          WHERE SSF.SCHEDULE_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+          AND SSF.PSE_ID = P.ID
+          AND PSE.PSE_ID = SSF.PSE_ID
+          ORDER BY 1, 2;
+
+  EXCEPTION
+      WHEN OTHERS THEN
+          p_STATUS := SQLCODE;
+
+  END SYSTEM_FREQUENCY;
+
+-------------------------------------------------------------------------------
+PROCEDURE ACTIVE_MP_UNITS
+(
+    p_PSE_ID IN VARCHAR2,
+    p_STATUS OUT NUMBER,
+    p_CURSOR IN OUT REF_CURSOR
+) IS
+
+    v_PSE_IDs    ID_TABLE;
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+    UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+
+    OPEN p_CURSOR FOR
+     SELECT
+         PSE.PSE_NAME PARTICIPANT_NAME,
+         SP.SERVICE_POINT_NAME AS RESOURCE_NAME,
+		 S.RESOURCE_TYPE,
+         S.EFFECTIVE_DATE,
+         S.EXPIRATION_DATE
+      FROM TABLE(CAST(v_PSE_IDs AS ID_TABLE)) P,
+          SEM_MP_UNITS S,
+          SERVICE_POINT SP,
+          PURCHASING_SELLING_ENTITY PSE
+      WHERE S.PSE_ID = P.ID
+            AND SP.SERVICE_POINT_ID = S.POD_ID
+			AND PSE.PSE_ID = S.PSE_ID
+       ORDER BY 1,2,3;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        p_STATUS := SQLCODE;
+
+END ACTIVE_MP_UNITS;
+-------------------------------------------------------------------------------
+PROCEDURE SETTL_CLASS_UPDATE
+(
+    p_PSE_ID IN VARCHAR2,
+    p_STATUS OUT NUMBER,
+    p_CURSOR IN OUT REF_CURSOR
+) IS
+
+    v_PSE_IDs    ID_TABLE;
+
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+    UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+
+    OPEN p_CURSOR FOR
+/*      SELECT
+         PSE.PSE_NAME,
+         SP.SERVICE_POINT_NAME,
+         RT.BEGIN_DATE AS EFFECTIVE_DATE,
+         RT.END_DATE AS EXPIRATION_DATE,
+         RT.ATTRIBUTE_VAL AS SETTL_CLASS
+      FROM TABLE(CAST(v_PSE_IDs AS ID_TABLE)) P,
+          SEM_SERVICE_POINT_PSE S,
+          SERVICE_POINT SP,
+          TEMPORAL_ENTITY_ATTRIBUTE RT,
+          PURCHASING_SELLING_ENTITY PSE
+      WHERE S.PSE_ID = P.ID
+            AND SP.SERVICE_POINT_ID = S.POD_ID
+            AND RT.OWNER_ENTITY_ID = SP.SERVICE_POINT_ID
+            AND RT.ATTRIBUTE_NAME = 'Resource Type'
+            AND PSE.PSE_ID = S.PSE_ID
+       ORDER BY 1,2,3;*/
+
+	       SELECT   PSE.PSE_NAME,
+         SP.SERVICE_POINT_NAME,
+		 GREATEST(S.BEGIN_DATE,TEA.BEGIN_DATE) as EFFECTIVE_DATE,
+		 LEAST(NVL(S.END_DATE,HIGH_DATE), NVL(TEA.END_DATE,HIGH_DATE)) as EXPIRATION_DATE,
+		 TEA.ATTRIBUTE_VAL AS SETTL_CLASS
+      FROM TABLE(CAST(v_PSE_IDs AS ID_TABLE)) P,
+	       SEM_SERVICE_POINT_PSE S,
+           TEMPORAL_ENTITY_ATTRIBUTE TEA,
+		   SERVICE_POINT SP,
+		   PURCHASING_SELLING_ENTITY PSE
+      WHERE S.PSE_ID = P.ID
+	    AND SP.SERVICE_POINT_ID = S.POD_ID
+	    AND PSE.PSE_ID = S.PSE_ID
+	    AND  S.POD_ID = TEA.OWNER_ENTITY_ID
+        AND TEA.ATTRIBUTE_NAME = 'Resource Type'
+	    AND S.BEGIN_DATE <= NVL(TEA.END_DATE, HIGH_DATE)
+	    AND TEA.BEGIN_DATE <= NVL(S.END_DATE, HIGH_DATE)
+		ORDER BY 1,2,3;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        p_STATUS := SQLCODE;
+
+END SETTL_CLASS_UPDATE;
+--------------------------------------------------------------------------------
+  -- RSA -- 05/17/2007
+  PROCEDURE GET_SYSTEM_LABEL_VALUES
+	(
+	p_MODEL_ID IN NUMBER,
+	p_MODULE IN VARCHAR,
+	p_KEY1 IN VARCHAR,
+	p_KEY2 IN VARCHAR,
+	p_KEY3 IN VARCHAR,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT REF_CURSOR
+	) AS
+
+-- Answer a the values from the SYSTEM_LABEL tables matching the given keys.
+
+BEGIN
+
+	IF NOT CAN_READ('Public') THEN
+		ERRS.RAISE_NO_READ_MODULE('Public');
+	END IF;
+
+	p_STATUS := GA.SUCCESS;
+
+    --Note: Make case-insensitive
+	OPEN p_CURSOR FOR
+		  SELECT VALUE
+		  FROM SYSTEM_LABEL
+		  WHERE (p_MODEL_ID = -1 OR MODEL_ID = p_MODEL_ID OR MODEL_ID = 0)
+		  	  AND UPPER(KEY1) = UPPER(p_KEY1)
+			  AND UPPER(KEY2) = UPPER(p_KEY2)
+			  AND UPPER(KEY3) = UPPER(p_KEY3)
+			  AND UPPER(MODULE) = UPPER(p_MODULE)
+			  AND NVL(IS_HIDDEN,0) = 0
+              AND VALUE IN ('Load', 'Generation', 'Nomination') -- RSA -- 05/17/2007 -- Just show these 3 choices for SEM
+		  ORDER BY POSITION;
+
+END GET_SYSTEM_LABEL_VALUES;
+----------------------------------------------------------------------------------------------------
+PROCEDURE GP_SETTLEMENT_REPORT(
+   p_BEGIN_DATE     IN DATE,
+   p_END_DATE       IN DATE,
+   p_TIME_ZONE      IN VARCHAR2,
+   p_INTERVAL       IN VARCHAR2,
+   p_STATEMENT_TYPE IN NUMBER,
+   p_REPORT_TYPE    IN VARCHAR2,
+   p_MARKET         IN VARCHAR2,
+   p_JURISDICTION   IN VARCHAR2,
+   p_VARIABLE_TYPE  IN VARCHAR2,
+   p_RESOURCE_NAME  IN VARCHAR2,
+   p_CURSOR         IN OUT REF_CURSOR)
+IS
+	v_BEGIN_DATE     DATE;
+	v_END_DATE       DATE;
+	v_MARKETS        STRING_TABLE;
+	v_JURISDICTIONS  STRING_TABLE;
+	v_VARIABLE_TYPES STRING_TABLE;
+	v_RESOURCE_NAMES STRING_TABLE;
+   v_INTERVAL_ABBR  VARCHAR2(32);
+   v_MIN_INTRVL_NUM NUMBER;
+
+
+BEGIN
+
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+	UT.STRING_TABLE_FROM_STRING(p_MARKET,        c_COMMA, v_MARKETS);
+	UT.STRING_TABLE_FROM_STRING(p_JURISDICTION,  c_COMMA, v_JURISDICTIONS);
+	UT.STRING_TABLE_FROM_STRING(p_VARIABLE_TYPE, c_COMMA, v_VARIABLE_TYPES);
+	UT.STRING_TABLE_FROM_STRING(p_RESOURCE_NAME, c_COMMA, v_RESOURCE_NAMES);
+
+	SELECT GET_INTERVAL_ABBREVIATION(p_INTERVAL) INTO v_INTERVAL_ABBR FROM DUAL;
+
+    v_MIN_INTRVL_NUM := GET_INTERVAL_NUMBER('MI30');-- Underlying data is always in 30-min intervals.
+
+    SP.CHECK_SYSTEM_DATE_TIME(p_TIME_ZONE, p_BEGIN_DATE, p_END_DATE);
+
+	OPEN p_CURSOR FOR
+      WITH SDT AS (SELECT T.CUT_DATE_SCHEDULING AS CUT_DATE_SCHEDULING,
+                          T.DATA_INTERVAL_TYPE,
+                          (CASE
+                               WHEN v_INTERVAL_ABBR = 'MI30' OR
+                                    v_INTERVAL_ABBR = 'HH'   OR
+                                    v_INTERVAL_ABBR IS NULL  THEN
+                                  FROM_CUT_AS_HED(T.CUT_DATE_SCHEDULING,
+                                                  p_TIME_ZONE,
+                                                  v_INTERVAL_ABBR)
+                               WHEN v_INTERVAL_ABBR = 'DD' THEN
+                                  T.DAY_YYYY_MM_DD
+                               WHEN v_INTERVAL_ABBR = 'DY' THEN
+                                  T.WEEK_YYYY_MM_DD
+                               WHEN v_INTERVAL_ABBR = 'MM' THEN
+                                  T.MONTH_YYYY_MM_DD
+                               WHEN v_INTERVAL_ABBR = 'Q' THEN
+                                  T.QUARTER_YYYY_MM_DD
+                               WHEN v_INTERVAL_ABBR = 'YY' THEN
+                                  T.YEAR_YYYY_MM_DD
+                          END) AS SCHEDULE_DATE
+                     FROM SYSTEM_DATE_TIME T
+                    WHERE T.TIME_ZONE          = p_TIME_ZONE
+                      AND T.DAY_TYPE           = 1
+                      AND T.CUT_DATE_SCHEDULING BETWEEN v_BEGIN_DATE AND v_END_DATE
+                      AND T.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTRVL_NUM
+                   )
+     SELECT /*+ USE_HASH(S,SDT,R,V)*/
+            SUBSTR(SDT.SCHEDULE_DATE, 1,10) AS SCHEDULE_DATE,
+            SUBSTR(SDT.SCHEDULE_DATE, 12)   AS SCHEDULE_TIME,
+            S.REPORT_TYPE                   AS REPORT_TYPE,
+            S.MARKET                        AS MARKET,
+            S.RESOURCE_NAME                 AS RESOURCE_NAME,
+            S.JURISDICTION                  AS JURISDICTION,
+            S.VARIABLE_TYPE                 AS VARIABLE_TYPE,
+            S.VARIABLE_NAME                 AS VARIABLE_NAME,
+            S.RESOLUTION                    AS RESOLUTION,
+            S.UNIT                          AS UNIT,
+            SUM(S.VALUE)                    AS VALUE
+      FROM SEM_GP_SETTLEMENT S,
+           SDT,
+           TABLE(CAST(v_RESOURCE_NAMES AS STRING_TABLE)) R,
+           TABLE(CAST(v_VARIABLE_TYPES AS STRING_TABLE)) V,
+           TABLE(CAST(v_JURISDICTIONS AS STRING_TABLE))  J,
+           TABLE(CAST(v_MARKETS AS STRING_TABLE))        M
+     WHERE S.STATEMENT_TYPE = p_STATEMENT_TYPE
+       AND SDT.DATA_INTERVAL_TYPE = CASE WHEN S.RESOLUTION >= 32 THEN 2 ELSE 1 END
+       AND S.CHARGE_DATE(+) = SDT.CUT_DATE_SCHEDULING
+       AND (p_REPORT_TYPE   = 'Summary'    OR S.REPORT_TYPE   = p_REPORT_TYPE)
+       AND (p_MARKET        = g_ALL_STRING OR S.MARKET        = M.STRING_VAL)
+       AND (p_RESOURCE_NAME = g_ALL_STRING OR S.RESOURCE_NAME = R.STRING_VAL)
+       AND (p_JURISDICTION  = g_ALL_STRING OR S.JURISDICTION  = J.STRING_VAL)
+       AND (p_VARIABLE_TYPE = g_ALL_STRING OR S.VARIABLE_TYPE = V.STRING_VAL)
+      GROUP BY SUBSTR(SDT.SCHEDULE_DATE, 1,10),
+               SUBSTR(SDT.SCHEDULE_DATE, 12),
+               S.REPORT_TYPE,
+               S.MARKET,
+               S.RESOURCE_NAME,
+               S.JURISDICTION,
+               S.VARIABLE_TYPE,
+               S.VARIABLE_NAME,
+               S.RESOLUTION,
+               S.UNIT
+      ORDER BY S.REPORT_TYPE,
+               S.MARKET,
+               S.JURISDICTION,
+               S.RESOURCE_NAME,
+               S.VARIABLE_TYPE,
+               S.VARIABLE_NAME,
+               SUBSTR(SDT.SCHEDULE_DATE, 1,10),
+               SUBSTR(SDT.SCHEDULE_DATE, 12);
+
+END GP_SETTLEMENT_REPORT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE GET_TECH_OFFER_CHAR_RPT
+(
+p_BEGIN_DATE DATE,
+p_END_DATE DATE,
+p_TIME_ZONE IN VARCHAR2,
+p_RESOURCE_ID IN VARCHAR2,
+p_RESOURCE_TYPE IN VARCHAR2,
+p_RUN_TYPE_ID   IN VARCHAR2,
+p_FUEL_TYPE IN VARCHAR2,
+p_UNDER_TEST IN VARCHAR2,
+p_STATUS OUT NUMBER,
+p_CURSOR OUT REF_CURSOR
+)
+IS
+v_INTERVAL_ABBR  VARCHAR2(4) := 'DD';
+v_BEGIN_DATE DATE;
+v_END_DATE DATE;
+v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER(v_INTERVAL_ABBR);
+
+v_RESOURCE_IDs ID_TABLE;
+v_RESOURCE_TYPEs STRING_TABLE;
+v_FUEL_TYPEs STRING_TABLE;
+v_UNDER_TEST_FLAGs STRING_TABLE;
+v_RUN_TYPE_IDs ID_TABLE;
+BEGIN
+	p_STATUS := GA.SUCCESS;
+
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_RESOURCE_TYPE, c_COMMA, v_RESOURCE_TYPEs);
+	UT.STRING_TABLE_FROM_STRING(p_FUEL_TYPE, c_COMMA, v_FUEL_TYPEs);
+	UT.STRING_TABLE_FROM_STRING(p_UNDER_TEST, c_COMMA, v_UNDER_TEST_FLAGs);
+ 	UT.ID_TABLE_FROM_STRING(p_RUN_TYPE_ID, c_COMMA, v_RUN_TYPE_IDs);
+
+	-- Use Cut Time Zone to initialize v_BEGIN_DATE and v_END_DATE for Daily Data
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	OPEN p_CURSOR FOR
+		SELECT POD_ID,
+           A.RESOURCE_NAME,
+		   SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+           CASE WHEN A.STATEMENT_TYPE_ID IS NULL THEN NULL
+               ELSE EI.GET_ENTITY_IDENTIFIER_EXTSYS(EC.ED_STATEMENT_TYPE, A.STATEMENT_TYPE_ID, EC.ES_SEM, MM_SEM_UTIL.g_STATEMENT_TYPE_RUN_TYPE)
+           END AS RUN_TYPE,
+		   RESOURCE_TYPE,
+		   JURISDICTION,
+		   FUEL_TYPE,
+		   PRIORITY_DISPATCH_YN,
+		   PUMP_STORAGE_YN,
+		   ENERGY_LIMIT_YN,
+		   UNDER_TEST_YN,
+		   FIRM_ACCESS_QUANTITY,
+		   NON_FIRM_ACC_QUANTITY,
+		   SHORT_TERM_MAXIMISATION_CAP,
+		   MINIMUM_GENERATION,
+		   MAXIMUM_GENERATION,
+		   MINIMUM_ON_TIME,
+		   MINIMUM_OFF_TIME,
+		   MAXIMUM_ON_TIME,
+		   HOT_COOLING_BOUNDARY,
+		   WARM_COOLING_BOUNDARY,
+		   SYNCHRONOUS_START_UP_TIME_HOT,
+		   SYNCHRONOUS_START_UP_TIME_WARM,
+		   SYNCHRONOUS_START_UP_TIME_COLD,
+		   BLOCK_LOAD_COLD,
+		   BLOCK_LOAD_HOT,
+		   BLOCK_LOAD_WARM,
+		   LOADING_RATE_COLD_1,
+		   LOADING_RATE_COLD_2,
+		   LOADING_RATE_COLD_3,
+		   LOAD_UP_BREAK_POINT_COLD_1,
+		   LOAD_UP_BREAK_POINT_COLD_2,
+		   LOADING_RATE_HOT_1,
+		   LOADING_RATE_HOT_2,
+		   LOADING_RATE_HOT_3,
+		   LOAD_UP_BREAK_POINT_HOT_1,
+		   LOAD_UP_BREAK_POINT_HOT_2,
+		   LOADING_RATE_WARM_1,
+		   LOADING_RATE_WARM_2,
+		   LOADING_RATE_WARM_3,
+		   LOAD_UP_BREAK_POINT_WARM_1,
+		   LOAD_UP_BREAK_POINT_WARM_2,
+		   SOAK_TIME_COLD_1,
+		   SOAK_TIME_COLD_2,
+		   SOAK_TIME_TRIGGER_POINT_COLD_1,
+		   SOAK_TIME_TRIGGER_POINT_COLD_2,
+		   SOAK_TIME_HOT_1,
+		   SOAK_TIME_HOT_2,
+		   SOAK_TIME_TRIGGER_POINT_HOT_1,
+		   SOAK_TIME_TRIGGER_POINT_HOT_2,
+		   SOAK_TIME_WARM_1,
+		   SOAK_TIME_WARM_2,
+		   SOAK_TIME_TRIGGER_POINT_WARM_1,
+		   SOAK_TIME_TRIGGER_POINT_WARM_2,
+		   END_POINT_OF_START_UP_PERIOD,
+		   RAMP_UP_RATE_1,
+		   RAMP_UP_RATE_2,
+		   RAMP_UP_RATE_3,
+		   RAMP_UP_RATE_4,
+		   RAMP_UP_RATE_5,
+		   RAMP_UP_BREAK_POINT_1,
+		   RAMP_UP_BREAK_POINT_2,
+		   RAMP_UP_BREAK_POINT_3,
+		   RAMP_UP_BREAK_POINT_4,
+		   DWELL_TIME_1,
+		   DWELL_TIME_2,
+		   DWELL_TIME_3,
+		   DWELL_TIME_TRIGGER_POINT_1,
+		   DWELL_TIME_TRIGGER_POINT_2,
+		   DWELL_TIME_TRIGGER_POINT_3,
+           DWELL_TIME_DOWN_1,
+           DWELL_TIME_DOWN_2,
+           DWELL_TIME_DOWN_3,
+           DWELL_TIME_DOWN_TRIGGER_PT_1,
+           DWELL_TIME_DOWN_TRIGGER_PT_2,
+           DWELL_TIME_DOWN_TRIGGER_PT_3,
+		   RAMP_DOWN_RATE_1,
+		   RAMP_DOWN_RATE_2,
+		   RAMP_DOWN_RATE_3,
+		   RAMP_DOWN_RATE_4,
+		   RAMP_DOWN_RATE_5,
+		   RAMP_DOWN_BREAK_POINT_1,
+		   RAMP_DOWN_BREAK_POINT_2,
+		   RAMP_DOWN_BREAK_POINT_3,
+		   RAMP_DOWN_BREAK_POINT_4,
+		   DELOADING_RATE_1,
+		   DELOADING_RATE_2,
+		   DELOAD_BREAK_POINT,
+		   MAXIMUM_STORAGE_CAPACITY,
+		   MINIMUM_STORAGE_CAPACITY,
+		   PUMPING_LOAD_CAP,
+		   TARGET_RESERVOIR_LEVEL_PERCENT,
+		   ENERGY_LIMIT_MWH,
+		   ENERGY_LIMIT_FACTOR,
+		   FIXED_UNIT_LOAD,
+		   UNIT_LOAD_SCALAR,
+		   MAXIMUM_RAMP_UP_RATE,
+		   MAXIMUM_RAMP_DOWN_RATE,
+		   MINIMUM_DOWN_TIME,
+		   MAXIMUM_DOWN_TIME,
+		   GEN_EVENT_ID,
+		   DEM_EVENT_ID
+		FROM
+			(SELECT
+					SP.SERVICE_POINT_ID,
+					SP.SERVICE_POINT_NAME AS RESOURCE_NAME,
+					B.*,
+     				ST.STATEMENT_TYPE_ID AS STATEMENT_TYPE,
+     				ST.STATEMENT_TYPE_ORDER
+			FROM SERVICE_POINT SP,
+				SEM_TECH_OFFER_STD_UNITS B,
+				TABLE(CAST(v_RESOURCE_IDs as ID_TABLE)) R,
+				TABLE(CAST(v_RESOURCE_TYPEs as STRING_TABLE)) RT,
+				TABLE(CAST(v_FUEL_TYPEs as STRING_TABLE)) FT,
+				TABLE(CAST(v_UNDER_TEST_FLAGs as STRING_TABLE)) UT,
+    			TABLE(CAST(v_RUN_TYPE_IDs as ID_TABLE)) S,
+    		    STATEMENT_TYPE ST
+			WHERE
+				B.POD_ID = SP.SERVICE_POINT_ID
+				AND (R.ID = SP.SERVICE_POINT_ID OR R.ID = g_ALL)
+				AND (RT.STRING_VAL = B.RESOURCE_TYPE OR RT.STRING_VAL = g_ALL_STRING)
+				AND (FT.STRING_VAL = B.FUEL_TYPE OR FT.STRING_VAL = g_ALL_STRING)
+				AND (UT.STRING_VAL = B.UNDER_TEST_YN OR UT.STRING_VAL = g_ALL_STRING)
+    			AND (S.ID = B.STATEMENT_TYPE_ID OR S.ID = g_ALL)
+                AND ST.STATEMENT_TYPE_ID = B.STATEMENT_TYPE_ID) A,
+				SYSTEM_DATE_TIME SDT
+		WHERE 	SDT.TIME_ZONE = p_TIME_ZONE
+					AND SDT.DATA_INTERVAL_TYPE = 2
+					AND SDT.DAY_TYPE = '1'
+					AND SDT.CUT_DATE_SCHEDULING BETWEEN v_BEGIN_DATE AND (v_END_DATE - 1/(24*60*60))
+					AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+					AND A.SCHEDULE_DATE(+) = SDT.CUT_DATE_SCHEDULING
+		ORDER BY SDT.NO_ROLLUP_YYYY_MM_DD,
+    			A.STATEMENT_TYPE_ORDER,
+				A.RESOURCE_NAME,
+				A.RESOURCE_TYPE,
+				A.JURISDICTION,
+				A.FUEL_TYPE,
+				A.UNDER_TEST_YN;
+
+END GET_TECH_OFFER_CHAR_RPT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE GET_TECH_OFFER_FORECAST_RPT
+(
+p_BEGIN_DATE DATE,
+p_END_DATE DATE,
+p_TIME_ZONE IN VARCHAR2,
+p_GATE_WINDOWS IN VARCHAR2,
+p_RESOURCE_ID IN VARCHAR2,
+p_RESOURCE_TYPE IN VARCHAR2,
+p_UNDER_TEST IN VARCHAR2,
+p_ATTRIBUTE IN VARCHAR2,
+p_STATUS OUT NUMBER,
+p_CURSOR OUT REF_CURSOR
+)
+IS
+v_INTERVAL_ABBR  VARCHAR2(4) := 'MI30';
+v_BEGIN_DATE DATE;
+v_END_DATE DATE;
+v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER(v_INTERVAL_ABBR);
+
+v_RESOURCE_IDs ID_TABLE;
+v_RESOURCE_TYPEs STRING_TABLE;
+v_UNDER_TEST_FLAGs STRING_TABLE;
+v_GATE_WINDOWS STRING_TABLE;
+
+v_AVAILABILITY_ID CONSTANT NUMBER := 1;
+v_MIN_GEN_ID CONSTANT NUMBER := 2;
+v_MIN_OUTPUT_ID CONSTANT NUMBER := 3;
+v_SHOW_AVAILABILITY NUMBER := 0;
+v_SHOW_MIN_GEN NUMBER := 0;
+v_SHOW_MIN_OUTPUT NUMBER := 0;
+
+BEGIN
+	p_STATUS := GA.SUCCESS;
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_RESOURCE_TYPE, c_COMMA, v_RESOURCE_TYPEs);
+	UT.STRING_TABLE_FROM_STRING(p_UNDER_TEST, c_COMMA, v_UNDER_TEST_FLAGs);
+	UT.STRING_TABLE_FROM_STRING(p_GATE_WINDOWS, c_COMMA, v_GATE_WINDOWS);
+
+	-- Initialize all the variable used to show various attributes
+	IF INSTR(p_ATTRIBUTE, g_ALL) > 0 OR INSTR(p_ATTRIBUTE, v_AVAILABILITY_ID) > 0 THEN
+		v_SHOW_AVAILABILITY := 1;
+	END IF;
+
+	IF INSTR(p_ATTRIBUTE, g_ALL) > 0 OR INSTR(p_ATTRIBUTE, v_MIN_GEN_ID) > 0 THEN
+		v_SHOW_MIN_GEN := 1;
+	END IF;
+
+	IF INSTR(p_ATTRIBUTE, g_ALL) > 0 OR INSTR(p_ATTRIBUTE, v_MIN_OUTPUT_ID) > 0 THEN
+		v_SHOW_MIN_OUTPUT := 1;
+	END IF;
+
+	-- Use Time Zone which is passed in, to get intialize v_BEGIN_DATE and v_END_DATE for Daily Data
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	-- verify SYSTEM_DATE_TIME table is populated
+	SP.CHECK_SYSTEM_DATE_TIME(p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	OPEN p_CURSOR FOR
+        SELECT A.POD_ID,
+			   SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+			   A.STATEMENT_TYPE_ORDER,
+			   A.RUN_TYPE,
+			   A.RESOURCE_NAME,
+			   A.RESOURCE_TYPE,
+			   A.UNDER_TEST_YN,
+			   A.JURISDICTION,
+			   CASE WHEN v_SHOW_AVAILABILITY = 1 THEN A.FORECAST_AVAILABILITY ELSE NULL END as FORECAST_AVAILABILITY,
+			   CASE WHEN v_SHOW_MIN_GEN = 1 THEN A.FORECAST_MINIMUM_STABLE_GEN ELSE NULL END as FORECAST_MINIMUM_STABLE_GEN,
+			   CASE WHEN v_SHOW_MIN_OUTPUT = 1 THEN A.FORECAST_MINIMUM_OUTPUT ELSE NULL END as FORECAST_MINIMUM_OUTPUT
+		FROM
+			(SELECT
+					SP.SERVICE_POINT_ID,
+					SP.SERVICE_POINT_NAME AS RESOURCE_NAME,
+                    B.*,
+					ST.STATEMENT_TYPE_ORDER
+			FROM SERVICE_POINT SP,
+				SEM_TECH_OFFER_FORECAST B,
+                TABLE(CAST(v_RESOURCE_IDs AS ID_TABLE)) R,
+                TABLE(CAST(v_RESOURCE_TYPEs AS STRING_TABLE)) RT,
+                TABLE(CAST(v_UNDER_TEST_FLAGs AS STRING_TABLE)) UT,
+				TABLE(CAST(v_GATE_WINDOWS AS STRING_TABLE)) GW,
+				EXTERNAL_SYSTEM_IDENTIFIER ESI,
+				STATEMENT_TYPE ST
+			WHERE
+				B.POD_ID = SP.SERVICE_POINT_ID
+				AND (R.ID = SP.SERVICE_POINT_ID OR R.ID = g_ALL)
+				AND (RT.STRING_VAL = B.RESOURCE_TYPE OR RT.STRING_VAL = g_ALL_STRING)
+                AND (UT.STRING_VAL = B.UNDER_TEST_YN OR UT.STRING_VAL = g_ALL_STRING)
+				AND (GW.STRING_VAL = B.RUN_TYPE OR GW.STRING_VAL = CONSTANTS.ALL_STRING)
+				AND B.RUN_TYPE = ESI.EXTERNAL_IDENTIFIER
+				AND ESI.IDENTIFIER_TYPE = MM_SEM_UTIL.g_STATEMENT_TYPE_GATE_WINDOW
+				AND ESI.ENTITY_DOMAIN_ID = EC.ED_STATEMENT_TYPE
+				AND ESI.EXTERNAL_SYSTEM_ID = EC.ES_SEM
+				AND ESI.ENTITY_ID = ST.STATEMENT_TYPE_ID
+			) A,
+				SYSTEM_DATE_TIME SDT
+		WHERE 	SDT.TIME_ZONE = p_TIME_ZONE
+					AND SDT.DATA_INTERVAL_TYPE = 1
+					AND SDT.DAY_TYPE = '1'
+					AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+					AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+					AND A.SCHEDULE_DATE(+) = SDT.CUT_DATE
+		ORDER BY SDT.NO_ROLLUP_YYYY_MM_DD,
+		         A.STATEMENT_TYPE_ORDER,
+                 A.RESOURCE_NAME;
+
+END GET_TECH_OFFER_FORECAST_RPT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE GET_CO_GEN_DSU_RPT
+(
+p_BEGIN_DATE DATE,
+p_END_DATE DATE,
+p_TIME_ZONE IN VARCHAR2,
+p_RESOURCE_ID IN VARCHAR2,
+p_RESOURCE_TYPE IN VARCHAR2,
+p_SCHEDULE_ID   IN VARCHAR2,
+p_FUEL_TYPE IN VARCHAR2,
+p_UNDER_TEST IN VARCHAR2,
+p_STATUS OUT NUMBER,
+p_CURSOR OUT REF_CURSOR
+)
+IS
+v_INTERVAL_ABBR  VARCHAR2(4) := 'DD';
+v_BEGIN_DATE DATE;
+v_END_DATE DATE;
+v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER(v_INTERVAL_ABBR);
+
+v_RESOURCE_IDs ID_TABLE;
+v_RESOURCE_TYPEs STRING_TABLE;
+v_FUEL_TYPEs STRING_TABLE;
+v_UNDER_TEST_FLAGs STRING_TABLE;
+v_SCHEDULE_IDs ID_TABLE;
+BEGIN
+	p_STATUS := GA.SUCCESS;
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_RESOURCE_TYPE, c_COMMA, v_RESOURCE_TYPEs);
+	UT.STRING_TABLE_FROM_STRING(p_FUEL_TYPE, c_COMMA, v_FUEL_TYPEs);
+	UT.STRING_TABLE_FROM_STRING(p_UNDER_TEST, c_COMMA, v_UNDER_TEST_FLAGs);
+ 	UT.ID_TABLE_FROM_STRING(p_SCHEDULE_ID, c_COMMA, v_SCHEDULE_IDs);
+
+	-- Use Cut Time Zone to initialize v_BEGIN_DATE and v_END_DATE for Daily Data
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	OPEN p_CURSOR FOR
+		SELECT A.RESOURCE_NAME,
+				POD_ID,
+				NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+    			CASE WHEN A.STATEMENT_TYPE_ID IS NULL THEN NULL
+         			ELSE EI.GET_ENTITY_IDENTIFIER_EXTSYS(EC.ED_STATEMENT_TYPE, A.STATEMENT_TYPE_ID, EC.ES_SEM, MM_SEM_UTIL.g_STATEMENT_TYPE_RUN_TYPE)
+				END AS SCHEDULE_TYPE,
+				JURISDICTION,
+				FUEL_TYPE,
+				PRIORITY_DISPATCH_YN,
+				PUMP_STORAGE_YN,
+				ENERGY_LIMIT_YN,
+				UNDER_TEST_YN,
+				PRICE_1,
+				QUANTITY_1,
+				PRICE_2,
+				QUANTITY_2,
+				PRICE_3,
+				QUANTITY_3,
+				PRICE_4,
+				QUANTITY_4,
+				PRICE_5,
+				QUANTITY_5,
+				PRICE_6,
+				QUANTITY_6,
+				PRICE_7,
+				QUANTITY_7,
+				PRICE_8,
+				QUANTITY_8,
+				PRICE_9,
+				QUANTITY_9,
+				PRICE_10,
+				QUANTITY_10,
+				STARTUP_COST_HOT,
+				STARTUP_COST_WARM,
+				STARTUP_COST_COLD,
+				NO_LOAD_COST,
+				TARGET_RESV_LEVEL_MWH,
+				PUMP_STORAGE_CYC_EFY,
+				SHUTDOWN_COST,
+				GEN_EVENT_ID,
+				DEM_EVENT_ID,
+				RESOURCE_TYPE
+		FROM
+			(SELECT
+					SP.SERVICE_POINT_ID,
+					SP.SERVICE_POINT_NAME AS RESOURCE_NAME,
+					B.*,
+     				ST.STATEMENT_TYPE_ID,
+     				ST.STATEMENT_TYPE_ORDER
+			FROM SERVICE_POINT SP,
+				SEM_COMM_OFFER_STD_UNITS B,
+				TABLE(CAST(v_RESOURCE_IDs as ID_TABLE)) R,
+				TABLE(CAST(v_RESOURCE_TYPEs as STRING_TABLE)) RT,
+				TABLE(CAST(v_FUEL_TYPEs as STRING_TABLE)) FT,
+				TABLE(CAST(v_UNDER_TEST_FLAGs as STRING_TABLE)) UT,
+    			TABLE(CAST(v_SCHEDULE_IDs as ID_TABLE)) S,
+    		    STATEMENT_TYPE ST
+			WHERE
+				B.POD_ID = SP.SERVICE_POINT_ID
+				AND (R.ID = SP.SERVICE_POINT_ID OR R.ID = g_ALL)
+				AND (RT.STRING_VAL = B.RESOURCE_TYPE OR RT.STRING_VAL = g_ALL_STRING)
+				AND (FT.STRING_VAL = B.FUEL_TYPE OR FT.STRING_VAL = g_ALL_STRING)
+				AND (UT.STRING_VAL = B.UNDER_TEST_YN OR UT.STRING_VAL = g_ALL_STRING)
+    			AND (S.ID = B.SCHEDULE_TYPE OR S.ID = g_ALL)
+    			AND ST.STATEMENT_TYPE_ID = B.SCHEDULE_TYPE) A,
+				SYSTEM_DATE_TIME SDT
+		WHERE 	SDT.TIME_ZONE = p_TIME_ZONE
+					AND SDT.DATA_INTERVAL_TYPE = 2
+					AND SDT.DAY_TYPE = '1'
+					AND SDT.CUT_DATE_SCHEDULING BETWEEN v_BEGIN_DATE AND (v_END_DATE - 1/(24*60*60))
+					AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+					AND A.SCHEDULE_DATE(+) = SDT.CUT_DATE_SCHEDULING
+		ORDER BY SDT.NO_ROLLUP_YYYY_MM_DD,
+    			A.STATEMENT_TYPE_ORDER,
+				A.RESOURCE_NAME,
+				A.RESOURCE_TYPE,
+				A.JURISDICTION,
+				A.FUEL_TYPE,
+				A.UNDER_TEST_YN;
+
+END GET_CO_GEN_DSU_RPT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE GET_CO_IC_DATA_RPT
+(
+p_BEGIN_DATE DATE,
+p_END_DATE DATE,
+p_TIME_ZONE IN VARCHAR2,
+p_PSE_ID IN VARCHAR2,
+p_RESOURCE_TYPE IN VARCHAR2,
+p_GATE_WINDOW IN VARCHAR2,
+p_STATUS OUT NUMBER,
+p_CURSOR OUT REF_CURSOR
+)
+IS
+
+v_INTERVAL_ABBR  VARCHAR2(4) := 'MI30';
+v_BEGIN_DATE DATE;
+v_END_DATE DATE;
+v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER(v_INTERVAL_ABBR);
+
+v_PSE_IDs ID_TABLE;
+v_RESOURCE_TYPEs STRING_TABLE;
+v_GATE_WINDOWs STRING_TABLE;
+BEGIN
+	p_STATUS := GA.SUCCESS;
+	UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_RESOURCE_TYPE, c_COMMA, v_RESOURCE_TYPEs);
+	UT.STRING_TABLE_FROM_STRING(p_GATE_WINDOW, c_COMMA, v_GATE_WINDOWs);
+
+	-- Use Cut Time Zone to get intialize v_BEGIN_DATE and v_END_DATE for Daily Data
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	OPEN p_CURSOR FOR
+		SELECT A.PARTICIPANT_NAME,
+				A.RESOURCE_NAME,
+				A.POD_ID,
+				SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+				A.RESOURCE_TYPE,
+				A.GATE_WINDOW,
+				A.PSE_ID,
+				RESOURCE_TYPE,
+				JURISDICTION,
+				PRICE_1,
+				QUANTITY_1,
+				PRICE_2,
+				QUANTITY_2,
+				PRICE_3,
+				QUANTITY_3,
+				PRICE_4,
+				QUANTITY_4,
+				PRICE_5,
+				QUANTITY_5,
+				PRICE_6,
+				QUANTITY_6,
+				PRICE_7,
+				QUANTITY_7,
+				PRICE_8,
+				QUANTITY_8,
+				PRICE_9,
+				QUANTITY_9,
+				PRICE_10,
+				QUANTITY_10,
+				MAXIMUM_IU_IMPORT_CAPACITY_MW,
+				MAXIMUM_IU_EXPORT_CAPACITY_MW,
+				EVENT_ID
+		FROM
+			(SELECT
+					SP.SERVICE_POINT_ID,
+					SP.SERVICE_POINT_NAME AS RESOURCE_NAME,
+					P.PSE_NAME AS PARTICIPANT_NAME,
+					B.*
+			FROM SERVICE_POINT SP,
+				SEM_COMM_OFFER_IC B,
+				PURCHASING_SELLING_ENTITY P,
+				TABLE(CAST(v_PSE_IDs as ID_TABLE)) R,
+				TABLE(CAST(v_RESOURCE_TYPEs as STRING_TABLE)) RT,
+				TABLE(CAST(v_GATE_WINDOWs AS STRING_TABLE)) GW
+			WHERE
+				B.POD_ID = SP.SERVICE_POINT_ID
+				AND P.PSE_ID = B.PSE_ID
+				AND (R.ID = P.PSE_ID OR R.ID = g_ALL)
+				AND (RT.STRING_VAL = B.RESOURCE_TYPE OR RT.STRING_VAL = g_ALL_STRING)
+				AND (GW.STRING_VAL = B.GATE_WINDOW OR UPPER(GW.STRING_VAL) = UPPER(g_ALL_STRING))) A,
+				SYSTEM_DATE_TIME SDT
+		WHERE 	SDT.TIME_ZONE = p_TIME_ZONE
+					AND SDT.DATA_INTERVAL_TYPE = 1
+					AND SDT.DAY_TYPE = '1'
+					AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+					AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+					AND A.SCHEDULE_DATE(+) = SDT.CUT_DATE
+		ORDER BY SDT.NO_ROLLUP_YYYY_MM_DD,
+				A.GATE_WINDOW,
+				A.PARTICIPANT_NAME,
+				A.RESOURCE_NAME,
+				A.RESOURCE_TYPE,
+				A.JURISDICTION;
+
+END GET_CO_IC_DATA_RPT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE GET_CO_NOM_PROFILE_RPT
+(
+p_BEGIN_DATE DATE,
+p_END_DATE DATE,
+p_TIME_ZONE IN VARCHAR2,
+p_RESOURCE_ID IN VARCHAR2,
+p_RESOURCE_TYPE IN VARCHAR2,
+p_RUN_TYPE IN VARCHAR2,
+p_UNDER_TEST IN VARCHAR2,
+p_ATTRIBUTE IN VARCHAR2,
+p_STATUS OUT NUMBER,
+p_CURSOR OUT REF_CURSOR
+)
+IS
+v_INTERVAL_ABBR  VARCHAR2(4) := 'MI30';
+v_BEGIN_DATE DATE;
+v_END_DATE DATE;
+v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER(v_INTERVAL_ABBR);
+
+v_RESOURCE_IDs ID_TABLE;
+v_RESOURCE_TYPEs STRING_TABLE;
+v_UNDER_TEST_FLAGs STRING_TABLE;
+v_RUN_TYPEs STRING_TABLE;
+v_NOM_QTY_ID CONSTANT NUMBER := 1;
+v_DEC_PRICE_ID CONSTANT NUMBER := 2;
+v_SHOW_NOM_QTY NUMBER := 0;
+v_SHOW_DEC_PRICE NUMBER := 0;
+BEGIN
+	p_STATUS := GA.SUCCESS;
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_RESOURCE_TYPE, c_COMMA, v_RESOURCE_TYPEs);
+	UT.STRING_TABLE_FROM_STRING(p_UNDER_TEST, c_COMMA, v_UNDER_TEST_FLAGs);
+	UT.STRING_TABLE_FROM_STRING(p_RUN_TYPE, c_COMMA, v_RUN_TYPEs);
+
+	-- Initialize all the variable used to show various attributes
+	IF INSTR(p_ATTRIBUTE, g_ALL) > 0 OR INSTR(p_ATTRIBUTE, v_NOM_QTY_ID) > 0 THEN
+		v_SHOW_NOM_QTY := 1;
+	END IF;
+
+	IF INSTR(p_ATTRIBUTE, g_ALL) > 0 OR INSTR(p_ATTRIBUTE, v_DEC_PRICE_ID) > 0 THEN
+		v_SHOW_DEC_PRICE := 1;
+	END IF;
+
+	-- Use Time Zone which is passed in, to get intialize v_BEGIN_DATE and v_END_DATE for Daily Data
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+ 	-- verify SYSTEM_DATE_TIME table is populated
+	SP.CHECK_SYSTEM_DATE_TIME(p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	OPEN p_CURSOR FOR
+		SELECT A.RESOURCE_NAME,
+			   A.POD_ID,
+			   SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+      			A.STATEMENT_TYPE_ORDER,
+      			A.RUN_TYPE AS SCHEDULE_TYPE,
+			   A.RESOURCE_TYPE,
+			   A.UNDER_TEST_YN,
+			   A.JURISDICTION,
+			   CASE WHEN v_SHOW_NOM_QTY = 1 THEN A.NOMINATED_QUANTITY ELSE NULL END as NOMINATED_QUANTITY,
+			   CASE WHEN v_SHOW_DEC_PRICE = 1 THEN A.DECREMENTAL_PRICE ELSE NULL END as DECREMENTAL_PRICE
+		FROM 	SYSTEM_DATE_TIME SDT,
+			(SELECT
+					SP.SERVICE_POINT_ID,
+					SP.SERVICE_POINT_NAME AS RESOURCE_NAME,
+					B.*,
+     		ST.STATEMENT_TYPE_ORDER
+			FROM SERVICE_POINT SP,
+				SEM_NOM_PROFILE B,
+				TABLE(CAST(v_RESOURCE_IDs as ID_TABLE)) R,
+				TABLE(CAST(v_RESOURCE_TYPEs as STRING_TABLE)) RT,
+				TABLE(CAST(v_UNDER_TEST_FLAGs as STRING_TABLE)) UT,
+    			TABLE(CAST(v_RUN_TYPEs as STRING_TABLE)) RT1,
+    			EXTERNAL_SYSTEM_IDENTIFIER ESI,
+				STATEMENT_TYPE ST
+			WHERE
+				B.POD_ID = SP.SERVICE_POINT_ID
+				AND (R.ID = SP.SERVICE_POINT_ID OR R.ID = g_ALL)
+				AND (RT.STRING_VAL = B.RESOURCE_TYPE OR RT.STRING_VAL = g_ALL_STRING)
+				AND (UT.STRING_VAL = B.UNDER_TEST_YN OR UT.STRING_VAL = g_ALL_STRING)
+    			AND (RT1.STRING_VAL = B.RUN_TYPE OR RT1.STRING_VAL = g_ALL_STRING)
+    			AND B.RUN_TYPE = ESI.EXTERNAL_IDENTIFIER
+				AND ESI.IDENTIFIER_TYPE = MM_SEM_UTIL.g_STATEMENT_TYPE_RUN_TYPE
+				AND ESI.ENTITY_DOMAIN_ID = EC.ED_STATEMENT_TYPE
+				AND ESI.EXTERNAL_SYSTEM_ID = EC.ES_SEM
+				AND ESI.ENTITY_ID = ST.STATEMENT_TYPE_ID) A
+		WHERE 	SDT.TIME_ZONE = p_TIME_ZONE
+					AND SDT.DATA_INTERVAL_TYPE = 1
+					AND SDT.DAY_TYPE = '1'
+					AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+					AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+					AND A.SCHEDULE_DATE(+) = SDT.CUT_DATE
+		ORDER BY SDT.NO_ROLLUP_YYYY_MM_DD,
+    			A.STATEMENT_TYPE_ORDER,
+				A.RESOURCE_NAME,
+				A.RESOURCE_TYPE,
+				A.JURISDICTION,
+				A.UNDER_TEST_YN;
+END GET_CO_NOM_PROFILE_RPT;
+----------------------------------------------------------------------------------------------------
+PROCEDURE GET_WITHIN_DAY_ACTUAL_SCHED
+	(
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR2,
+	p_RESOURCE_ID IN VARCHAR2,
+	p_RESOURCE_TYPE IN VARCHAR2,
+	p_SCHEDULE_ID IN VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT REF_CURSOR
+	) IS
+
+	v_BEGIN_DATE DATE;
+	v_END_DATE DATE;
+	v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER('MI30');
+
+	v_RESOURCE_IDs ID_TABLE;
+	v_RESOURCE_TYPEs STRING_TABLE;
+	v_SCHEDULE_IDs ID_TABLE;
+
+BEGIN
+
+	p_STATUS := GA.SUCCESS;
+
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_RESOURCE_TYPE, c_COMMA, v_RESOURCE_TYPEs);
+	UT.ID_TABLE_FROM_STRING(NVL(p_SCHEDULE_ID, g_ALL), c_COMMA, v_SCHEDULE_IDs);
+
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE,
+						p_END_DATE,
+						p_TIME_ZONE,
+						v_BEGIN_DATE,
+						v_END_DATE);
+
+	OPEN p_CURSOR FOR
+		SELECT SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+			SERVICE_POINT_NAME,
+			RESOURCE_TYPE,
+			STATEMENT_TYPE_NAME,
+			SCHEDULE_MW
+		FROM (SELECT DISTINCT SAS.SCHEDULE_DATE,
+				SP.SERVICE_POINT_NAME,
+				SAS.RESOURCE_TYPE,
+				ST.STATEMENT_TYPE_NAME,
+				SAS.SCHEDULE_MW
+			FROM SERVICE_POINT SP,
+				SEM_ACTUAL_SCHEDULES SAS,
+				STATEMENT_TYPE ST,
+				TABLE(CAST(v_RESOURCE_IDs AS ID_TABLE)) RID,
+				TABLE(CAST(v_RESOURCE_TYPEs AS STRING_TABLE)) RTYPE,
+				TABLE(CAST(v_SCHEDULE_IDs AS ID_TABLE)) SCHEDID
+			WHERE SAS.POD_ID = SP.SERVICE_POINT_ID
+				AND SAS.SCHEDULE_TYPE = ST.STATEMENT_TYPE_ID
+				AND (RID.ID = g_ALL
+						OR SP.SERVICE_POINT_ID = RID.ID)
+				AND (RTYPE.STRING_VAL = g_ALL_STRING
+					OR TRIM(SAS.RESOURCE_TYPE) = RTYPE.STRING_VAL)
+				AND (SCHEDID.ID = g_ALL
+						OR SAS.SCHEDULE_TYPE = SCHEDID.ID)) MAIN,
+			SYSTEM_DATE_TIME SDT
+		WHERE MAIN.SCHEDULE_DATE(+) = SDT.CUT_DATE
+			AND SDT.TIME_ZONE = p_TIME_ZONE
+			AND SDT.DATA_INTERVAL_TYPE = 1
+			AND SDT.DAY_TYPE = '1'
+			AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+			AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		ORDER BY SCHEDULE_DATE,
+			SERVICE_POINT_NAME,
+			RESOURCE_TYPE,
+			STATEMENT_TYPE_NAME,
+			SCHEDULE_MW;
+
+END GET_WITHIN_DAY_ACTUAL_SCHED;
+---------------------------------------
+PROCEDURE GET_SO_TRADES
+	(
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR2,
+	p_RESOURCE_ID IN VARCHAR2,
+	p_CURSOR IN OUT REF_CURSOR
+	) IS
+
+	v_BEGIN_DATE DATE;
+	v_END_DATE DATE;
+	v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER('MI30');
+
+	v_RESOURCE_IDs ID_TABLE;
+
+BEGIN
+
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE,
+						p_END_DATE,
+						p_TIME_ZONE,
+						v_BEGIN_DATE,
+						v_END_DATE);
+
+	OPEN p_CURSOR FOR
+		SELECT SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+			SERVICE_POINT_NAME,
+			SO_INTERCON_EXP_QUANTITY,
+			SO_INTERCON_IMP_PRICE,
+			SO_INTERCON_IMP_QUANTITY,
+			SO_INTERCON_EXP_PRICE
+		FROM (SELECT DISTINCT S.SCHEDULE_DATE,
+				SP.SERVICE_POINT_NAME,
+				S.SO_INTERCON_EXP_QUANTITY,
+				S.SO_INTERCON_IMP_PRICE,
+				S.SO_INTERCON_IMP_QUANTITY,
+				S.SO_INTERCON_EXP_PRICE
+			FROM SERVICE_POINT SP,
+				SEM_SO_TRADES S,
+				TABLE(CAST(v_RESOURCE_IDs AS ID_TABLE)) RID
+			WHERE S.POD_ID = SP.SERVICE_POINT_ID
+				AND (RID.ID = g_ALL
+					OR SP.SERVICE_POINT_ID = RID.ID)) MAIN,
+			SYSTEM_DATE_TIME SDT
+		WHERE MAIN.SCHEDULE_DATE(+) = SDT.CUT_DATE_SCHEDULING
+			AND SDT.TIME_ZONE = p_TIME_ZONE
+			AND SDT.DATA_INTERVAL_TYPE = 1
+			AND SDT.DAY_TYPE = '1'
+			AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+			AND SDT.CUT_DATE_SCHEDULING BETWEEN v_BEGIN_DATE AND v_END_DATE
+		ORDER BY SCHEDULE_DATE,
+			SERVICE_POINT_NAME;
+END GET_SO_TRADES;
+---------------------------------------
+PROCEDURE GET_IC_NOMINATIONS
+	(
+	p_BEGIN_DATE DATE,
+	p_END_DATE DATE,
+	p_TIME_ZONE IN VARCHAR2,
+	p_PSE_ID IN VARCHAR2,
+	p_RESOURCE_ID IN VARCHAR2,
+	p_RUN_TYPE IN VARCHAR2,
+	p_GATE_WINDOW IN VARCHAR2,
+	p_CURSOR OUT REF_CURSOR
+	) IS
+	v_BEGIN_DATE       DATE;
+	v_END_DATE         DATE;
+	v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER('MI30');
+
+	v_PSE_IDS        ID_TABLE;
+	v_RESOURCE_IDs   ID_TABLE;
+	v_RUN_TYPEs 	 STRING_TABLE;
+	v_GATE_WINDOWs 	 STRING_TABLE;
+BEGIN
+	UT.ID_TABLE_FROM_STRING(p_PSE_ID, c_COMMA, v_PSE_IDs);
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_RUN_TYPE, c_COMMA, v_RUN_TYPEs);
+	UT.STRING_TABLE_FROM_STRING(p_GATE_WINDOW, c_COMMA, v_GATE_WINDOWs);
+
+	UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	OPEN p_CURSOR FOR
+		SELECT --A.STATEMENT_TYPE,
+			   SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+			   A.RUN_TYPE,
+			   A.GATE_WINDOW,
+			   A.PARTICIPANT_NAME,
+			   A.RESOURCE_NAME AS INTERCONNECTOR,
+			   A.UNIT_NOMINATION
+		FROM (SELECT E.EXTERNAL_IDENTIFIER AS PARTICIPANT_NAME, SP.SERVICE_POINT_NAME AS RESOURCE_NAME, B.*
+			  FROM PSE,
+				   SERVICE_POINT SP,
+				   EXTERNAL_SYSTEM_IDENTIFIER E,
+				   SEM_IC_NOMINATIONS B,
+				   TABLE(CAST(v_PSE_IDs as ID_TABLE)) P,
+				   TABLE(CAST(v_RESOURCE_IDs as ID_TABLE)) R,
+				   TABLE(CAST(v_RUN_TYPEs AS STRING_TABLE)) RT,
+				   TABLE(CAST(v_GATE_WINDOWs AS STRING_TABLE)) GW
+			  WHERE PSE.PSE_ID = E.ENTITY_ID
+			  AND E.EXTERNAL_SYSTEM_ID = EC.ES_SEM
+			  AND E.ENTITY_DOMAIN_ID = EC.ED_PSE
+			  AND E.IDENTIFIER_TYPE = 'Default'
+			  AND B.PSE_ID = PSE.PSE_ID
+			  AND B.POD_ID = SP.SERVICE_POINT_ID
+			  AND (P.ID = PSE.PSE_ID OR P.ID = g_ALL)
+			  AND (R.ID = SP.SERVICE_POINT_ID OR R.ID = g_ALL)
+			  AND (RT.STRING_VAL = B.RUN_TYPE OR UPPER(RT.STRING_VAL) = UPPER(g_ALL_STRING))
+			  AND (GW.STRING_VAL = B.GATE_WINDOW OR UPPER(GW.STRING_VAL) = UPPER(g_ALL_STRING))) A,
+			 SYSTEM_DATE_TIME SDT
+		WHERE SDT.TIME_ZONE = p_TIME_ZONE
+		AND SDT.DATA_INTERVAL_TYPE = 1
+		AND SDT.DAY_TYPE = '1'
+		AND SDT.CUT_DATE_SCHEDULING BETWEEN v_BEGIN_DATE AND (v_END_DATE - 1 / (24 * 60 * 60))
+		AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+		AND A.SCHEDULE_DATE(+) = SDT.CUT_DATE_SCHEDULING
+		ORDER BY SDT.NO_ROLLUP_YYYY_MM_DD, A.RUN_TYPE, A.GATE_WINDOW, A.PARTICIPANT_NAME, A.RESOURCE_NAME;
+
+END GET_IC_NOMINATIONS;
+--------------------------------------------------------------------------------------				
+PROCEDURE GET_IC_OFFER_CAPACITY
+	(
+		p_BEGIN_DATE                IN DATE,
+		p_END_DATE                  IN DATE,
+		p_TIME_ZONE                 IN VARCHAR2,
+		p_RESOURCE_ID 				IN VARCHAR2,
+		p_GATE_WINDOW 				IN VARCHAR2,
+		p_CURSOR                    IN OUT REF_CURSOR
+	) IS
+
+	v_BEGIN_DATE DATE;
+	v_END_DATE DATE;
+	v_MIN_INTERVAL_NUM NUMBER(3) := GET_INTERVAL_NUMBER('MI30');
+
+	v_RESOURCE_IDs   ID_TABLE;
+	v_GATE_WINDOWs 	 STRING_TABLE;
+	
+BEGIN
+
+	UT.ID_TABLE_FROM_STRING(p_RESOURCE_ID, c_COMMA, v_RESOURCE_IDs);
+	UT.STRING_TABLE_FROM_STRING(p_GATE_WINDOW, c_COMMA, v_GATE_WINDOWs);
+	
+	UT.CUT_DATE_RANGE(  p_BEGIN_DATE,
+						p_END_DATE,
+						p_TIME_ZONE,
+						v_BEGIN_DATE,
+						v_END_DATE);
+
+	OPEN p_CURSOR FOR
+	WITH ST_ORDER AS (
+                    SELECT I.EXTERNAL_IDENTIFIER,
+                         ST.STATEMENT_TYPE_ORDER
+                    FROM EXTERNAL_SYSTEM_IDENTIFIER I,
+                         STATEMENT_TYPE ST
+                    WHERE I.ENTITY_DOMAIN_ID = EC.ED_STATEMENT_TYPE
+                          AND I.EXTERNAL_SYSTEM_ID = EC.ES_SEM
+                          AND I.IDENTIFIER_TYPE = MM_SEM_UTIL.g_STATEMENT_TYPE_RUN_TYPE
+                          AND ST.STATEMENT_TYPE_ID = I.ENTITY_ID
+                    )
+		SELECT SDT.NO_ROLLUP_YYYY_MM_DD AS SCHEDULE_DATE,
+			SP.SERVICE_POINT_NAME AS INTERCONNECTOR,
+			VAL,
+			COL_TYPE,
+			COL_ORDER AS COL_TYPE_DISPLAY_ORDER,
+			RUN_TYPE_ORDER.STATEMENT_TYPE_ORDER AS GATE_WINDOW_DISPLAY_ORDER,
+			RUN_TYPE AS GATE_WINDOW
+			
+		FROM ( 	
+			 SELECT SCHEDULE_DATE,
+      		 	POD_ID AS INTERCONNECTOR,
+      		 	'Allocated Capacity (MW)' AS COL_TYPE,
+     		 	AIC AS VAL,
+     		 	RUN_TYPE,
+				1 AS COL_ORDER
+     	 	 FROM
+     			SEM_IC_OFFER_CAPACITY OC
+    		 UNION 
+    		 SELECT SCHEDULE_DATE,
+    			 POD_ID AS INTERCONNECTOR,
+     			 'Offered Capacity (Export MW)',
+     			 OICE,
+     			 RUN_TYPE,
+				 2 AS COL_ORDER
+    		 FROM
+   				 SEM_IC_OFFER_CAPACITY OC
+    		 UNION 
+   			 SELECT SCHEDULE_DATE,
+     			 POD_ID AS INTERCONNECTOR,
+   				 'Offered Capacity (Import MW)',
+     			 OICI,
+     			 RUN_TYPE,
+				 3 AS COL_ORDER
+     		 FROM
+     			 SEM_IC_OFFER_CAPACITY OC
+    		 UNION 
+    		 SELECT SCHEDULE_DATE,
+     			 POD_ID AS INTERCONNECTOR,
+     		     'Max Export ATC',
+     			 MAX_EXPORT_ATC,
+     			 RUN_TYPE,
+				 4 AS COL_ORDER
+     		 FROM
+     			 SEM_IC_OFFER_CAPACITY OC
+    		 UNION 
+    		 SELECT SCHEDULE_DATE,
+    			 POD_ID AS INTERCONNECTOR,
+     			 'Max Import ATC',
+   				  MAX_IMPORT_ATC,
+   				  RUN_TYPE,
+				  5 AS COL_ORDER
+     		FROM
+     			  SEM_IC_OFFER_CAPACITY OC
+			) OC,
+			 SYSTEM_DATE_TIME SDT,
+			 SERVICE_POINT SP,
+			 TABLE(CAST(v_RESOURCE_IDs as ID_TABLE)) R,
+			 TABLE(CAST(v_GATE_WINDOWs AS STRING_TABLE)) GW,
+			 ST_ORDER RUN_TYPE_ORDER
+	
+		WHERE SDT.TIME_ZONE = p_TIME_ZONE
+			AND SDT.DATA_INTERVAL_TYPE = 1
+			AND SDT.DAY_TYPE = '1'
+			AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUM
+			AND SDT.CUT_DATE_SCHEDULING BETWEEN v_BEGIN_DATE AND v_END_DATE
+			AND OC.SCHEDULE_DATE = SDT.CUT_DATE_SCHEDULING
+			AND (R.ID = SP.SERVICE_POINT_ID OR R.ID = g_ALL)
+			AND(GW.STRING_VAL = OC.RUN_TYPE OR UPPER(GW.STRING_VAL) = UPPER(g_ALL_STRING))
+			AND SP.SERVICE_POINT_ID = OC.INTERCONNECTOR
+			AND RUN_TYPE_ORDER.EXTERNAL_IDENTIFIER = OC.RUN_TYPE
+		ORDER BY 1,2,3,4,5,6,7;
+		
+END GET_IC_OFFER_CAPACITY;
+--------------------------------------------------------------------------------------
+PROCEDURE GET_DOWNLOAD_GROUPS(p_CURSOR OUT REF_CURSOR) IS
+
+BEGIN
+
+	OPEN p_CURSOR FOR
+		SELECT GROUP_NAME,
+			   MARKET_TYPE,
+			   REPORT_TYPE,
+			   NVL(STATEMENT_TYPE_ID, g_ALL) STATEMENT_TYPE_ID,
+			   EXTERNAL_ACCOUNT_NAME,
+			   CASE NVL(PIR_STATEMENT_TYPE_ID, 0) WHEN 0 THEN 'N/A' ELSE EI.GET_ENTITY_IDENTIFIER_EXTSYS(EC.ED_STATEMENT_TYPE, PIR_STATEMENT_TYPE_ID, EC.ES_SEM, MM_SEM_UTIL.g_STATEMENT_TYPE_SETTLEMENT) END PIR_STATEMENT_TYPE_EXTID,
+			   INCLUDE_IN_DL
+		FROM SEM_DOWNLOAD_GROUP
+		ORDER BY 1;
+
+END GET_DOWNLOAD_GROUPS;
+----------------------------------------------------------------------------------------------------
+PROCEDURE DEL_DOWNLOAD_GROUP(p_GROUP_NAME IN VARCHAR2, p_ERROR_MESSAGE OUT VARCHAR2) IS
+BEGIN
+	DELETE FROM SEM_DOWNLOAD_GROUP WHERE GROUP_NAME = p_GROUP_NAME;
+END DEL_DOWNLOAD_GROUP;
+----------------------------------------------------------------------------------------------------
+PROCEDURE PUT_DOWNLOAD_GROUP(p_GROUP_NAME IN VARCHAR2,
+							 p_MARKET_TYPE IN VARCHAR2,
+							 p_REPORT_TYPE IN VARCHAR2,
+							 p_STATEMENT_TYPE_ID IN NUMBER,
+							 p_EXTERNAL_ACCOUNT_NAME IN VARCHAR2,
+							 p_PIR_STATEMENT_TYPE_EXTID IN VARCHAR2,
+							 p_INCLUDE_IN_DL IN NUMBER,
+							 p_ERROR_MESSAGE OUT VARCHAR2) IS
+	v_PIR_STATEMENT_TYPE_ID NUMBER;
+	v_GROUP_NAME VARCHAR2(128);
+	v_F_STATEMENT_TYPE_ID NUMBER(9);
+BEGIN
+	SAVEPOINT BEFORE_GROUP_EDIT;
+
+	-- get the statement type ID for the F external identifier
+	v_F_STATEMENT_TYPE_ID := MM_UTIL.DETERMINE_STATEMENT_TYPE('F', NULL, EC.ES_SEM, MM_SEM_UTIL.g_STATEMENT_TYPE_SETTLEMENT);
+
+	IF p_PIR_STATEMENT_TYPE_EXTID != 'N/A' THEN
+		-- find the ID of the PIR statement type (auto-created if needed)
+		v_PIR_STATEMENT_TYPE_ID := MM_UTIL.DETERMINE_STATEMENT_TYPE('F', REGEXP_SUBSTR(p_PIR_STATEMENT_TYPE_EXTID, '([0-9]+)'), EC.ES_SEM, MM_SEM_UTIL.g_STATEMENT_TYPE_SETTLEMENT);
+	ELSE
+		v_PIR_STATEMENT_TYPE_ID := NULL;
+	END IF;
+
+/*
+The rule for validating groups with revised PIRs is
+“When the market and participant are the same, the
+statement type is F, and the report type is PIR,
+then the PIR statement type must be the same.” This
+rule implicitly includes “<All>” values for market,
+participant, statement type, and report type.
+*/
+	-- make sure this doesn't conflict with any existing groups
+	IF p_REPORT_TYPE IN (g_ALL_STRING, 'PIR') AND p_INCLUDE_IN_DL = 1 THEN
+		BEGIN
+			SELECT GROUP_NAME
+			INTO v_GROUP_NAME
+			FROM SEM_DOWNLOAD_GROUP
+			WHERE INCLUDE_IN_DL = 1
+			AND (MARKET_TYPE IN (p_MARKET_TYPE, g_ALL_STRING) OR p_MARKET_TYPE = g_ALL_STRING)
+			AND REPORT_TYPE IN (g_ALL_STRING, 'PIR')
+			AND (EXTERNAL_ACCOUNT_NAME IN (p_EXTERNAL_ACCOUNT_NAME, g_ALL_STRING) OR p_EXTERNAL_ACCOUNT_NAME = g_ALL_STRING)
+			AND (NVL(STATEMENT_TYPE_ID, v_F_STATEMENT_TYPE_ID) = p_STATEMENT_TYPE_ID OR p_STATEMENT_TYPE_ID = g_ALL)
+			AND NVL(PIR_STATEMENT_TYPE_ID, 0) != NVL(v_PIR_STATEMENT_TYPE_ID, 0)
+			AND GROUP_NAME <> p_GROUP_NAME  -- don't validate against myself!
+			AND ROWNUM = 1;
+
+			-- this is a bad thing; raise the offending group name with the error
+			RAISE_APPLICATION_ERROR(-20000, 'PIR statement type ' || p_PIR_STATEMENT_TYPE_EXTID || ' in group ' || p_GROUP_NAME || ' conflicts with group ' || v_GROUP_NAME);
+		EXCEPTION WHEN NO_DATA_FOUND THEN
+			-- this is a good thing; carry on
+			NULL;
+		END;
+	END IF;
+
+	MERGE INTO SEM_DOWNLOAD_GROUP S
+	USING (SELECT p_GROUP_NAME GROUP_NAME
+		   FROM DUAL) A
+	ON (A.GROUP_NAME = S.GROUP_NAME)
+	WHEN MATCHED THEN
+		UPDATE
+		SET S.MARKET_TYPE = p_MARKET_TYPE,
+			S.REPORT_TYPE = p_REPORT_TYPE,
+			S.STATEMENT_TYPE_ID = CASE p_STATEMENT_TYPE_ID
+				WHEN g_ALL THEN NULL ELSE p_STATEMENT_TYPE_ID END,
+			S.EXTERNAL_ACCOUNT_NAME = p_EXTERNAL_ACCOUNT_NAME,
+			S.PIR_STATEMENT_TYPE_ID = CASE p_PIR_STATEMENT_TYPE_EXTID
+				WHEN 'N/A' THEN NULL ELSE v_PIR_STATEMENT_TYPE_ID END,
+			S.INCLUDE_IN_DL = NVL(p_INCLUDE_IN_DL, 0)
+	WHEN NOT MATCHED THEN
+		INSERT
+			(GROUP_NAME,
+			 MARKET_TYPE,
+			 REPORT_TYPE,
+			 STATEMENT_TYPE_ID,
+			 EXTERNAL_ACCOUNT_NAME,
+			 PIR_STATEMENT_TYPE_ID,
+			 INCLUDE_IN_DL)
+		VALUES
+			(p_GROUP_NAME,
+			 p_MARKET_TYPE,
+			 p_REPORT_TYPE,
+			 CASE p_STATEMENT_TYPE_ID
+				WHEN g_ALL THEN NULL ELSE p_STATEMENT_TYPE_ID END,
+			 p_EXTERNAL_ACCOUNT_NAME,
+			 CASE p_PIR_STATEMENT_TYPE_EXTID
+				WHEN 'N/A' THEN NULL ELSE v_PIR_STATEMENT_TYPE_ID END,
+			 NVL(p_INCLUDE_IN_DL, 0));
+
+END PUT_DOWNLOAD_GROUP;
+
+----------------------------------------------------------------------------------------
+PROCEDURE GET_SEM_PSE_SERVICE_POINT
+(
+    p_SERVICE_POINT_ID IN NUMBER,
+    p_STATUS           OUT NUMBER,
+    p_CURSOR           IN OUT REF_CURSOR
+) AS
+BEGIN
+
+    OPEN p_CURSOR FOR
+        SELECT PSE.PSE_ID, A.BEGIN_DATE, A.END_DATE, A.ENTRY_DATE
+        FROM SEM_SERVICE_POINT_PSE A, PSE
+        WHERE A.POD_ID = p_SERVICE_POINT_ID
+        AND A.PSE_ID = PSE.PSE_ID
+		ORDER BY 2,3;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        p_STATUS := SQLCODE;
+END GET_SEM_PSE_SERVICE_POINT;
+---------------------------------------------------------------------------------
+PROCEDURE PUT_SEM_PSE_SERVICE_POINT
+(
+    p_SERVICE_POINT_ID IN NUMBER,
+    p_PSE_ID           IN NUMBER,
+	p_BEGIN_DATE       IN DATE,
+	p_END_DATE         IN DATE,
+	p_OLD_PSE_ID       IN NUMBER,
+	p_OLD_BEGIN_DATE   IN DATE,
+    p_STATUS           OUT NUMBER
+) AS
+
+v_END_DATE DATE;
+BEGIN
+
+	p_STATUS := GA.SUCCESS;
+	v_END_DATE := NULL_DATE(p_END_DATE);
+
+	--update/insert SEM_SERVICE_POINT_PSE table
+    UT.PUT_TEMPORAL_DATA_UI(p_TABLE_NAME => 'SEM_SERVICE_POINT_PSE',
+							p_BEGIN_DATE => p_BEGIN_DATE,
+							p_END_DATE => v_END_DATE,
+							p_OLD_BEGIN_DATE => p_OLD_BEGIN_DATE,
+							p_UPDATE_ENTRY_DATE => TRUE,
+							p_COL_NAME1 => 'PSE_ID',
+							p_COL_NEW_VALUE1 => UT.GET_LITERAL_FOR_NUMBER(p_PSE_ID),
+							p_COL_OLD_VALUE1 => UT.GET_LITERAL_FOR_NUMBER(p_OLD_PSE_ID),
+							p_COL_IS_KEY1 => FALSE,
+							p_COL_NAME2 => 'POD_ID',
+							p_COL_NEW_VALUE2 => UT.GET_LITERAL_FOR_NUMBER(p_SERVICE_POINT_ID),
+							p_COL_OLD_VALUE2 => UT.GET_LITERAL_FOR_NUMBER(p_SERVICE_POINT_ID),
+							p_COL_IS_KEY2 => TRUE);
+
+EXCEPTION
+	WHEN OTHERS THEN
+		p_STATUS := SQLCODE;
+
+END PUT_SEM_PSE_SERVICE_POINT;
+---------------------------------------------------------------------------------
+PROCEDURE DEL_SEM_PSE_SERVICE_POINT
+(
+    p_SERVICE_POINT_ID IN NUMBER,
+    p_PSE_ID           IN NUMBER,
+    p_BEGIN_DATE       IN DATE,
+    p_STATUS           OUT NUMBER
+) AS
+
+BEGIN
+
+    p_STATUS := GA.SUCCESS;
+
+    DELETE FROM SEM_SERVICE_POINT_PSE A
+    WHERE A.POD_ID = p_SERVICE_POINT_ID
+    AND A.PSE_ID = p_PSE_ID
+    AND A.BEGIN_DATE = p_BEGIN_DATE;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        p_STATUS := SQLCODE;
+
+END DEL_SEM_PSE_SERVICE_POINT;
+---------------------------------------
+PROCEDURE PIR_VARIABLES(p_CURSOR OUT REF_CURSOR) IS
+BEGIN
+  OPEN p_CURSOR FOR
+	  SELECT '<ALL>' AS VARIABLE_TYPE FROM DUAL
+	  UNION
+	  SELECT VARIABLE_TYPE FROM SEM_PIR_VARIABLES
+	  ORDER BY 1;
+END PIR_VARIABLES;
+---------------------------------------
+PROCEDURE GET_SEM_MARKET_RESULTS
+(
+	p_BEGIN_DATE           IN DATE,
+	p_END_DATE             IN DATE,
+	p_TIME_ZONE            IN VARCHAR2,
+	p_REPORT_DATE_RANGE_BY IN VARCHAR2,
+	p_RUN_TYPES		       IN VARCHAR2,
+	p_SHOW_EURO		       IN NUMBER DEFAULT 1,
+	p_SHOW_GBP		       IN NUMBER DEFAULT 1,
+	p_STATUS               OUT NUMBER,
+	p_CURSOR               OUT REF_CURSOR
+) IS
+    -- column headers that will display in the UI
+	c_LABEL_SYSTEM_LOAD CONSTANT VARCHAR2(16) := 'System Load';
+	c_LABEL_SMP_EURO    CONSTANT VARCHAR2(16) := 'SMP (Euro)';
+	c_LABEL_SMP_GBP     CONSTANT VARCHAR2(16) := 'SMP (GBP)';
+	c_LABEL_LAMBDA_EURO CONSTANT VARCHAR2(16) := 'Lambda (Euro)';
+	c_LABEL_LAMBDA_GBP  CONSTANT VARCHAR2(16) := 'Lambda (GBP)';
+
+	-- in memory table that we can join in attribute names
+	v_ATTRIBUTES STRING_TABLE := STRING_TABLE(STRING_TYPE(c_LABEL_SYSTEM_LOAD),
+	                                          STRING_TYPE(c_LABEL_SMP_EURO),
+											  STRING_TYPE(c_LABEL_SMP_GBP),
+											  STRING_TYPE(c_LABEL_LAMBDA_EURO),
+											  STRING_TYPE(c_LABEL_LAMBDA_GBP));
+
+	-- define the order of the column headers
+	c_ORDER_SYSTEM_LOAD CONSTANT NUMBER := 0;
+	c_ORDER_SMP_EURO    CONSTANT NUMBER := 1;
+	c_ORDER_LAMBDA_EURO CONSTANT NUMBER := 2;
+	c_ORDER_SMP_GBP     CONSTANT NUMBER := 3;
+	c_ORDER_LAMBDA_GBP  CONSTANT NUMBER := 4;
+
+	-- range by option strings sent by the UI filter
+	c_RANGE_BY_TRADING_DAY  CONSTANT VARCHAR2(16) := 'Trading Day';
+	c_RANGE_BY_CALENDAR_DAY CONSTANT VARCHAR2(16) := 'Calendar Day';
+
+	-- adjusted begin/end date
+	v_BEGIN_DATE DATE;
+	v_END_DATE   DATE;
+
+	v_RUN_TYPES STRING_TABLE;
+	v_MIN_INTERVAL_NUMBER NUMBER := GET_INTERVAL_NUMBER(c_MI30_INTERVAL);
+BEGIN
+    p_STATUS := GA.SUCCESS;
+
+	-- cut/adjust date range based on p_REPORT_DATE_RANGE_BY filter
+	IF p_REPORT_DATE_RANGE_BY = c_RANGE_BY_TRADING_DAY THEN
+	    MM_SEM_UTIL.OFFER_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, v_BEGIN_DATE, v_END_DATE);
+	ELSIF p_REPORT_DATE_RANGE_BY = c_RANGE_BY_CALENDAR_DAY THEN
+	    UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+	END IF;
+
+	-- verify SYSTEM_DATE_TIME table is populated
+	SP.CHECK_SYSTEM_DATE_TIME(p_TIME_ZONE, v_BEGIN_DATE, v_END_DATE);
+
+	-- parse run type filter into virtual table
+	UT.STRING_TABLE_FROM_STRING(p_RUN_TYPES, c_COMMA, v_RUN_TYPES);
+
+	OPEN p_CURSOR FOR
+	WITH SDT AS (
+	    -- SYSTEM_DATE_TIME intervals to outer join
+		SELECT SDT.CUT_DATE
+		FROM SYSTEM_DATE_TIME SDT
+		WHERE SDT.TIME_ZONE = p_TIME_ZONE
+		  AND SDT.DATA_INTERVAL_TYPE = 1
+		  AND SDT.DAY_TYPE = GA.STANDARD
+		  AND SDT.CUT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE
+		  AND SDT.MINIMUM_INTERVAL_NUMBER >= v_MIN_INTERVAL_NUMBER
+	), RUN_TYPES AS (
+	    -- actual list of Run Types and their order
+		SELECT ESI.EXTERNAL_IDENTIFIER AS RUN_TYPE,
+			   ST.STATEMENT_TYPE_ORDER AS RUN_TYPE_ORDER
+		FROM STATEMENT_TYPE ST,
+			 EXTERNAL_SYSTEM_IDENTIFIER ESI,
+			 TABLE(CAST(v_RUN_TYPES AS STRING_TABLE)) RT_FILTER
+		WHERE ESI.EXTERNAL_SYSTEM_ID = EC.ES_SEM
+		  AND ESI.ENTITY_DOMAIN_ID = EC.ED_STATEMENT_TYPE
+		  AND ESI.ENTITY_ID = ST.STATEMENT_TYPE_ID
+		  AND ESI.IDENTIFIER_TYPE = MM_SEM_UTIL.g_STATEMENT_TYPE_RUN_TYPE
+		  AND (RT_FILTER.STRING_VAL = ESI.EXTERNAL_IDENTIFIER OR UPPER(RT_FILTER.STRING_VAL) = UPPER(g_ALL_STRING))
+	), SDT_RUN_TYPES AS (
+	   -- interval and run type join (one "table" we can outer join below to)
+	   SELECT SDT.CUT_DATE,
+			  RUN_TYPES.RUN_TYPE,
+			  RUN_TYPES.RUN_TYPE_ORDER
+	   FROM SDT,
+			RUN_TYPES
+	)
+	-- for the anchored grid display requirement, we need to "explode" the table
+	-- so that we have rows that look like the following:
+	-- 11/25/2011 0:30      System Load        EA         7
+	SELECT FROM_CUT_AS_HED(SDTR.CUT_DATE, p_TIME_ZONE, c_MI30_INTERVAL)     SCHEDULE_DATE,
+		   CASE A.STRING_VAL
+			   WHEN c_LABEL_SYSTEM_LOAD THEN c_ORDER_SYSTEM_LOAD
+			   WHEN c_LABEL_SMP_EURO THEN c_ORDER_SMP_EURO
+			   WHEN c_LABEL_SMP_GBP THEN c_ORDER_SMP_GBP
+			   WHEN c_LABEL_LAMBDA_EURO THEN c_ORDER_LAMBDA_EURO
+			   WHEN c_LABEL_LAMBDA_GBP THEN c_ORDER_LAMBDA_GBP
+		   END                                                              ATTRIBUTE_ORDER,
+		   A.STRING_VAL                                                     ATTRIBUTE_NAME,
+		   SDTR.RUN_TYPE_ORDER                                              RUN_TYPE_ORDER,
+		   SDTR.RUN_TYPE                                                    RUN_TYPE,
+		   CASE A.STRING_VAL
+			   WHEN c_LABEL_SYSTEM_LOAD THEN SMR.SYSTEM_LOAD
+			   WHEN c_LABEL_SMP_EURO THEN SMR.SMP_EURO
+			   WHEN c_LABEL_SMP_GBP THEN SMR.SMP_GBP
+			   WHEN c_LABEL_LAMBDA_EURO THEN SMR.LAMBDA_EURO
+			   WHEN c_LABEL_LAMBDA_GBP THEN SMR.LAMBDA_GBP
+		   END                                                             ATTRIBUTE_VALUE
+	FROM SDT_RUN_TYPES SDTR,
+		 SEM_MARKET_RESULTS SMR,
+		 TABLE(CAST(v_ATTRIBUTES AS STRING_TABLE)) A
+	WHERE SDTR.CUT_DATE = SMR.SCHEDULE_DATE(+) -- need to have a row for each interval
+	  AND SDTR.RUN_TYPE = SMR.RUN_TYPE(+)      -- need to have a run type for each interval
+	  AND (p_SHOW_EURO=1 OR (p_SHOW_EURO=0 AND A.STRING_VAL<>c_LABEL_SMP_EURO AND A.STRING_VAL<>c_LABEL_LAMBDA_EURO))
+	  AND (p_SHOW_GBP=1 OR (p_SHOW_GBP=0 AND A.STRING_VAL<>c_LABEL_SMP_GBP AND A.STRING_VAL<>c_LABEL_LAMBDA_GBP))
+	ORDER BY SCHEDULE_DATE,ATTRIBUTE_ORDER,RUN_TYPE_ORDER;
+END GET_SEM_MARKET_RESULTS;
+---------------------------------------------------------------------------------
+PROCEDURE CANCELLED_SRA_RPT
+(
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE IN DATE,
+	p_TIME_ZONE IN VARCHAR2,
+    p_ENTITY_GROUP_ID IN NUMBER,
+    p_SRA_TYPE IN VARCHAR2, -- '<ALL>','Energy','Capacity'
+	p_CURSOR IN OUT REF_CURSOR
+) AS
+    v_REALLOC_TYPE VARCHAR2(16);
+    v_CUT_BEGIN_DATE DATE;
+    v_CUT_END_DATE DATE;
+    v_CP_EXT_ID EXTERNAL_SYSTEM_IDENTIFIER.EXTERNAL_IDENTIFIER%TYPE;
+	c_DATE_TIME_FORMAT CONSTANT VARCHAR2(32) := 'YYYY-MM-DD HH24:MI';
+BEGIN
+    v_REALLOC_TYPE := CASE p_SRA_TYPE
+                      WHEN MM_SEM_UTIL.c_COMMODITY_ENERGY THEN 'E'
+                      WHEN MM_SEM_UTIL.c_COMMODITY_CAPACITY THEN 'C'
+                      ELSE p_SRA_TYPE
+					  END;
+	-- Get cut date range for the user input date range that is in local time
+    UT.CUT_DATE_RANGE(p_BEGIN_DATE, p_END_DATE, p_TIME_ZONE, v_CUT_BEGIN_DATE, v_CUT_END_DATE);
+	IF p_ENTITY_GROUP_ID <> g_ALL THEN
+		SELECT ESI.EXTERNAL_IDENTIFIER
+		INTO v_CP_EXT_ID
+		FROM EXTERNAL_SYSTEM_IDENTIFIER ESI
+		WHERE ESI.EXTERNAL_SYSTEM_ID = EC.ES_SEM
+		  AND ESI.ENTITY_DOMAIN_ID = EC.ED_ENTITY_GROUP
+		  AND ESI.ENTITY_ID = p_ENTITY_GROUP_ID
+		  AND ESI.IDENTIFIER_TYPE = SEM_REPORTS.c_EXT_ID_TYPE_CODE_PARTICIPANT;
+    END IF;
+
+    OPEN p_CURSOR FOR
+	SELECT *
+	FROM(
+		SELECT H.TRANSACTION_CID,
+			   H.CODE_PARTICIPANT_CID,
+			   D.PARTICIPANT_NAME,
+			   D.PARTICIPANT_NAME_CREDIT,
+			   D.REALLOC_TYPE,
+			   TO_CHAR(FROM_CUT(MM_SEM_UTIL.GET_SCHEDULE_DATE(D.DELIVERY_DATE, D.DELIVERY_HOUR, D.DELIVERY_INTERVAL, 1, NULL),
+							   p_TIME_ZONE)-(1/48), c_DATE_TIME_FORMAT) AS CHARGE_DATE,
+			   D.MONETARY_VALUE,
+			   D.REALLOC_AGREEMENT_NAME
+		FROM SEM_CANCELLED_SRA_HEADER H,
+			 SEM_CANCELLED_SRA_DETAIL D
+		WHERE (g_ALL = p_ENTITY_GROUP_ID OR H.CODE_PARTICIPANT_CID = v_CP_EXT_ID)
+		  AND (g_ALL_STRING = v_REALLOC_TYPE OR D.REALLOC_TYPE = v_REALLOC_TYPE)
+		  AND D.FILE_ID = H.FILE_ID
+--		  AND MM_SEM_UTIL.GET_SCHEDULE_DATE(D.DELIVERY_DATE, D.DELIVERY_HOUR, D.DELIVERY_INTERVAL, 1, NULL)
+		  AND H.RECORD_TIMESTAMP
+			  BETWEEN v_CUT_BEGIN_DATE AND v_CUT_END_DATE
+		ORDER BY H.TRANSACTION_CID,
+			 H.CODE_PARTICIPANT_CID,
+			 D.PARTICIPANT_NAME,
+			 D.PARTICIPANT_NAME_CREDIT,
+			 D.REALLOC_TYPE,
+			 CHARGE_DATE
+	);
+END CANCELLED_SRA_RPT;
+---------------------------------------------------------------------------------
+PROCEDURE CANCELLED_SRA_CP_LIST
+(
+    p_CURSOR IN OUT REF_CURSOR
+) AS
+BEGIN
+    OPEN p_CURSOR FOR
+    SELECT *
+	FROM
+    (
+	    SELECT g_ALL_STRING AS ENTITY_GROUP_NAME,
+		       g_ALL        AS ENTITY_GROUP_ID
+		FROM DUAL
+        UNION ALL
+        SELECT G.ENTITY_GROUP_NAME,
+		       G.ENTITY_GROUP_ID
+        FROM ENTITY_GROUP G,
+             EXTERNAL_SYSTEM_IDENTIFIER E
+        WHERE G.GROUP_CATEGORY = MM_SEM_CREDIT_SHADOW.c_ENTITY_GROUP_CATEGORY
+          AND E.EXTERNAL_SYSTEM_ID = EC.ES_SEM
+          AND E.ENTITY_DOMAIN_ID = EC.ED_ENTITY_GROUP
+          AND E.ENTITY_ID = G.ENTITY_GROUP_ID
+          AND E.IDENTIFIER_TYPE = SEM_REPORTS.c_EXT_ID_TYPE_CODE_PARTICIPANT
+    )
+    ORDER BY ENTITY_GROUP_NAME;
+END CANCELLED_SRA_CP_LIST;
+---------------------------------------------------------------------------------
+BEGIN
+
+  SELECT   EA.ATTRIBUTE_ID
+  INTO     g_RESOURCE_TYPE_ATT_ID
+  FROM     ENTITY_ATTRIBUTE EA
+  WHERE    EA.ATTRIBUTE_NAME = 'Resource Type'
+  	AND	   EA.ENTITY_DOMAIN_ID = EC.ED_SERVICE_POINT;
+-------------------------------------------
+
+END SEM_REPORTS;
+/

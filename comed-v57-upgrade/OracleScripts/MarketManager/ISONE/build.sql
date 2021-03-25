@@ -1,0 +1,6 @@
+prompt MM_ISONE_UTIL
+@@MM_ISONE_UTIL.sql
+prompt MM_ISONE_LMP
+@@MM_ISONE_LMP.sql
+prompt MM_ISONE
+@@MM_ISONE.sql

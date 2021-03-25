@@ -1,0 +1,55 @@
+CREATE OR REPLACE FUNCTION ENTITY_NAME_FROM_IDS
+	(
+    p_ENTITY_DOMAIN_ID IN NUMBER,
+    p_ENTITY_ID IN NUMBER
+    ) RETURN VARCHAR DETERMINISTIC IS
+--Revision: $Revision: 1.11 $
+
+-- Answer the ENTITY_NAME for the specified ENTITY_ID and ENTITY_DOMAIN_ID.
+
+v_NAME VARCHAR2(512);
+v_TABLE_NAME VARCHAR2(64);
+v_ID_FIELD VARCHAR2(64);
+v_NAME_FIELD VARCHAR2(64);
+
+BEGIN
+	-- get the domain's name from the ENTITY_DOMAIN table
+    SELECT A.ENTITY_DOMAIN_TABLE,
+    	RTRIM(LTRIM(UPPER(B.PRIMARY_ID_COLUMN)))
+    INTO v_TABLE_NAME, v_ID_FIELD
+    FROM ENTITY_DOMAIN A, NERO_TABLE_PROPERTY_INDEX B
+    WHERE A.ENTITY_DOMAIN_ID = p_ENTITY_DOMAIN_ID
+    	AND RTRIM(LTRIM(UPPER(A.ENTITY_DOMAIN_TABLE))) = RTRIM(LTRIM(UPPER(B.TABLE_NAME)));
+
+    v_NAME_FIELD := SUBSTR(v_ID_FIELD,1,LENGTH(v_ID_FIELD)-2)||'NAME';
+
+    EXECUTE IMMEDIATE
+           'SELECT '||v_NAME_FIELD
+            ||' FROM '||v_TABLE_NAME
+            ||' WHERE '||v_ID_FIELD||' = :v1'
+    	INTO v_NAME USING p_ENTITY_ID;
+
+    RETURN v_NAME;
+
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		BEGIN
+    		-- not found? then check the graveyard in case this is the name of
+    		-- an entity that was deleted
+    		SELECT '<html><body><strike>'||ENTITY_NAME||'</strike></body></html>'
+    		INTO v_NAME
+    		FROM ENTITY_GRAVEYARD
+    		WHERE ENTITY_DOMAIN_ID = p_ENTITY_DOMAIN_ID
+    			AND ENTITY_ID = p_ENTITY_ID;
+
+            RETURN v_NAME;
+		EXCEPTION
+			WHEN OTHERS THEN
+				-- still not found? then return null
+				RETURN NULL;
+		END;
+
+	WHEN OTHERS THEN
+    	RETURN NULL;
+END ENTITY_NAME_FROM_IDS;
+/

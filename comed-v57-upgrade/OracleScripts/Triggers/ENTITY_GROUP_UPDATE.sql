@@ -1,0 +1,15 @@
+create or replace trigger ENTITY_GROUP_UPDATE
+  after update on ENTITY_GROUP  
+  FOR EACH ROW
+  
+DECLARE
+  -- local variables here
+BEGIN
+
+	IF :new.ENTITY_DOMAIN_ID <> :old.ENTITY_DOMAIN_ID THEN
+		DELETE FROM ENTITY_GROUP_ASSIGNMENT
+		WHERE ENTITY_GROUP_ID = :new.ENTITY_GROUP_ID;
+	END IF;	
+  
+END ENTITY_GROUP_UPDATE;
+/

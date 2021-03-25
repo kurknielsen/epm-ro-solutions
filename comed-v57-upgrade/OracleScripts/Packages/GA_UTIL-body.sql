@@ -1,0 +1,168 @@
+CREATE OR REPLACE PACKAGE BODY GA_UTIL IS
+----------------------------------------------------------------------------------------------------
+c_MODULE CONSTANT VARCHAR2(16) := 'System';
+c_KEY1   CONSTANT VARCHAR2(16) := 'GA Settings';
+----------------------------------------------------------------------------------------------------
+FUNCTION WHAT_VERSION RETURN VARCHAR2 IS
+BEGIN
+    RETURN '$Revision: 1.3 $';
+END WHAT_VERSION;
+---------------------------------------------------------------------------------------------------
+FUNCTION GET_SETTING
+	(
+	p_MODULE IN VARCHAR2,
+	p_SETTING_NAME IN VARCHAR2
+	) RETURN VARCHAR2 IS
+BEGIN
+	RETURN GET_DICTIONARY_VALUE(p_SETTING_NAME, CONSTANTS.GLOBAL_MODEL, c_MODULE, c_KEY1, p_MODULE);
+END GET_SETTING;
+----------------------------------------------------------------------------------------------------
+FUNCTION LOAD_BOOLEAN
+	(
+	p_MODULE IN VARCHAR2,
+	p_SETTING_NAME IN VARCHAR2,
+	p_DEFAULT_VALUE IN BOOLEAN := FALSE
+	) RETURN BOOLEAN IS
+BEGIN
+	RETURN NVL( UT.BOOLEAN_FROM_STRING(GET_SETTING(p_MODULE, p_SETTING_NAME)),
+				p_DEFAULT_VALUE );
+
+END LOAD_BOOLEAN;
+----------------------------------------------------------------------------------------------------
+FUNCTION LOAD_NUMBER_INTERNAL
+	(
+	p_MODULE IN VARCHAR2,
+	p_SETTING_NAME IN VARCHAR2,
+	p_DEFAULT_VALUE IN NUMBER
+	) RETURN NUMBER IS
+v_SETTING SYSTEM_DICTIONARY.VALUE%TYPE;
+BEGIN
+	v_SETTING := GET_SETTING(p_MODULE, p_SETTING_NAME);
+	
+	IF v_SETTING IS NULL THEN
+		RETURN p_DEFAULT_VALUE;
+	END IF;
+	
+	BEGIN
+		RETURN TO_NUMBER(v_SETTING);
+	EXCEPTION
+		WHEN OTHERS THEN
+			RETURN p_DEFAULT_VALUE;
+	END;
+END LOAD_NUMBER_INTERNAL;
+----------------------------------------------------------------------------------------------------
+FUNCTION LOAD_NUMBER
+	(
+	p_MODULE IN VARCHAR2,
+	p_SETTING_NAME IN VARCHAR2,
+	p_DEFAULT_VALUE IN NUMBER := 0,
+	p_MIN_VAL IN NUMBER := NULL,
+	p_MAX_VAL IN NUMBER := NULL
+	) RETURN NUMBER IS
+v_RET NUMBER;
+BEGIN
+	v_RET := LOAD_NUMBER_INTERNAL(p_MODULE, p_SETTING_NAME, p_DEFAULT_VALUE);
+
+	-- validate	
+	IF p_MIN_VAL IS NOT NULL AND v_RET < p_MIN_VAL THEN
+		RETURN p_MIN_VAL;
+	END IF;
+	IF p_MAX_VAL IS NOT NULL AND v_RET > p_MAX_VAL THEN
+		RETURN p_MAX_VAL;
+	END IF;
+	
+	RETURN v_RET;
+	
+END LOAD_NUMBER;
+----------------------------------------------------------------------------------------------------
+FUNCTION LOAD_NUMBER
+	(
+	p_MODULE IN VARCHAR2,
+	p_SETTING_NAME IN VARCHAR2,
+	p_DEFAULT_VALUE IN NUMBER := 0,
+	p_MUST_BE_ONE_OF IN NUMBER_COLLECTION
+	) RETURN NUMBER IS
+v_RET NUMBER;
+BEGIN
+	v_RET := LOAD_NUMBER_INTERNAL(p_MODULE, p_SETTING_NAME, p_DEFAULT_VALUE);
+
+	-- validate	
+	IF NOT UT.NUMBER_COLLECTION_CONTAINS(p_MUST_BE_ONE_OF, v_RET) THEN
+		RETURN p_DEFAULT_VALUE;
+	END IF;
+	
+	RETURN v_RET;
+	
+END LOAD_NUMBER;
+----------------------------------------------------------------------------------------------------
+FUNCTION LOAD_STRING_INTERNAL
+	(
+	p_MODULE IN VARCHAR2,
+	p_SETTING_NAME IN VARCHAR2,
+	p_DEFAULT_VALUE IN VARCHAR2,
+	p_CASE_SENSITIVE IN BOOLEAN
+	) RETURN VARCHAR2 IS
+v_SETTING SYSTEM_DICTIONARY.VALUE%TYPE;
+BEGIN
+	v_SETTING := GET_SETTING(p_MODULE, p_SETTING_NAME);
+	
+	IF v_SETTING IS NULL THEN
+		v_SETTING := p_DEFAULT_VALUE;
+	END IF;
+	
+	IF NOT p_CASE_SENSITIVE THEN
+		-- if not case-sensitive, then use all upper-case
+		RETURN UPPER(v_SETTING);
+	ELSE
+		RETURN v_SETTING;
+	END IF;
+END LOAD_STRING_INTERNAL;
+----------------------------------------------------------------------------------------------------
+FUNCTION LOAD_STRING
+	(
+	p_MODULE IN VARCHAR2,
+	p_SETTING_NAME IN VARCHAR2,
+	p_DEFAULT_VALUE IN VARCHAR2 := NULL,
+	p_MIN_LENGTH IN PLS_INTEGER := NULL,
+	p_MAX_LENGTH IN PLS_INTEGER := NULL,
+	p_CASE_SENSITIVE IN BOOLEAN := FALSE
+	) RETURN VARCHAR2 IS
+v_RET SYSTEM_DICTIONARY.VALUE%TYPE;
+BEGIN
+	v_RET := LOAD_STRING_INTERNAL(p_MODULE, p_SETTING_NAME, p_DEFAULT_VALUE, p_CASE_SENSITIVE);
+	
+	-- validate
+	IF p_MIN_LENGTH IS NOT NULL AND NVL(LENGTH(v_RET),0) < p_MIN_LENGTH THEN
+		RETURN p_DEFAULT_VALUE;
+	END IF;
+	IF p_MAX_LENGTH IS NOT NULL AND NVL(LENGTH(v_RET),0) > p_MAX_LENGTH THEN
+		RETURN p_DEFAULT_VALUE;
+	END IF;
+	
+	RETURN v_RET;
+
+END LOAD_STRING;
+----------------------------------------------------------------------------------------------------
+FUNCTION LOAD_STRING
+	(
+	p_MODULE IN VARCHAR2,
+	p_SETTING_NAME IN VARCHAR2,
+	p_DEFAULT_VALUE IN VARCHAR2,
+	p_MUST_BE_ONE_OF IN STRING_COLLECTION,
+	p_CASE_SENSITIVE IN BOOLEAN := FALSE
+	) RETURN VARCHAR2 IS
+v_RET SYSTEM_DICTIONARY.VALUE%TYPE;
+BEGIN
+	v_RET := LOAD_STRING_INTERNAL(p_MODULE, p_SETTING_NAME, p_DEFAULT_VALUE, p_CASE_SENSITIVE);
+	
+	-- validate
+	IF NOT UT.STRING_COLLECTION_CONTAINS(p_MUST_BE_ONE_OF, v_RET, p_CASE_SENSITIVE) THEN
+		RETURN p_DEFAULT_VALUE;
+	END IF;
+	
+	RETURN v_RET;
+
+END LOAD_STRING;
+----------------------------------------------------------------------------------------------------
+END GA_UTIL;
+/

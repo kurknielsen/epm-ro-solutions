@@ -1,0 +1,1737 @@
+CREATE OR REPLACE PACKAGE RETAIL_PRICING IS
+
+  -- $Revision: 1.21 $
+  -- Author  : JHUMPHRIES
+  -- Created : 12/4/2009 1:43:32 PM
+  -- Purpose : Pricing/evaluation of retail charge components
+
+-- Constants
+c_APPLY_RATE_END_DATE_OPTION VARCHAR2(32) := 'End Date';
+c_APPLY_RATE_DAY_WT_AVG_OPTION VARCHAR2(32) := 'Day Weighted Average';
+c_INTEGRATION_INTERVAL_ENT_ATR CONSTANT VARCHAR2(32) := 'Integration Interval';
+c_USE_ZERO_MIN_INT_QTY_ENT_ATR CONSTANT VARCHAR2(32) := 'Use Zero As Min Interval Qty';
+
+FUNCTION WHAT_VERSION RETURN VARCHAR2;
+
+-- Initializes base formula context, used for evaluating formula
+-- components.
+-- %parm p_SERVICE_CODE			Service code for evaluating references to
+--								service load or service consumption data.
+-- %parm p_TIME_ZONE			Optional time zone
+-- %parm p_AS_OF_DATE			Optional "as of" date for versioned
+--								queries.
+-- %parm p_STATEMENT_TYPE_ID	Optional statement type for evaluating
+--								any references to schedule data.
+-- %parm p_OTHERS				Optional set of other name->value pairs.
+PROCEDURE INIT_FORMULA_CONTEXT
+	(
+	p_SERVICE_CODE IN CHAR,
+	p_TIME_ZONE IN VARCHAR2 := GA.LOCAL_TIME_ZONE,
+	p_AS_OF_DATE IN DATE := CONSTANTS.HIGH_DATE,
+	p_STATEMENT_TYPE_ID IN NUMBER := NULL,
+	p_OTHERS IN UT.STRING_MAP := UT.c_EMPTY_MAP
+	);
+
+-- Returns the "current" accessor. This is a transient value that
+-- corresponds to the p_ACCESSOR parameter of the currently executing
+-- evaluation. It is used from CALC_ENGINE to access methods of the
+-- accessor from formula charges.
+-- %return	The current accessor or NULL if there isn't one.
+FUNCTION GET_CURRENT_ACCESSOR RETURN DETERMINANT_ACCESSOR;
+
+-- Returns the formula determinant accessor. This accessor wraps
+-- the "current" accessor, but also provides extra utility functions
+-- to ease use of the accessor from a formula charge.
+FUNCTION GET_FORMULA_ACCESSOR RETURN FORMULA_DETERMINANT_ACCESSOR;
+
+-- This procedure should only be used from the FORMULA_DETERMINANT_ACCESSOR.
+-- It is used to track the determinant status for a particular evaluation of
+-- a formula charge.
+PROCEDURE ADD_DETERMINANT_STATUS
+	(
+	p_DETERMINANT_STATUS IN PLS_INTEGER
+	);
+
+-- Evaluates a charge component for a specified date range using
+-- determinants provided by the specified accessor.
+-- %parm p_ACCESSOR		Object for retrieving charge determinants.
+-- %parm p_BEGIN_DATE	Start date of bill period.
+-- %parm p_END_DATE		End date of bill period.
+-- %parm p_COMPONENT_ID	Component to evaluate.
+-- %parm p_PRODUCT_ID	Optional Product associated with specified
+--						Component.
+-- %parm p_PERIOD_ID	Optional Period to evaluate. This only applies
+--						to TOU components.
+-- %parm p_SUPPRESS_PERIOD_WARNINGS If a period is specified by p_PERIOD_ID
+--						but the component evaluated is *not* a TOU component
+--						then a warning is issued. This flag allows the invoker
+--						to suppress the logging of those warnings.
+-- %return				Table of results.
+FUNCTION EVALUATE_COMPONENT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_COMPONENT_ID IN NUMBER,
+	p_PRODUCT_ID IN NUMBER := NULL,
+	p_PERIOD_ID IN NUMBER := NULL,
+	p_SUPPRESS_PERIOD_WARNINGS IN BOOLEAN := FALSE
+	) RETURN PRICING_RESULT_TABLE;
+
+
+
+$if $$UNIT_TEST_MODE = 1 $then
+
+FUNCTION EVALUATE_FLAT_COMPONENT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_FACTOR IN NUMBER,
+	p_USE_ZERO_MIN_INT_QTY_FLAG IN BOOLEAN := FALSE
+	) RETURN PRICING_RESULT_TABLE;
+
+FUNCTION EVALUATE_TOU_COMPONENT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_FACTOR IN NUMBER,
+	p_PERIOD_ID IN NUMBER,
+	p_USE_ZERO_MIN_INT_QTY_FLAG IN BOOLEAN := FALSE
+	) RETURN PRICING_RESULT_TABLE;
+
+PROCEDURE ADD_TO_FORMULA_CONTEXT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_CONTEXT IN OUT NOCOPY UT.STRING_MAP
+	);
+
+FUNCTION GET_FORMULA_CONTEXT RETURN UT.STRING_MAP;
+
+PROCEDURE GET_PK_DTMT_INTERVAL
+    (
+    p_COMPONENT_ID IN NUMBER,
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE IN DATE,
+    p_INTEGRATION_INTERVAL OUT VARCHAR2
+    );
+
+PROCEDURE GET_CHARGE_QUANTITY
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_NUMBER_OF_INTERVALS IN PLS_INTEGER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_PERIOD_ID IN NUMBER := NULL,
+	p_INTERVAL_MINIMUM_QTY IN NUMBER := NULL,
+	p_RETURN_VALUE OUT NUMBER,
+	p_RETURN_STATUS OUT PLS_INTEGER
+	);	
+	
+$END
+
+
+END RETAIL_PRICING;
+/
+CREATE OR REPLACE PACKAGE BODY RETAIL_PRICING IS
+-------------------------------------------------------------------------------
+-- Package variables
+g_CURRENT_ACCESSOR		DETERMINANT_ACCESSOR;
+g_FORMULA_ACCESSOR		FORMULA_DETERMINANT_ACCESSOR;
+g_FORMULA_CONTEXT		UT.STRING_MAP;
+g_DETERMINANT_STATUS	PLS_INTEGER;
+-------------------------------------------------------------------------------
+FUNCTION WHAT_VERSION RETURN VARCHAR2 IS
+BEGIN
+	RETURN '$Revision: 1.21 $';
+END WHAT_VERSION;
+---------------------------------------------------------------------------------------------------
+FUNCTION USING_ZERO_MIN_INT_QTY
+	(
+	p_COMPONENT_ID IN NUMBER
+	) RETURN BOOLEAN AS
+v_USE_ZERO_MIN_INT_QTY_VAL		TEMPORAL_ENTITY_ATTRIBUTE.ATTRIBUTE_VAL%TYPE;
+v_USE_ZERO_MIN_INT_QTY_ATR_ID 	ENTITY_ATTRIBUTE.ATTRIBUTE_ID%TYPE;
+BEGIN
+	ID.ID_FOR_ENTITY_ATTRIBUTE(c_USE_ZERO_MIN_INT_QTY_ENT_ATR, EC.ED_COMPONENT, 'String', FALSE, v_USE_ZERO_MIN_INT_QTY_ATR_ID);
+
+	SELECT NVL(MIN(X.ATTRIBUTE_VAL), 'N')
+	  INTO v_USE_ZERO_MIN_INT_QTY_VAL
+	  FROM (SELECT TEA.ATTRIBUTE_VAL AS ATTRIBUTE_VAL
+		  	 FROM TEMPORAL_ENTITY_ATTRIBUTE TEA
+		 	WHERE TEA.ATTRIBUTE_ID 		= v_USE_ZERO_MIN_INT_QTY_ATR_ID
+		   	  AND TEA.OWNER_ENTITY_ID 	= p_COMPONENT_ID
+		   	  AND TEA.ENTITY_DOMAIN_ID 	= EC.ED_COMPONENT
+		   	  AND TEA.ATTRIBUTE_NAME 	= c_USE_ZERO_MIN_INT_QTY_ENT_ATR
+		   	ORDER BY TEA.BEGIN_DATE DESC) X
+	   WHERE ROWNUM = 1;
+
+	IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+		LOGS.LOG_DEBUG_DETAIL('Use Zero As Min Interval Qty = ' || v_USE_ZERO_MIN_INT_QTY_VAL);
+	END IF;
+
+	RETURN UT.BOOLEAN_FROM_STRING(v_USE_ZERO_MIN_INT_QTY_VAL);
+END USING_ZERO_MIN_INT_QTY;
+---------------------------------------------------------------------------------------------------
+PROCEDURE GET_PK_DTMT_INTERVAL
+    (
+    p_COMPONENT_ID IN NUMBER,
+    p_BEGIN_DATE IN DATE,
+    p_END_DATE IN DATE,
+    p_INTEGRATION_INTERVAL OUT VARCHAR2
+    )
+AS
+v_INTEGRATION_INTERVAL_ATTR_ID NUMBER(9);
+BEGIN
+    ID.ID_FOR_ENTITY_ATTRIBUTE(c_INTEGRATION_INTERVAL_ENT_ATR, EC.ED_COMPONENT, 'String', FALSE, v_INTEGRATION_INTERVAL_ATTR_ID);
+
+    SELECT MIN(TEA.ATTRIBUTE_VAL)
+    INTO p_INTEGRATION_INTERVAL
+    FROM TEMPORAL_ENTITY_ATTRIBUTE TEA
+    WHERE TEA.ATTRIBUTE_ID = v_INTEGRATION_INTERVAL_ATTR_ID
+        AND TEA.BEGIN_DATE <= p_END_DATE
+        AND NVL(TEA.END_DATE, CONSTANTS.HIGH_DATE) >= p_BEGIN_DATE
+        AND TEA.OWNER_ENTITY_ID = p_COMPONENT_ID
+        AND TEA.ENTITY_DOMAIN_ID = EC.ED_COMPONENT
+    ORDER BY TEA.BEGIN_DATE;
+
+END GET_PK_DTMT_INTERVAL;
+-------------------------------------------------------------------------------
+PROCEDURE ADD_TO_FORMULA_CONTEXT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_CONTEXT IN OUT NOCOPY UT.STRING_MAP
+	) AS
+
+v_ENTRIES 	MAP_ENTRY_TABLE := p_ACCESSOR.GET_FORMULA_CONTEXTS;
+v_IDX		PLS_INTEGER;
+v_DEBUG		BOOLEAN := LOGS.IS_DEBUG_DETAIL_ENABLED;
+
+BEGIN
+
+	IF v_ENTRIES IS NOT NULL THEN
+		v_IDX := v_ENTRIES.FIRST;
+		WHILE v_ENTRIES.EXISTS(v_IDX) LOOP
+			p_CONTEXT(v_ENTRIES(v_IDX).KEY) := v_ENTRIES(v_IDX).VALUE;
+			IF v_DEBUG THEN
+				LOGS.LOG_DEBUG_DETAIL('Formula entry from accessor: '||v_ENTRIES(v_IDX).KEY||' -> '||v_ENTRIES(v_IDX).VALUE);
+			END IF;
+			v_IDX := v_ENTRIES.NEXT(v_IDX);
+		END LOOP;
+	END IF;
+
+END ADD_TO_FORMULA_CONTEXT;
+-------------------------------------------------------------------------------
+PROCEDURE INIT_FORMULA_CONTEXT
+	(
+	p_SERVICE_CODE IN CHAR,
+	p_TIME_ZONE IN VARCHAR2 := GA.LOCAL_TIME_ZONE,
+	p_AS_OF_DATE IN DATE := CONSTANTS.HIGH_DATE,
+	p_STATEMENT_TYPE_ID IN NUMBER := NULL,
+	p_OTHERS IN UT.STRING_MAP := UT.c_EMPTY_MAP
+	) AS
+BEGIN
+
+	g_FORMULA_CONTEXT := p_OTHERS;
+
+	-- Default context attributes that must be initialized to NULL for the Retail Pricing engine
+	g_FORMULA_CONTEXT(':invoice_line_begin_date') := CONSTANTS.LITERAL_NULL;
+	g_FORMULA_CONTEXT(':invoice_line_end_date') := CONSTANTS.LITERAL_NULL;
+	g_FORMULA_CONTEXT(':account') := CONSTANTS.LITERAL_NULL;
+	g_FORMULA_CONTEXT(':service_location') := CONSTANTS.LITERAL_NULL;
+	g_FORMULA_CONTEXT(':meter') := CONSTANTS.LITERAL_NULL;
+	g_FORMULA_CONTEXT(':aggregate') := CONSTANTS.LITERAL_NULL;
+	g_FORMULA_CONTEXT(':scenario') := CONSTANTS.LITERAL_NULL;
+	g_FORMULA_CONTEXT(':services') := CONSTANTS.LITERAL_NULL;
+	g_FORMULA_CONTEXT(':service_point') := CONSTANTS.LITERAL_NULL;
+	g_FORMULA_CONTEXT(':pse') := CONSTANTS.LITERAL_NULL;
+	g_FORMULA_CONTEXT(':meter_type') := CONSTANTS.LITERAL_NULL;
+	g_FORMULA_CONTEXT(':transactions') := CONSTANTS.LITERAL_NULL;
+
+	g_FORMULA_CONTEXT(':service_code') := UT.GET_LITERAL_FOR_STRING(p_SERVICE_CODE);
+	g_FORMULA_CONTEXT(':time_zone') := UT.GET_LITERAL_FOR_STRING(p_TIME_ZONE);
+	g_FORMULA_CONTEXT(':as_of') := UT.GET_LITERAL_FOR_DATE(p_AS_OF_DATE);
+	IF p_STATEMENT_TYPE_ID IS NOT NULL THEN
+		g_FORMULA_CONTEXT(':statement_type') := UT.GET_LITERAL_FOR_NUMBER(p_STATEMENT_TYPE_ID);
+	END IF;
+
+END INIT_FORMULA_CONTEXT;
+-------------------------------------------------------------------------------
+FUNCTION GET_FORMULA_CONTEXT RETURN UT.STRING_MAP AS
+BEGIN
+	RETURN g_FORMULA_CONTEXT;
+END GET_FORMULA_CONTEXT;
+-------------------------------------------------------------------------------
+FUNCTION GET_CURRENT_ACCESSOR RETURN DETERMINANT_ACCESSOR IS
+BEGIN
+	RETURN g_CURRENT_ACCESSOR;
+END GET_CURRENT_ACCESSOR;
+-------------------------------------------------------------------------------
+FUNCTION GET_FORMULA_ACCESSOR RETURN FORMULA_DETERMINANT_ACCESSOR IS
+BEGIN
+	RETURN g_FORMULA_ACCESSOR;
+END GET_FORMULA_ACCESSOR;
+-------------------------------------------------------------------------------
+PROCEDURE ADD_DETERMINANT_STATUS
+	(
+	p_DETERMINANT_STATUS IN PLS_INTEGER
+	) AS
+BEGIN
+	IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+		LOGS.LOG_DEBUG_DETAIL('Add determinant status - Current: '||g_DETERMINANT_STATUS||'; Incoming: '||p_DETERMINANT_STATUS);
+	END IF;
+
+	IF g_DETERMINANT_STATUS IS NULL THEN
+		g_DETERMINANT_STATUS := p_DETERMINANT_STATUS;
+	ELSIF g_DETERMINANT_STATUS <> p_DETERMINANT_STATUS AND g_DETERMINANT_STATUS <> RETAIL_DETERMINANTS.c_STATUS_PARTIAL THEN
+		g_DETERMINANT_STATUS := RETAIL_DETERMINANTS.c_STATUS_PARTIAL;
+	END IF;
+END ADD_DETERMINANT_STATUS;
+-------------------------------------------------------------------------------
+PROCEDURE SET_CURRENT_ACCESSOR
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR
+	) IS
+BEGIN
+	IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+		LOGS.LOG_DEBUG_DETAIL('Setting package accessor');
+	END IF;
+
+	g_CURRENT_ACCESSOR := p_ACCESSOR;
+	g_FORMULA_ACCESSOR := FORMULA_DETERMINANT_ACCESSOR();
+	g_DETERMINANT_STATUS := NULL;
+END SET_CURRENT_ACCESSOR;
+-------------------------------------------------------------------------------
+FUNCTION RESET_CURRENT_ACCESSOR RETURN PLS_INTEGER IS
+v_RET PLS_INTEGER := g_DETERMINANT_STATUS;
+BEGIN
+	IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+		LOGS.LOG_DEBUG_DETAIL('Resetting package accessor');
+	END IF;
+
+	g_CURRENT_ACCESSOR := NULL;
+	g_FORMULA_ACCESSOR := NULL;
+	g_DETERMINANT_STATUS := NULL;
+	RETURN v_RET;
+END RESET_CURRENT_ACCESSOR;
+-------------------------------------------------------------------------------
+-- Calculates charge quantity based on specified charge type.
+-- %parm p_ACCESSOR					Object for retrieving charge determinants.
+-- %parm p_BEGIN_DATE				Start date of bill period.
+-- %parm p_END_DATE					End date of bill period.
+-- %parm p_NUMBER_OF_INTERVALS  	The number of rate intervals in the
+--									specified date range.
+-- %parm p_COMPONENT				Component to evaluate.
+-- %parm p_PERIOD_ID				Optional TOU Period.
+-- %parm p_RETURN_VALUE				The result charge quantity.
+-- %parm p_INTERVAL_MINIMUM_QTY		If Zero should be used as Minimum Quantity at Interval level.
+--									'Use Zero As Min Interval Qty', then this value is passed. Else NULL.
+--									Cannot be used for 'Block'/'Tiered' Rate Structures or 'Demand Hours' Charge Type
+--									or Interval other than 'Meter Period'
+-- %parm p_RETURN_STATUS			The status of the determinants used to find the
+--									result value: 0 = OK, 1 = Missing (result will be 0),
+--									or 2 = Partial. Partial for interval data means that
+--									data did not exist for the full date range; for non-
+--									interval data, it means that period records that span
+--									the entire date range were not found.
+PROCEDURE GET_CHARGE_QUANTITY
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_NUMBER_OF_INTERVALS IN PLS_INTEGER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_PERIOD_ID IN NUMBER := NULL,
+	p_INTERVAL_MINIMUM_QTY IN NUMBER := NULL,
+	p_RETURN_VALUE OUT NUMBER,
+	p_RETURN_STATUS OUT PLS_INTEGER
+	) AS
+
+v_TEMPLATE_ID NUMBER(9);
+v_KWH		NUMBER;
+v_KVARH		NUMBER;
+v_KVA		NUMBER;
+v_ANC_SVC	NUMBER;
+v_STATUS1	NUMBER;
+v_STATUS2	NUMBER;
+v_STATUS3	NUMBER;
+v_FROM_UOM	COMPONENT.QUANTITY_UNIT%TYPE;
+v_TO_UOM	COMPONENT.QUANTITY_UNIT%TYPE := NVL(p_COMPONENT.QUANTITY_UNIT, CONSTANTS.UNDEFINED_ATTRIBUTE);
+v_INTEGRATION_INTERVAL VARCHAR2(32);
+BEGIN
+	-- Service charges
+	IF UPPER(p_COMPONENT.CHARGE_TYPE) = 'SERVICE' THEN
+		v_FROM_UOM := CONSTANTS.UNDEFINED_ATTRIBUTE;
+		IF NVL(p_COMPONENT.TEMPLATE_ID, CONSTANTS.NOT_ASSIGNED) = CONSTANTS.NOT_ASSIGNED THEN
+			p_RETURN_VALUE := p_NUMBER_OF_INTERVALS;
+		ELSE
+			v_TEMPLATE_ID := p_ACCESSOR.GET_METER_TYPE_TEMPLATE_ID(p_END_DATE);
+			IF p_COMPONENT.TEMPLATE_ID = v_TEMPLATE_ID OR
+				(NVL(v_TEMPLATE_ID,CONSTANTS.ALL_ID) = CONSTANTS.ALL_ID AND p_COMPONENT.IS_DEFAULT_TEMPLATE = 1) THEN
+
+				p_RETURN_VALUE := p_NUMBER_OF_INTERVALS;
+			ELSE
+				p_RETURN_VALUE := 0; -- service charge does not apply to this meter type
+			END IF;
+		END IF;
+		p_RETURN_STATUS := RETAIL_DETERMINANTS.c_STATUS_OK;
+
+	-- Peak Demand charges
+	ELSIF UPPER(p_COMPONENT.CHARGE_TYPE) = 'PEAK DEMAND' THEN
+        GET_PK_DTMT_INTERVAL(p_COMPONENT.COMPONENT_ID, p_BEGIN_DATE, p_END_DATE, v_INTEGRATION_INTERVAL);
+		v_FROM_UOM := CASE WHEN UPPER(GA.DEFAULT_UNIT_OF_MEASUREMENT) = 'KWH' THEN 'KW' ELSE GA.DEFAULT_UNIT_OF_MEASUREMENT END;
+		p_ACCESSOR.GET_PEAK_DETERMINANT(
+							p_COMPONENT.RATE_INTERVAL,
+							p_BEGIN_DATE,
+							p_END_DATE,
+							v_FROM_UOM,
+							CASE WHEN p_PERIOD_ID IS NULL THEN NULL ELSE p_COMPONENT.TEMPLATE_ID END,
+							p_PERIOD_ID,
+							p_COMPONENT.LOSS_ADJ_TYPE,
+                            v_INTEGRATION_INTERVAL,
+							p_RETURN_VALUE,
+							p_RETURN_STATUS
+							);
+
+	-- Energy charges
+	ELSIF UPPER(p_COMPONENT.CHARGE_TYPE) IN ('ENERGY','COMMODITY','CONSUMPTION','TRANSPORTATION','TRANSMISSION','DISTRIBUTION','DEMAND HOURS') THEN
+
+		v_FROM_UOM := GA.DEFAULT_UNIT_OF_MEASUREMENT;
+		p_ACCESSOR.GET_SUM_DETERMINANTS(
+							p_COMPONENT.RATE_INTERVAL,
+							p_BEGIN_DATE,
+							p_END_DATE,
+							v_FROM_UOM,
+							CASE WHEN p_PERIOD_ID IS NULL THEN NULL ELSE p_COMPONENT.TEMPLATE_ID END,
+							p_PERIOD_ID,
+							p_COMPONENT.LOSS_ADJ_TYPE,
+							CASE WHEN UPPER(p_COMPONENT.CHARGE_TYPE) = 'DEMAND HOURS' THEN NULL ELSE p_INTERVAL_MINIMUM_QTY END,
+							NULL,
+							p_RETURN_VALUE,
+							p_RETURN_STATUS
+							);
+
+	-- Ancillary Service charges
+	ELSIF UPPER(p_COMPONENT.CHARGE_TYPE) IN ('CAPACITY','ANCILLARY SERVICE') THEN
+
+		SELECT ASRV.ANCILLARY_SERVICE_UNIT INTO v_FROM_UOM
+		FROM ANCILLARY_SERVICE ASRV
+		WHERE ASRV.ANCILLARY_SERVICE_ID = p_COMPONENT.ANCILLARY_SERVICE_ID;
+
+		p_ACCESSOR.GET_EFFECTIVE_ANC_SVC(
+							p_BEGIN_DATE,
+							p_COMPONENT.ANCILLARY_SERVICE_ID,
+							p_RETURN_VALUE,
+							p_RETURN_STATUS
+							);
+		p_RETURN_VALUE := p_RETURN_VALUE * p_NUMBER_OF_INTERVALS;
+
+	-- Power Factor charges
+	ELSIF UPPER(p_COMPONENT.CHARGE_TYPE) = 'POWER FACTOR' THEN
+
+		v_FROM_UOM := 'KVARH';
+		-- Retrieve values from accessor
+		p_ACCESSOR.GET_EFFECTIVE_ANC_SVC(
+							p_END_DATE,
+							p_COMPONENT.ANCILLARY_SERVICE_ID,
+							v_ANC_SVC,
+							v_STATUS1
+							);
+		p_ACCESSOR.GET_SUM_DETERMINANTS(
+							p_COMPONENT.RATE_INTERVAL,
+							p_BEGIN_DATE,
+							p_END_DATE,
+							'KWH',
+							CASE WHEN p_PERIOD_ID IS NULL THEN NULL ELSE p_COMPONENT.TEMPLATE_ID END,
+							p_PERIOD_ID,
+							p_COMPONENT.LOSS_ADJ_TYPE,
+							p_INTERVAL_MINIMUM_QTY,
+							NULL,
+							v_KWH,
+							v_STATUS2
+							);
+		p_ACCESSOR.GET_SUM_DETERMINANTS(
+							p_COMPONENT.RATE_INTERVAL,
+							p_BEGIN_DATE,
+							p_END_DATE,
+							'KVARH',
+							CASE WHEN p_PERIOD_ID IS NULL THEN NULL ELSE p_COMPONENT.TEMPLATE_ID END,
+							p_PERIOD_ID,
+							p_COMPONENT.LOSS_ADJ_TYPE,
+							p_INTERVAL_MINIMUM_QTY,
+							NULL,
+							v_KVARH,
+							v_STATUS3
+							);
+		-- And compute applicable bill quantity
+		IF v_ANC_SVC > 0 THEN
+			p_RETURN_VALUE := 0;
+		ELSE
+			p_RETURN_VALUE := v_KVARH - p_COMPONENT.KWH_MULTIPLIER * v_KWH;
+		END IF;
+		-- Finally, determine overall determinant status
+		IF v_STATUS1 = v_STATUS2 AND v_STATUS2 = v_STATUS3 THEN
+			p_RETURN_STATUS := v_STATUS1;
+		ELSE
+			p_RETURN_STATUS := RETAIL_DETERMINANTS.c_STATUS_PARTIAL;
+		END IF;
+
+	-- Excess Capacity surcharges
+	ELSIF UPPER(p_COMPONENT.CHARGE_TYPE) = 'EXCESS CAPACITY SURCHARGE' THEN
+        GET_PK_DTMT_INTERVAL(p_COMPONENT.COMPONENT_ID, p_BEGIN_DATE, p_END_DATE, v_INTEGRATION_INTERVAL);
+		v_FROM_UOM := 'KVA';
+		-- Retrieve values from accessor
+		p_ACCESSOR.GET_EFFECTIVE_ANC_SVC(
+							p_END_DATE,
+							p_COMPONENT.ANCILLARY_SERVICE_ID,
+							v_ANC_SVC,
+							v_STATUS1
+							);
+		p_ACCESSOR.GET_PEAK_DETERMINANT(
+							p_COMPONENT.RATE_INTERVAL,
+							p_BEGIN_DATE,
+							p_END_DATE,
+							'KVA',
+							CASE WHEN p_PERIOD_ID IS NULL THEN NULL ELSE p_COMPONENT.TEMPLATE_ID END,
+							p_PERIOD_ID,
+							p_COMPONENT.LOSS_ADJ_TYPE,
+                            v_INTEGRATION_INTERVAL,
+							v_KVA,
+							v_STATUS2
+							);
+		-- And compute applicable bill quantity
+		p_RETURN_VALUE := v_KVA - v_ANC_SVC;
+		-- Finally, determine overall determinant status
+		IF v_STATUS1 = v_STATUS2 THEN
+			p_RETURN_STATUS := v_STATUS1;
+		ELSE
+			p_RETURN_STATUS := RETAIL_DETERMINANTS.c_STATUS_PARTIAL;
+		END IF;
+
+	-- Unrecognized
+	ELSE
+		LOGS.LOG_ERROR('Charge type '''||p_COMPONENT.CHARGE_TYPE||''' not supported');
+		p_RETURN_VALUE := 0;
+		p_RETURN_STATUS := RETAIL_DETERMINANTS.c_STATUS_MISSING;
+	END IF;
+
+	-- Try to convert "native" units for value to the component's quantity unit
+	IF p_RETURN_STATUS <> RETAIL_DETERMINANTS.c_STATUS_MISSING AND v_FROM_UOM <> CONSTANTS.UNDEFINED_ATTRIBUTE
+			AND v_TO_UOM <> CONSTANTS.UNDEFINED_ATTRIBUTE AND v_FROM_UOM <> v_TO_UOM THEN
+		p_RETURN_VALUE := UT.CONVERT_UNIT_OF_MEASURE(v_FROM_UOM, p_RETURN_VALUE, v_TO_UOM);
+	END IF;
+
+	IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+		LOGS.LOG_DEBUG_DETAIL('Charge Quantity = '||p_RETURN_VALUE||'; Determinant Status = '||p_RETURN_STATUS);
+	END IF;
+END GET_CHARGE_QUANTITY;
+-------------------------------------------------------------------------------
+-- Calculates demand hours based on specified charge type.
+-- %parm p_ACCESSOR			Object for retrieving charge determinants.
+-- %parm p_BEGIN_DATE		Start date of bill period.
+-- %parm p_END_DATE			End date of bill period.
+-- %param p_INTERVAL		The rate interval for the component.
+-- %param p_LOSS_ADJ_TYPE	The loss adjustment type for the component.
+-- %parm p_ENERGY			Optional Total Energy (supply if already
+--							available)
+-- %param p_RETURN_VALUE	The result demand hours value.
+-- %param p_RETURN_STATUS	The status of the determinants used to find the
+--							result value: 0 = OK, 1 = Missing (result will be 0),
+--							or 2 = Partial. Partial for interval data means that
+--							data did not exist for the full date range; for non-
+--							interval data, it means that period records that span
+--							the entire date range were not found.
+PROCEDURE GET_DEMAND_HOURS
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_INTERVAL IN VARCHAR2,
+	p_LOSS_ADJ_TYPE IN NUMBER,
+	p_ENERGY IN NUMBER,
+    p_INTEGRATION_INTERVAL IN VARCHAR2,
+	p_RETURN_VALUE OUT NUMBER,
+	p_RETURN_STATUS OUT PLS_INTEGER
+	) AS
+
+v_ENERGY	NUMBER := p_ENERGY;
+v_STATUS1	NUMBER;
+v_PEAK		NUMBER;
+v_STATUS2	NUMBER;
+
+BEGIN
+
+	-- Make sure we have the energy volume
+	IF v_ENERGY IS NULL THEN
+		p_ACCESSOR.GET_SUM_DETERMINANTS(
+							p_INTERVAL,
+							p_BEGIN_DATE,
+							p_END_DATE,
+							GA.DEFAULT_UNIT_OF_MEASUREMENT,
+							NULL,
+							NULL,
+							p_LOSS_ADJ_TYPE,
+							NULL,
+							NULL,
+							v_ENERGY,
+							v_STATUS1
+							);
+	END IF;
+	-- Query for peak demand
+	p_ACCESSOR.GET_PEAK_DETERMINANT(
+						p_INTERVAL,
+						p_BEGIN_DATE,
+						p_END_DATE,
+						CASE WHEN UPPER(GA.DEFAULT_UNIT_OF_MEASUREMENT) = 'KWH' THEN 'KW' ELSE GA.DEFAULT_UNIT_OF_MEASUREMENT END,
+						NULL,
+						NULL,
+						p_LOSS_ADJ_TYPE,
+                        p_INTEGRATION_INTERVAL,
+						v_PEAK,
+						v_STATUS2
+						);
+	-- Now compute the demand hours
+	IF NVL(v_PEAK,0) = 0 THEN
+		p_RETURN_VALUE := NULL; -- avoid divide-by-zero
+	ELSE
+		p_RETURN_VALUE := v_ENERGY / v_PEAK;
+	END IF;
+	-- And determine overall determinant status
+	IF v_STATUS1 IS NULL OR v_STATUS1 = v_STATUS2 THEN
+		p_RETURN_STATUS := v_STATUS2;
+	ELSE
+		p_RETURN_STATUS := RETAIL_DETERMINANTS.c_STATUS_PARTIAL;
+	END IF;
+
+	IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+		LOGS.LOG_DEBUG_DETAIL('Demand Hours = '||p_RETURN_VALUE||'; Determinant Status = '||p_RETURN_STATUS
+								||' ( Energy = '||v_ENERGY||'; Status = '||v_STATUS1
+								||' | Demand = '||v_Peak||'; Status = '||v_STATUS2||' )');
+	END IF;
+END GET_DEMAND_HOURS;
+-------------------------------------------------------------------------------
+-- Creates a new PRICING_RESULT instance.
+-- %parm p_BEGIN_DATE	Start date of bill period.
+-- %parm p_END_DATE		End date of bill period.
+-- %parm p_PRODUCT_ID	Optional Product associated with specified
+--						Component.
+-- %parm p_COMPONENT	Component to evaluate.
+-- %parm p_FACTOR		Component's effective percentage.
+-- %return				A new PRICING_RESULT entry with as many fields
+--						filled in as possible.
+FUNCTION NEW_PRICING_RESULT
+	(
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_FACTOR IN NUMBER
+	) RETURN PRICING_RESULT AS
+
+v_RET PRICING_RESULT := PRICING_RESULT();
+
+BEGIN
+
+	v_RET.PRODUCT_ID := p_PRODUCT_ID;
+	v_RET.COMPONENT_ID := p_COMPONENT.COMPONENT_ID;
+	v_RET.BEGIN_DATE := p_BEGIN_DATE;
+	v_RET.END_DATE := p_END_DATE;
+	v_RET.DATES_ARE_CUT := UT.NUMBER_FROM_BOOLEAN(RETAIL_DETERMINANTS.IS_SUB_DAILY(p_COMPONENT.RATE_INTERVAL));
+	v_RET.NUMBER_OF_INTERVALS := RETAIL_DETERMINANTS.GET_NUMBER_OF_INTERVALS(p_COMPONENT.RATE_INTERVAL, p_BEGIN_DATE, p_END_DATE);
+	v_RET.FACTOR := p_FACTOR;
+
+	IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+		LOGS.LOG_DEBUG_DETAIL('New Pricing Result: '||TEXT_UTIL.TO_CHAR_TIME(p_BEGIN_DATE)||' -> '||TEXT_UTIL.TO_CHAR_TIME(p_END_DATE)
+								||CASE WHEN v_RET.DATES_ARE_CUT=1 THEN ' (CUT)' ELSE NULL END
+								||', Interval = '||p_COMPONENT.RATE_INTERVAL||', # of Intervals = '||v_RET.NUMBER_OF_INTERVALS);
+	END IF;
+
+	RETURN v_RET;
+
+END NEW_PRICING_RESULT;
+-------------------------------------------------------------------------------
+FUNCTION GET_RATE_END_DATES
+	(
+	p_TABLE_NAME IN VARCHAR2,
+	p_COMPONENT_ID IN NUMBER,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE
+	) RETURN DATE_COLLECTION IS
+
+v_FROM_WHERE	VARCHAR2(4000);
+v_SQL			VARCHAR2(4000);
+v_RET			DATE_COLLECTION := DATE_COLLECTION();
+
+BEGIN
+	v_FROM_WHERE := ' FROM '||p_TABLE_NAME||' WHERE COMPONENT_ID = :COMP25 '||
+					' AND SUB_COMPONENT_TYPE = '||UT.GET_LITERAL_FOR_STRING(CONSTANTS.UNDEFINED_ATTRIBUTE)||
+					' AND SUB_COMPONENT_ID = '||UT.GET_LITERAL_FOR_NUMBER(CONSTANTS.NOT_ASSIGNED);
+
+	v_SQL := 'SELECT :END1 FROM DUAL'||
+				' UNION SELECT BEGIN_DATE-1 '||v_FROM_WHERE||' AND BEGIN_DATE > :BEGIN3 AND BEGIN_DATE <= :END4'||
+				' UNION SELECT END_DATE '||v_FROM_WHERE||' AND END_DATE >= :BEGIN6 AND END_DATE < :END7'||
+				' ORDER BY 1';
+
+	EXECUTE IMMEDIATE v_SQL BULK COLLECT INTO v_RET
+	USING p_END_DATE, p_COMPONENT_ID, p_BEGIN_DATE, p_END_DATE, p_COMPONENT_ID, p_BEGIN_DATE, p_END_DATE;
+
+	RETURN v_RET;
+
+END GET_RATE_END_DATES;
+-------------------------------------------------------------------------------
+-- Evaluates a Flat charge component for a specified date range using
+-- determinants provided by the specified accessor.
+-- %parm p_ACCESSOR						Object for retrieving charge determinants.
+-- %parm p_BEGIN_DATE					Start date of bill period.
+-- %parm p_END_DATE						End date of bill period.
+-- %parm p_PRODUCT_ID					Optional Product associated with specified
+--										Component.
+-- %parm p_COMPONENT					Component to evaluate.
+-- %parm p_FACTOR						Component's effective percentage.
+-- %parm p_USE_ZERO_MIN_INT_QTY_FLAG	If Zero should be used as Minimum Quantity at Interval level.
+-- %return								Table of results.
+FUNCTION EVALUATE_FLAT_COMPONENT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_FACTOR IN NUMBER,
+	p_USE_ZERO_MIN_INT_QTY_FLAG IN BOOLEAN := FALSE
+	) RETURN PRICING_RESULT_TABLE AS
+
+v_DET_BEGIN_DATE			DATE;
+v_DET_END_DATE				DATE;
+v_QTY						NUMBER;
+v_RESULT					PRICING_RESULT;
+v_RESULTS					PRICING_RESULT_TABLE := PRICING_RESULT_TABLE();
+v_INTERVAL_MINIMUM_QTY		NUMBER := NULL;
+
+CURSOR cur_RATES IS
+	-- Meter Period interval? just use rate effective on the end date of the period
+	SELECT p_BEGIN_DATE AS BEGIN_DATE,
+		p_END_DATE AS END_DATE,
+		CFR.RATE,
+		CFR.CHARGE_MIN
+	FROM COMPONENT_FLAT_RATE CFR
+	WHERE p_COMPONENT.RATE_INTERVAL = 'Meter Period'
+		AND CFR.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+		-- use end date as "default" value when component's attribute is not specified
+        AND (p_COMPONENT.APPLY_RATE_FOR IS NULL
+			 OR p_COMPONENT.APPLY_RATE_FOR IN (c_APPLY_RATE_END_DATE_OPTION, CONSTANTS.UNDEFINED_ATTRIBUTE))
+		AND CFR.SUB_COMPONENT_TYPE = CONSTANTS.UNDEFINED_ATTRIBUTE
+		AND CFR.SUB_COMPONENT_ID = CONSTANTS.NOT_ASSIGNED
+		AND p_END_DATE BETWEEN CFR.BEGIN_DATE AND NVL(CFR.END_DATE, CONSTANTS.HIGH_DATE)
+    UNION ALL
+    -- Meter Period interval? use Day Weighted Average
+    SELECT p_BEGIN_DATE AS BEGIN_DATE,
+		p_END_DATE AS END_DATE,
+		SUM((LEAST(p_END_DATE, NVL(CFR.END_DATE, CONSTANTS.HIGH_DATE)) - GREATEST(p_BEGIN_DATE, CFR.BEGIN_DATE) + 1)*CFR.RATE)/
+			 SUM(LEAST(p_END_DATE, NVL(CFR.END_DATE, CONSTANTS.HIGH_DATE)) - GREATEST(p_BEGIN_DATE, CFR.BEGIN_DATE) + 1) AS RATE,
+		SUM((LEAST(p_END_DATE, NVL(CFR.END_DATE, CONSTANTS.HIGH_DATE)) - GREATEST(p_BEGIN_DATE, CFR.BEGIN_DATE) + 1)*CFR.CHARGE_MIN)/
+			 SUM(LEAST(p_END_DATE, NVL(CFR.END_DATE, CONSTANTS.HIGH_DATE)) - GREATEST(p_BEGIN_DATE, CFR.BEGIN_DATE) + 1) AS CHARGE_MIN
+	FROM COMPONENT_FLAT_RATE CFR
+	WHERE p_COMPONENT.RATE_INTERVAL = 'Meter Period'
+		AND CFR.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+		AND p_COMPONENT.APPLY_RATE_FOR = c_APPLY_RATE_DAY_WT_AVG_OPTION
+		AND CFR.SUB_COMPONENT_TYPE = CONSTANTS.UNDEFINED_ATTRIBUTE
+		AND CFR.SUB_COMPONENT_ID = CONSTANTS.NOT_ASSIGNED
+		AND CFR.BEGIN_DATE <= p_END_DATE
+		AND NVL(CFR.END_DATE, CONSTANTS.HIGH_DATE) >= p_BEGIN_DATE
+	HAVING COUNT(1) > 0
+	UNION ALL
+	-- Otherwise, get all rates w/ overlapping date ranges
+	SELECT GREATEST(p_BEGIN_DATE, CFR.BEGIN_DATE) as BEGIN_DATE,
+		LEAST(p_END_DATE, NVL(CFR.END_DATE, CONSTANTS.HIGH_DATE)) as END_DATE,
+		CFR.RATE,
+		CFR.CHARGE_MIN
+	FROM COMPONENT_FLAT_RATE CFR
+	WHERE p_COMPONENT.RATE_INTERVAL <> 'Meter Period'
+		AND CFR.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+		AND CFR.SUB_COMPONENT_TYPE = CONSTANTS.UNDEFINED_ATTRIBUTE
+		AND CFR.SUB_COMPONENT_ID = CONSTANTS.NOT_ASSIGNED
+		AND CFR.BEGIN_DATE <= p_END_DATE
+		AND NVL(CFR.END_DATE, CONSTANTS.HIGH_DATE) >= p_BEGIN_DATE;
+
+BEGIN
+
+	FOR v_RATE IN cur_RATES LOOP
+		RETAIL_DETERMINANTS.DETERMINANT_ACCESSOR_DATES(p_COMPONENT.RATE_INTERVAL, v_RATE.BEGIN_DATE, v_RATE.END_DATE, p_ACCESSOR.TIME_ZONE, v_DET_BEGIN_DATE, v_DET_END_DATE);
+		v_RESULT := NEW_PRICING_RESULT(v_DET_BEGIN_DATE, v_DET_END_DATE, p_PRODUCT_ID, p_COMPONENT, p_FACTOR);
+
+		IF p_USE_ZERO_MIN_INT_QTY_FLAG THEN
+			v_INTERVAL_MINIMUM_QTY := 0;
+		END IF;
+
+		IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+			LOGS.LOG_DEBUG_DETAIL('Interval Minimum Quantity = ' || v_INTERVAL_MINIMUM_QTY);
+		END IF;
+
+		GET_CHARGE_QUANTITY(p_ACCESSOR, v_DET_BEGIN_DATE, v_DET_END_DATE, v_RESULT.NUMBER_OF_INTERVALS, p_COMPONENT, NULL, v_INTERVAL_MINIMUM_QTY, v_QTY, v_RESULT.DETERMINANT_STATUS);
+
+		IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+			LOGS.LOG_DEBUG_DETAIL('Flat rate = '||v_RATE.RATE);
+		END IF;
+
+		IF v_QTY < v_RATE.CHARGE_MIN THEN
+			v_QTY := v_RATE.CHARGE_MIN;
+		END IF;
+
+		-- Calculate result
+		v_RESULT.QUANTITY := v_QTY;
+		v_RESULT.RATE := v_RATE.RATE;
+		v_RESULT.AMOUNT := v_QTY * v_RATE.RATE * p_FACTOR;
+		-- Add to result set
+		V_RESULTS.EXTEND;
+		v_RESULTS(v_RESULTS.LAST) := v_RESULT;
+	END LOOP;
+
+	-- Done!
+	RETURN v_RESULTS;
+
+END EVALUATE_FLAT_COMPONENT;
+-------------------------------------------------------------------------------
+-- Evaluates a Block and Tiered charge components for a specified date
+-- range using determinants provided by the specified accessor.
+-- %parm p_ACCESSOR		Object for retrieving charge determinants.
+-- %parm p_BEGIN_DATE	Start date of bill period.
+-- %parm p_END_DATE		End date of bill period.
+-- %parm p_PRODUCT_ID	Optional Product associated with specified
+--						Component.
+-- %parm p_COMPONENT	Component to evaluate.
+-- %parm p_FACTOR		Component's effective percentage.
+-- %return				Table of results.
+FUNCTION EVALUATE_BLOCK_TIER_COMPONENT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_FACTOR IN NUMBER
+	) RETURN PRICING_RESULT_TABLE AS
+
+v_DATES				DATE_COLLECTION;
+v_BEGIN_DATE		DATE;
+v_END_DATE			DATE;
+v_DATE_IDX			PLS_INTEGER;
+v_DET_BEGIN_DATE	DATE;
+v_DET_END_DATE		DATE;
+v_QTY				NUMBER;
+v_LOOKUP_VAL		NUMBER;
+v_DET_STATUS		PLS_INTEGER;
+v_MULTIPLIER		NUMBER;
+v_RATE				NUMBER;
+v_CHARGE_MIN		NUMBER;
+v_PREV_MAX			NUMBER;
+v_TIER_SIZE			NUMBER;
+v_RESULT			PRICING_RESULT;
+v_RESULTS			PRICING_RESULT_TABLE := PRICING_RESULT_TABLE();
+v_INTEGRATION_INTERVAL VARCHAR2(32);
+
+CURSOR cur_TIERED_RATES(p_VAL IN NUMBER, p_MULT IN NUMBER, p_DATE IN DATE) IS
+	SELECT CBR.BLOCK_MAX * p_MULT as BLOCK_MAX,
+		CBR.CHARGE_MIN * p_MULT as CHARGE_MIN,
+		CBR.RATE
+	FROM COMPONENT_BLOCK_RATE CBR
+	WHERE CBR.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+		AND CBR.SUB_COMPONENT_TYPE = CONSTANTS.UNDEFINED_ATTRIBUTE
+		AND CBR.SUB_COMPONENT_ID = CONSTANTS.NOT_ASSIGNED
+		AND p_DATE BETWEEN CBR.BEGIN_DATE AND NVL(CBR.END_DATE, CONSTANTS.HIGH_DATE)
+		AND CBR.BLOCK_MIN BETWEEN 0 AND p_VAL
+	ORDER BY CBR.BLOCK_MIN ASC;
+BEGIN
+
+	IF p_COMPONENT.RATE_INTERVAL = 'Meter Period' THEN
+		v_DATES := DATE_COLLECTION(p_END_DATE);
+	ELSE
+		v_DATES := GET_RATE_END_DATES('COMPONENT_BLOCK_RATE', p_COMPONENT.COMPONENT_ID, p_BEGIN_DATE, p_END_DATE);
+	END IF;
+
+	v_BEGIN_DATE := p_BEGIN_DATE;
+	v_DATE_IDX := v_DATES.FIRST;
+
+	-- Loop through all rate date ranges during this period
+	WHILE v_DATES.EXISTS(v_DATE_IDX) LOOP
+		v_END_DATE := v_DATES(v_DATE_IDX);
+
+		RETAIL_DETERMINANTS.DETERMINANT_ACCESSOR_DATES(p_COMPONENT.RATE_INTERVAL, v_BEGIN_DATE, v_END_DATE, p_ACCESSOR.TIME_ZONE, v_DET_BEGIN_DATE, v_DET_END_DATE);
+		v_RESULT := NEW_PRICING_RESULT(v_DET_BEGIN_DATE, v_DET_END_DATE, p_PRODUCT_ID, p_COMPONENT, p_FACTOR);
+		GET_CHARGE_QUANTITY(p_ACCESSOR, v_DET_BEGIN_DATE, v_DET_END_DATE, v_RESULT.NUMBER_OF_INTERVALS, p_COMPONENT, NULL, NULL, v_QTY, v_RESULT.DETERMINANT_STATUS);
+
+		v_MULTIPLIER := 1;
+		IF UPPER(p_COMPONENT.CHARGE_TYPE) = 'DEMAND HOURS' THEN
+            GET_PK_DTMT_INTERVAL(p_COMPONENT.COMPONENT_ID, v_DET_BEGIN_DATE, v_DET_END_DATE, v_INTEGRATION_INTERVAL);
+			GET_DEMAND_HOURS(p_ACCESSOR,
+                                v_DET_BEGIN_DATE,
+                                v_DET_END_DATE,
+                                p_COMPONENT.RATE_INTERVAL,
+                                p_COMPONENT.LOSS_ADJ_TYPE,
+                                v_QTY,
+                                v_INTEGRATION_INTERVAL,
+                                v_LOOKUP_VAL,
+                                v_DET_STATUS);
+			v_RESULT.BASE_QUANTITY := v_LOOKUP_VAL;
+			-- Set v_DET_STATUS so it reflects overall status of both charge quantity and demand hours determinants
+			IF v_RESULT.DETERMINANT_STATUS NOT IN (v_DET_STATUS, RETAIL_DETERMINANTS.c_STATUS_PARTIAL) THEN
+				v_RESULT.DETERMINANT_STATUS := RETAIL_DETERMINANTS.c_STATUS_PARTIAL;
+			END IF;
+			-- Calculate multiplier - used to process demand hour tiers
+			-- (multiply tiers by demand to convert to energy volumes)
+			IF v_LOOKUP_VAL <> 0 THEN
+				v_MULTIPLIER := v_QTY / v_LOOKUP_VAL;
+			END IF;
+		ELSE
+			v_LOOKUP_VAL := v_QTY;
+		END IF;
+
+		IF UPPER(p_COMPONENT.RATE_STRUCTURE) = 'BLOCK' THEN
+
+			-- Based on quantity, look-up effective rate
+			SELECT MAX(RATE), MAX(CHARGE_MIN)
+			INTO v_RATE, v_CHARGE_MIN
+			FROM COMPONENT_BLOCK_RATE CBR
+			WHERE CBR.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+				AND CBR.SUB_COMPONENT_TYPE = CONSTANTS.UNDEFINED_ATTRIBUTE
+				AND CBR.SUB_COMPONENT_ID = CONSTANTS.NOT_ASSIGNED
+				AND v_END_DATE BETWEEN CBR.BEGIN_DATE AND NVL(CBR.END_DATE, CONSTANTS.HIGH_DATE)
+				AND v_LOOKUP_VAL BETWEEN CBR.BLOCK_MIN AND NVL(CBR.BLOCK_MAX,v_LOOKUP_VAL);
+
+			IF v_QTY < v_CHARGE_MIN THEN
+				v_QTY := v_CHARGE_MIN;
+			END IF;
+
+			IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+				LOGS.LOG_DEBUG_DETAIL('Block rate = '||v_RATE);
+			END IF;
+
+			-- Calculate result
+			v_RESULT.QUANTITY := v_QTY;
+			v_RESULT.RATE := v_RATE;
+			v_RESULT.AMOUNT := v_QTY * v_RATE * p_FACTOR;
+			-- Add to result set
+			V_RESULTS.EXTEND;
+			v_RESULTS(v_RESULTS.LAST) := v_RESULT;
+
+		ELSE -- 'TIERED'
+
+			-- Spread volume to all applicable tiers
+			v_PREV_MAX := 0;
+			v_RESULT.BAND_TIER_NUMBER := 1;
+			FOR v_TIERED_RATE IN cur_TIERED_RATES(v_LOOKUP_VAL, v_MULTIPLIER, v_END_DATE) LOOP
+
+				IF v_TIERED_RATE.BLOCK_MAX IS NULL THEN
+					v_RESULT.QUANTITY := v_QTY;
+					v_QTY := 0;
+				ELSE
+					v_TIER_SIZE := v_TIERED_RATE.BLOCK_MAX - v_PREV_MAX;
+					IF v_QTY > v_TIER_SIZE THEN
+						v_RESULT.QUANTITY := v_TIER_SIZE;
+						v_QTY := v_QTY - v_TIER_SIZE;
+					ELSE
+						v_RESULT.QUANTITY := v_QTY;
+						v_QTY := 0;
+					END IF;
+				END IF;
+
+				IF v_RESULT.QUANTITY < v_CHARGE_MIN THEN
+					v_RESULT.QUANTITY := v_CHARGE_MIN;
+				END IF;
+
+				IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+					LOGS.LOG_DEBUG_DETAIL('Tier #'||v_RESULT.BAND_TIER_NUMBER||' - qty = '||v_RESULT.QUANTITY||', rate = '||v_TIERED_RATE.RATE);
+				END IF;
+
+				-- Calculate result
+				v_RESULT.RATE := v_TIERED_RATE.RATE;
+				v_RESULT.AMOUNT := v_RESULT.QUANTITY * v_TIERED_RATE.RATE * p_FACTOR;
+				-- Add to result set
+				V_RESULTS.EXTEND;
+				v_RESULTS(v_RESULTS.LAST) := v_RESULT;
+				-- Clone this entry for next tier
+				v_RESULT := PRICING_RESULT(v_RESULT);
+
+				-- Now to next tier
+				v_PREV_MAX := v_TIERED_RATE.BLOCK_MAX;
+				v_RESULT.BAND_TIER_NUMBER := v_RESULT.BAND_TIER_NUMBER+1;
+			END LOOP;
+
+		END IF;
+
+		-- next date range
+		v_BEGIN_DATE := v_END_DATE+1;
+		v_DATE_IDX := v_DATES.NEXT(v_DATE_IDX);
+	END LOOP;
+
+	-- Done!
+	RETURN v_RESULTS;
+
+END EVALUATE_BLOCK_TIER_COMPONENT;
+-------------------------------------------------------------------------------
+-- Evaluates a Time of Use charge component for a specified date range
+-- using determinants provided by the specified accessor. Optionally,
+-- only evaluate component for a single TOU period.
+-- %parm p_ACCESSOR						Object for retrieving charge determinants.
+-- %parm p_BEGIN_DATE					Start date of bill period.
+-- %parm p_END_DATE						End date of bill period.
+-- %parm p_PRODUCT_ID					Optional Product associated with specified
+--										Component.
+-- %parm p_COMPONENT					Component to evaluate.
+-- %parm p_FACTOR						Component's effective percentage.
+-- %parm p_PERIOD_ID					Optional TOU Period.
+-- %parm p_USE_ZERO_MIN_INT_QTY_FLAG	If Zero should be used as Minimum Quantity at Interval level.
+-- %return								Table of results.
+FUNCTION EVALUATE_TOU_COMPONENT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_FACTOR IN NUMBER,
+	p_PERIOD_ID IN NUMBER,
+	p_USE_ZERO_MIN_INT_QTY_FLAG IN BOOLEAN := FALSE
+	) RETURN PRICING_RESULT_TABLE AS
+
+v_DET_BEGIN_DATE			DATE;
+v_DET_END_DATE				DATE;
+v_QTY						NUMBER;
+v_RESULT					PRICING_RESULT;
+v_RESULTS					PRICING_RESULT_TABLE := PRICING_RESULT_TABLE();
+v_INTERVAL_MINIMUM_QTY		NUMBER := NULL;
+
+CURSOR cur_PERIODS IS
+	SELECT DISTINCT ST.PERIOD_ID
+	FROM SEASON_TEMPLATE ST
+	WHERE ST.TEMPLATE_ID = p_COMPONENT.TEMPLATE_ID
+		AND (p_PERIOD_ID IS NULL OR ST.PERIOD_ID = p_PERIOD_ID);
+
+CURSOR cur_RATES(p_PERIOD_ID IN NUMBER) IS
+	-- Meter Period interval? just use rate effective on the end date of the period
+	SELECT p_BEGIN_DATE AS BEGIN_DATE,
+		p_END_DATE AS END_DATE,
+		CTR.RATE,
+		CTR.CHARGE_MIN
+	FROM COMPONENT_TOU_RATE CTR
+	WHERE p_COMPONENT.RATE_INTERVAL = 'Meter Period'
+		AND CTR.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+		-- use end date as "default" value when component's attribute is not specified
+        AND (p_COMPONENT.APPLY_RATE_FOR IS NULL
+			 OR p_COMPONENT.APPLY_RATE_FOR IN (c_APPLY_RATE_END_DATE_OPTION, CONSTANTS.UNDEFINED_ATTRIBUTE))
+		AND CTR.SUB_COMPONENT_TYPE = CONSTANTS.UNDEFINED_ATTRIBUTE
+		AND CTR.SUB_COMPONENT_ID = CONSTANTS.NOT_ASSIGNED
+		AND CTR.PERIOD_ID = p_PERIOD_ID
+		AND p_END_DATE BETWEEN CTR.BEGIN_DATE AND NVL(CTR.END_DATE, CONSTANTS.HIGH_DATE)
+    UNION ALL
+    -- Meter Period interval? use Day Weighted Average
+    SELECT p_BEGIN_DATE AS BEGIN_DATE,
+		p_END_DATE AS END_DATE,
+		SUM((LEAST(p_END_DATE, NVL(CTR.END_DATE, CONSTANTS.HIGH_DATE)) - GREATEST(p_BEGIN_DATE, CTR.BEGIN_DATE) + 1)*CTR.RATE)/
+			 SUM(LEAST(p_END_DATE, NVL(CTR.END_DATE, CONSTANTS.HIGH_DATE)) - GREATEST(p_BEGIN_DATE, CTR.BEGIN_DATE) + 1) AS RATE,
+		SUM((LEAST(p_END_DATE, NVL(CTR.END_DATE, CONSTANTS.HIGH_DATE)) - GREATEST(p_BEGIN_DATE, CTR.BEGIN_DATE) + 1)*CTR.CHARGE_MIN)/
+			 SUM(LEAST(p_END_DATE, NVL(CTR.END_DATE, CONSTANTS.HIGH_DATE)) - GREATEST(p_BEGIN_DATE, CTR.BEGIN_DATE) + 1) AS CHARGE_MIN
+	FROM COMPONENT_TOU_RATE CTR
+	WHERE p_COMPONENT.RATE_INTERVAL = 'Meter Period'
+		AND CTR.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+		AND p_COMPONENT.APPLY_RATE_FOR = c_APPLY_RATE_DAY_WT_AVG_OPTION
+		AND CTR.SUB_COMPONENT_TYPE = CONSTANTS.UNDEFINED_ATTRIBUTE
+		AND CTR.SUB_COMPONENT_ID = CONSTANTS.NOT_ASSIGNED
+		AND CTR.PERIOD_ID = p_PERIOD_ID
+		AND CTR.BEGIN_DATE <= p_END_DATE
+		AND NVL(CTR.END_DATE, CONSTANTS.HIGH_DATE) >= p_BEGIN_DATE
+	HAVING COUNT(1) > 0
+	UNION ALL
+	-- Otherwise, get all rates w/ overlapping date ranges
+	SELECT GREATEST(p_BEGIN_DATE, CTR.BEGIN_DATE) as BEGIN_DATE,
+		LEAST(p_END_DATE, NVL(CTR.END_DATE, CONSTANTS.HIGH_DATE)) as END_DATE,
+		CTR.RATE,
+		CTR.CHARGE_MIN
+	FROM COMPONENT_TOU_RATE CTR
+	WHERE p_COMPONENT.RATE_INTERVAL <> 'Meter Period'
+		AND CTR.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+		AND CTR.SUB_COMPONENT_TYPE = CONSTANTS.UNDEFINED_ATTRIBUTE
+		AND CTR.SUB_COMPONENT_ID = CONSTANTS.NOT_ASSIGNED
+		AND CTR.PERIOD_ID = p_PERIOD_ID
+		AND CTR.BEGIN_DATE <= p_END_DATE
+		AND NVL(CTR.END_DATE, CONSTANTS.HIGH_DATE) >= p_BEGIN_DATE;
+
+BEGIN
+
+	FOR v_PERIOD IN cur_PERIODS LOOP
+		FOR v_RATE IN cur_RATES(v_PERIOD.PERIOD_ID) LOOP
+			RETAIL_DETERMINANTS.DETERMINANT_ACCESSOR_DATES(p_COMPONENT.RATE_INTERVAL, v_RATE.BEGIN_DATE, v_RATE.END_DATE, p_ACCESSOR.TIME_ZONE, v_DET_BEGIN_DATE, v_DET_END_DATE);
+			v_RESULT := NEW_PRICING_RESULT(v_DET_BEGIN_DATE, v_DET_END_DATE, p_PRODUCT_ID, p_COMPONENT, p_FACTOR);
+			v_RESULT.PERIOD_ID := v_PERIOD.PERIOD_ID;
+
+			IF p_USE_ZERO_MIN_INT_QTY_FLAG THEN
+				v_INTERVAL_MINIMUM_QTY := 0;
+			END IF;
+
+			IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+				LOGS.LOG_DEBUG_DETAIL('Interval Minimum Quantity = ' || v_INTERVAL_MINIMUM_QTY);
+			END IF;
+
+			GET_CHARGE_QUANTITY(p_ACCESSOR, v_DET_BEGIN_DATE, v_DET_END_DATE, v_RESULT.NUMBER_OF_INTERVALS, p_COMPONENT, v_PERIOD.PERIOD_ID, v_INTERVAL_MINIMUM_QTY, v_QTY, v_RESULT.DETERMINANT_STATUS);
+
+			IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+				LOGS.LOG_DEBUG_DETAIL('TOU rate for '||TEXT_UTIL.TO_CHAR_ENTITY(v_PERIOD.PERIOD_ID, EC.ED_PERIOD)||' = '||v_RATE.RATE);
+			END IF;
+
+			IF v_QTY < v_RATE.CHARGE_MIN THEN
+				v_QTY := v_RATE.CHARGE_MIN;
+			END IF;
+
+			-- Calculate result
+			v_RESULT.QUANTITY := v_QTY;
+			v_RESULT.RATE := v_RATE.RATE;
+			v_RESULT.AMOUNT := v_QTY * v_RATE.RATE * p_FACTOR;
+			-- Add to result set
+			V_RESULTS.EXTEND;
+			v_RESULTS(v_RESULTS.LAST) := v_RESULT;
+		END LOOP;
+	END LOOP;
+
+	-- Done!
+	RETURN v_RESULTS;
+
+END EVALUATE_TOU_COMPONENT;
+-------------------------------------------------------------------------------
+-- Evaluates a Market Rate charge component for a specified date range
+-- using determinants provided by the specified accessor.
+-- %parm p_ACCESSOR		Object for retrieving charge determinants.
+-- %parm p_BEGIN_DATE	Start date of bill period.
+-- %parm p_END_DATE		End date of bill period.
+-- %parm p_PRODUCT_ID	Optional Product associated with specified
+--						Component.
+-- %parm p_COMPONENT	Component to evaluate.
+-- %parm p_FACTOR		Component's effective percentage.
+-- %return				Table of results.
+FUNCTION EVALUATE_MARKET_COMPONENT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_FACTOR IN NUMBER
+	) RETURN PRICING_RESULT_TABLE AS
+
+v_MP_INTERVAL		MARKET_PRICE.MARKET_PRICE_INTERVAL%TYPE;
+v_PRICE_BEGIN_DATE	DATE;
+v_PRICE_END_DATE	DATE;
+v_DET_BEGIN_DATE	DATE;
+v_DET_END_DATE		DATE;
+v_QTY				NUMBER;
+v_RESULT			PRICING_RESULT;
+v_RESULTS			PRICING_RESULT_TABLE := PRICING_RESULT_TABLE();
+
+CURSOR cur_RATE_ADJs IS
+	-- Meter Period interval? just use rate adjustments effective on the end date of the period
+	SELECT p_BEGIN_DATE as BEGIN_DATE,
+		p_END_DATE as END_DATE,
+		NVL(CMR.RATE_ADDER,0) as ADDER,
+		NVL(CMR.RATE_MULTIPLIER,1) as MULTIPLIER
+	FROM COMPONENT_MARKET_PRICE CMR
+	WHERE p_COMPONENT.RATE_INTERVAL = 'Meter Period'
+		AND CMR.COMPONENT_ID(+) = p_COMPONENT.COMPONENT_ID
+		AND CMR.SUB_COMPONENT_TYPE(+) = CONSTANTS.UNDEFINED_ATTRIBUTE
+		AND CMR.SUB_COMPONENT_ID(+) = CONSTANTS.NOT_ASSIGNED
+		AND p_END_DATE BETWEEN CMR.BEGIN_DATE(+) AND NVL(CMR.END_DATE(+), CONSTANTS.HIGH_DATE)
+	UNION ALL
+	-- Otherwise, get all rate adjustments w/ overlapping date ranges
+	SELECT GREATEST(p_BEGIN_DATE, NVL(CMR.BEGIN_DATE, CONSTANTS.LOW_DATE)) as BEGIN_DATE,
+		LEAST(p_END_DATE, NVL(CMR.END_DATE, CONSTANTS.HIGH_DATE)) as END_DATE,
+		NVL(CMR.RATE_ADDER,0) as ADDER,
+		NVL(CMR.RATE_MULTIPLIER,1) as MULTIPLIER
+	FROM COMPONENT_MARKET_PRICE CMR
+	WHERE p_COMPONENT.RATE_INTERVAL <> 'Meter Period'
+		AND CMR.COMPONENT_ID(+) = p_COMPONENT.COMPONENT_ID
+		AND CMR.SUB_COMPONENT_TYPE(+) = CONSTANTS.UNDEFINED_ATTRIBUTE
+		AND CMR.SUB_COMPONENT_ID(+) = CONSTANTS.NOT_ASSIGNED
+		AND CMR.BEGIN_DATE(+) <= p_END_DATE
+		AND NVL(CMR.END_DATE(+), CONSTANTS.HIGH_DATE) >= p_BEGIN_DATE;
+
+CURSOR cur_PRICES(p_BEGIN_DATE IN DATE, p_END_DATE IN DATE) IS
+	SELECT MPV.PRICE_DATE,
+		MPV.PRICE
+	FROM MARKET_PRICE_VALUE MPV
+	WHERE MPV.MARKET_PRICE_ID = p_COMPONENT.MARKET_PRICE_ID
+		AND MPV.PRICE_DATE BETWEEN p_BEGIN_DATE AND p_END_DATE
+		AND MPV.AS_OF_DATE = CONSTANTS.LOW_DATE -- versioning not supported
+		AND MPV.PRICE_CODE = -- determine "best available" price code
+							(SELECT DECODE(MAX(DECODE(MPV2.PRICE_CODE,'F',1,'P',2,'A',3)),1,'F',2,'P',3,'A')
+							FROM MARKET_PRICE_VALUE MPV2
+							WHERE MPV2.MARKET_PRICE_ID = MPV.MARKET_PRICE_ID
+								AND MPV2.PRICE_CODE IN ('F','P','A')
+								AND MPV2.PRICE_DATE = MPV.PRICE_DATE);
+
+BEGIN
+
+	-- Determine price interval
+	SELECT MARKET_PRICE_INTERVAL
+	INTO v_MP_INTERVAL
+	FROM MARKET_PRICE
+	WHERE MARKET_PRICE_ID = p_COMPONENT.MARKET_PRICE_ID;
+
+	-- Loop through temporal definitions of rate adjustments
+	FOR v_RATE_ADJ IN cur_RATE_ADJs LOOP
+		-- For each date range, get the price values
+		RETAIL_DETERMINANTS.DETERMINANT_ACCESSOR_DATES(v_MP_INTERVAL, v_RATE_ADJ.BEGIN_DATE, v_RATE_ADJ.END_DATE, p_ACCESSOR.TIME_ZONE, v_PRICE_BEGIN_DATE, v_PRICE_END_DATE);
+		FOR v_PRICE IN cur_PRICES(v_PRICE_BEGIN_DATE, v_PRICE_END_DATE) LOOP
+			IF RETAIL_DETERMINANTS.IS_SUB_DAILY(v_MP_INTERVAL) THEN
+				v_DET_END_DATE := v_PRICE.PRICE_DATE;
+				v_DET_BEGIN_DATE := DATE_UTIL.GET_INTERVAL_BEGIN_DATE(v_PRICE.PRICE_DATE, v_MP_INTERVAL);
+			ELSE
+				v_DET_BEGIN_DATE := v_PRICE.PRICE_DATE;
+				v_DET_END_DATE := DATE_UTIL.END_DATE_FOR_INTERVAL(v_PRICE.PRICE_DATE, v_MP_INTERVAL);
+			END IF;
+			v_RESULT := NEW_PRICING_RESULT(v_DET_BEGIN_DATE, v_DET_END_DATE, p_PRODUCT_ID, p_COMPONENT, p_FACTOR);
+			GET_CHARGE_QUANTITY(p_ACCESSOR, v_DET_BEGIN_DATE, v_DET_END_DATE, v_RESULT.NUMBER_OF_INTERVALS, p_COMPONENT, NULL, NULL, v_QTY, v_RESULT.DETERMINANT_STATUS);
+
+			-- Calculate result
+			v_RESULT.QUANTITY := v_QTY;
+			v_RESULT.RATE := v_PRICE.PRICE * v_RATE_ADJ.MULTIPLIER + v_RATE_ADJ.ADDER;
+			v_RESULT.AMOUNT := v_QTY * v_RESULT.RATE * p_FACTOR;
+
+			IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+				LOGS.LOG_DEBUG_DETAIL('Market rate = '||v_RESULT.RATE||' (Market price value = '||v_PRICE.PRICE||')');
+			END IF;
+
+			-- Add to result set
+			V_RESULTS.EXTEND;
+			v_RESULTS(v_RESULTS.LAST) := v_RESULT;
+		END LOOP;
+	END LOOP;
+
+	-- Done!
+	RETURN v_RESULTS;
+
+END EVALUATE_MARKET_COMPONENT;
+-------------------------------------------------------------------------------
+-- Evaluates a Composite charge component for a specified date range
+-- using determinants provided by the specified accessor.
+-- %parm p_ACCESSOR	Object for retrieving charge determinants.
+-- %parm p_BEGIN_DATE	Start date of bill period.
+-- %parm p_END_DATE		End date of bill period.
+-- %parm p_PRODUCT_ID	Optional Product associated with specified
+--						Component.
+-- %parm p_COMPONENT	Component to evaluate.
+-- %parm p_FACTOR		Component's effective percentage.
+-- %parm p_PERIOD_ID	Optional TOU Period.
+-- %return				Table of results.
+FUNCTION EVALUATE_COMPOSITE_COMPONENT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_FACTOR IN NUMBER,
+	p_PERIOD_ID IN NUMBER
+	) RETURN PRICING_RESULT_TABLE AS
+
+v_DATES					DATE_COLLECTION;
+v_BEGIN_DATE			DATE;
+v_END_DATE				DATE;
+v_DATE_IDX				PLS_INTEGER;
+v_DET_BEGIN_DATE		DATE;
+v_DET_END_DATE			DATE;
+v_NUM_INTERVALS			PLS_INTEGER;
+v_QTY					NUMBER;
+v_DET_STATUS			PLS_INTEGER;
+v_CHILD_COMP_ID 		NUMBER(9);
+v_CHILD_RATE_STRUCTURE	COMPONENT.RATE_STRUCTURE%TYPE;
+v_RESULTS				PRICING_RESULT_TABLE := PRICING_RESULT_TABLE();
+v_TMP					PRICING_RESULT_TABLE;
+v_IDX					PLS_INTEGER;
+v_INTEGRATION_INTERVAL   VARCHAR2(32);
+
+BEGIN
+
+	IF p_COMPONENT.RATE_INTERVAL = 'Meter Period' THEN
+		v_DATES := DATE_COLLECTION(p_END_DATE);
+	ELSE
+		v_DATES := GET_RATE_END_DATES('COMPONENT_COMPOSITE', p_COMPONENT.COMPONENT_ID, p_BEGIN_DATE, p_END_DATE);
+	END IF;
+
+	v_BEGIN_DATE := p_BEGIN_DATE;
+	v_DATE_IDX := v_DATES.FIRST;
+
+	-- Loop through all rate date ranges during this period
+	WHILE v_DATES.EXISTS(v_DATE_IDX) LOOP
+		v_END_DATE := v_DATES(v_DATE_IDX);
+
+		RETAIL_DETERMINANTS.DETERMINANT_ACCESSOR_DATES(p_COMPONENT.RATE_INTERVAL, v_BEGIN_DATE, v_END_DATE, p_ACCESSOR.TIME_ZONE, v_DET_BEGIN_DATE, v_DET_END_DATE);
+		IF UPPER(p_COMPONENT.CHARGE_TYPE) = 'DEMAND HOURS' THEN
+            GET_PK_DTMT_INTERVAL(p_COMPONENT.COMPONENT_ID, v_DET_BEGIN_DATE, v_DET_END_DATE, v_INTEGRATION_INTERVAL);
+			GET_DEMAND_HOURS(p_ACCESSOR, v_DET_BEGIN_DATE, v_DET_END_DATE, p_COMPONENT.RATE_INTERVAL, p_COMPONENT.LOSS_ADJ_TYPE, NULL, v_INTEGRATION_INTERVAL, v_QTY, v_DET_STATUS);
+		ELSE
+			v_NUM_INTERVALS	:= RETAIL_DETERMINANTS.GET_NUMBER_OF_INTERVALS(p_COMPONENT.RATE_INTERVAL, v_BEGIN_DATE, v_END_DATE);
+			GET_CHARGE_QUANTITY(p_ACCESSOR, v_DET_BEGIN_DATE, v_DET_END_DATE, v_NUM_INTERVALS, p_COMPONENT, NULL, NULL, v_QTY, v_DET_STATUS);
+		END IF;
+
+		-- Based on quantity, look-up effective child component
+		SELECT I.COMPONENT_ID, C.RATE_STRUCTURE
+		INTO v_CHILD_COMP_ID, v_CHILD_RATE_STRUCTURE
+		FROM (SELECT MAX(CC.COMPOSITE_COMPONENT_ID) as COMPONENT_ID
+				FROM COMPONENT_COMPOSITE CC
+				WHERE CC.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+					AND CC.SUB_COMPONENT_TYPE = CONSTANTS.UNDEFINED_ATTRIBUTE
+					AND CC.SUB_COMPONENT_ID = CONSTANTS.NOT_ASSIGNED
+					AND v_END_DATE BETWEEN CC.BEGIN_DATE AND NVL(CC.END_DATE, CONSTANTS.HIGH_DATE)
+					AND v_QTY BETWEEN CC.BLOCK_MIN AND NVL(CC.BLOCK_MAX,v_QTY)
+			) I,
+			COMPONENT C
+		WHERE C.COMPONENT_ID(+) = I.COMPONENT_ID;
+
+		IF UPPER(v_CHILD_RATE_STRUCTURE) IN ('COMPOSITE','COMBINATION') THEN
+			LOGS.LOG_ERROR('Composite charge: Child components with rate structure of Combination or Composite are not allowed');
+		ELSE
+			v_TMP := EVALUATE_COMPONENT(p_ACCESSOR, v_BEGIN_DATE, v_END_DATE,
+										v_CHILD_COMP_ID, p_PRODUCT_ID, p_PERIOD_ID);
+			v_IDX := v_TMP.FIRST;
+			WHILE v_TMP.EXISTS(v_IDX) LOOP
+				-- mark child component results as "child" results and append to
+				-- returned result list
+				v_TMP(v_IDX).CHILD_COMPONENT_ID := v_CHILD_COMP_ID;
+				v_TMP(v_IDX).COMPONENT_ID := p_COMPONENT.COMPONENT_ID;
+
+				v_TMP(v_IDX).FACTOR := v_TMP(v_IDX).FACTOR * p_FACTOR;
+				v_TMP(v_IDX).AMOUNT := v_TMP(v_IDX).AMOUNT * p_FACTOR;
+
+				-- Make sure determinant status adequately reflects state of determinants
+				-- used for block look-up
+				IF v_TMP(v_IDX).DETERMINANT_STATUS IS NULL THEN
+					v_TMP(v_IDX).DETERMINANT_STATUS := v_DET_STATUS;
+				ELSIF v_TMP(v_IDX).DETERMINANT_STATUS NOT IN (v_DET_STATUS, RETAIL_DETERMINANTS.c_STATUS_PARTIAL) THEN
+					v_TMP(v_IDX).DETERMINANT_STATUS := RETAIL_DETERMINANTS.c_STATUS_PARTIAL;
+				END IF;
+
+				v_RESULTS.EXTEND;
+				v_RESULTS(v_RESULTS.LAST) := v_TMP(v_IDX);
+
+				v_IDX := v_TMP.NEXT(v_IDX);
+			END LOOP;
+		END IF;
+
+		-- next date range
+		v_BEGIN_DATE := v_END_DATE+1;
+		v_DATE_IDX := v_DATES.NEXT(v_DATE_IDX);
+	END LOOP;
+
+	-- Done!
+	RETURN v_RESULTS;
+
+END EVALUATE_COMPOSITE_COMPONENT;
+-------------------------------------------------------------------------------
+-- Evaluates a Combination charge component for a specified date range
+-- using determinants provided by the specified accessor.
+-- %parm p_ACCESSOR		Object for retrieving charge determinants.
+-- %parm p_BEGIN_DATE	Start date of bill period.
+-- %parm p_END_DATE		End date of bill period.
+-- %parm p_PRODUCT_ID	Optional Product associated with specified
+--						Component.
+-- %parm p_COMPONENT	Component to evaluate.
+-- %parm p_FACTOR		Component's effective percentage.
+-- %parm p_PERIOD_ID	Optional TOU Period.
+-- %return				Table of results.
+FUNCTION EVALUATE_COMBINATION_COMPONENT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_FACTOR IN NUMBER,
+	p_PERIOD_ID IN NUMBER
+	) RETURN PRICING_RESULT_TABLE AS
+
+v_RESULTS	PRICING_RESULT_TABLE := PRICING_RESULT_TABLE();
+v_TMP		PRICING_RESULT_TABLE;
+v_IDX		PLS_INTEGER;
+
+CURSOR cur_CHILD_COMPS IS
+	-- Meter Period interval? just use child components effective on the end date of the period
+	SELECT CC.COMBINED_COMPONENT_ID,
+		p_BEGIN_DATE as BEGIN_DATE,
+		p_END_DATE as END_DATE,
+		CC.COEFFICIENT,
+		C.RATE_STRUCTURE
+	FROM COMPONENT_COMBINATION CC,
+		COMPONENT C
+	WHERE p_COMPONENT.RATE_INTERVAL = 'Meter Period'
+		AND CC.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+		AND CC.SUB_COMPONENT_TYPE = CONSTANTS.UNDEFINED_ATTRIBUTE
+		AND CC.SUB_COMPONENT_ID = CONSTANTS.NOT_ASSIGNED
+		AND p_END_DATE BETWEEN CC.BEGIN_DATE AND NVL(CC.END_DATE, CONSTANTS.HIGH_DATE)
+		AND C.COMPONENT_ID = CC.COMBINED_COMPONENT_ID
+	UNION ALL
+	-- Otherwise, get all child components w/ overlapping date ranges
+	SELECT CC.COMBINED_COMPONENT_ID,
+		GREATEST(p_BEGIN_DATE, CC.BEGIN_DATE) as BEGIN_DATE,
+		LEAST(p_END_DATE, NVL(CC.END_DATE, CONSTANTS.HIGH_DATE)) as END_DATE,
+		CC.COEFFICIENT,
+		C.RATE_STRUCTURE
+	FROM COMPONENT_COMBINATION CC,
+		COMPONENT C
+	WHERE p_COMPONENT.RATE_INTERVAL <> 'Meter Period'
+		AND CC.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+		AND CC.SUB_COMPONENT_TYPE = CONSTANTS.UNDEFINED_ATTRIBUTE
+		AND CC.SUB_COMPONENT_ID = CONSTANTS.NOT_ASSIGNED
+		AND CC.BEGIN_DATE <= p_END_DATE
+		AND NVL(CC.END_DATE, CONSTANTS.HIGH_DATE) >= p_BEGIN_DATE
+		AND C.COMPONENT_ID = CC.COMBINED_COMPONENT_ID;
+
+BEGIN
+
+	FOR v_CHILD_COMP IN cur_CHILD_COMPS LOOP
+		IF UPPER(v_CHILD_COMP.RATE_STRUCTURE) IN ('COMPOSITE','COMBINATION') THEN
+			LOGS.LOG_ERROR('Combination charge: Child components with rate structure of Combination or Composite are not allowed');
+		ELSE
+			v_TMP := EVALUATE_COMPONENT(p_ACCESSOR, v_CHILD_COMP.BEGIN_DATE, v_CHILD_COMP.END_DATE,
+										v_CHILD_COMP.COMBINED_COMPONENT_ID, p_PRODUCT_ID, p_PERIOD_ID);
+			v_IDX := v_TMP.FIRST;
+			WHILE v_TMP.EXISTS(v_IDX) LOOP
+				-- mark child component results as "child" results and append to
+				-- returned result list
+				IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+					LOGS.LOG_DEBUG_DETAIL('Coefficient for combined component = '||v_CHILD_COMP.COEFFICIENT);
+				END IF;
+
+				v_TMP(v_IDX).CHILD_COMPONENT_ID := v_CHILD_COMP.COMBINED_COMPONENT_ID;
+				v_TMP(v_IDX).COMPONENT_ID := p_COMPONENT.COMPONENT_ID;
+
+				v_TMP(v_IDX).FACTOR := v_TMP(v_IDX).FACTOR * p_FACTOR * NVL(v_CHILD_COMP.COEFFICIENT,1);
+				v_TMP(v_IDX).AMOUNT := v_TMP(v_IDX).AMOUNT * p_FACTOR * NVL(v_CHILD_COMP.COEFFICIENT,1);
+
+				v_RESULTS.EXTEND;
+				v_RESULTS(v_RESULTS.LAST) := v_TMP(v_IDX);
+
+				v_IDX := v_TMP.NEXT(v_IDX);
+			END LOOP;
+		END IF;
+	END LOOP;
+
+	-- Done!
+	RETURN v_RESULTS;
+
+END EVALUATE_COMBINATION_COMPONENT;
+-------------------------------------------------------------------------------
+-- Evaluates a Formula charge component for a specified date range
+-- using determinants provided by the specified accessor.
+-- %parm p_ACCESSOR		Object for retrieving charge determinants.
+-- %parm p_BEGIN_DATE	Start date of bill period.
+-- %parm p_END_DATE	End date of bill period.
+-- %parm p_PRODUCT_ID	Optional Product associated with specified
+--						Component.
+-- %parm p_COMPONENT	Component to evaluate.
+-- %parm p_FACTOR		Component's effective percentage.
+-- %return				Table of results.
+FUNCTION EVALUATE_FORMULA_COMPONENT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_FACTOR IN NUMBER
+	) RETURN PRICING_RESULT_TABLE AS
+
+v_CHARGE_ID			FORMULA_CHARGE.CHARGE_ID%TYPE;
+v_CONTEXT			UT.STRING_MAP := g_FORMULA_CONTEXT;
+v_DET_BEGIN_DATE	DATE;
+v_DET_END_DATE		DATE;
+v_CUT_BEGIN_DATE	DATE;
+v_CUT_END_DATE		DATE;
+v_RESULT			PRICING_RESULT;
+
+BEGIN
+	-- Get Charge ID for this formula charge
+	SELECT BID.NEXTVAL INTO v_CHARGE_ID
+	FROM DUAL;
+
+	-- flesh out the formula context
+	ADD_TO_FORMULA_CONTEXT(p_ACCESSOR, v_CONTEXT);
+	v_CONTEXT(':process_id') := UT.GET_LITERAL_FOR_NUMBER(LOGS.CURRENT_PROCESS_ID);
+	v_CONTEXT(':session_id') := UT.GET_LITERAL_FOR_NUMBER(LOGS.CURRENT_PROCESS_ID);
+	v_CONTEXT(':accessor') := 'RETAIL_PRICING.GET_FORMULA_ACCESSOR()';
+	v_CONTEXT(':invoice_line_begin_date') := UT.GET_LITERAL_FOR_DATE(p_BEGIN_DATE);
+	v_CONTEXT(':invoice_line_end_date') := UT.GET_LITERAL_FOR_DATE(p_END_DATE);
+
+	-- Setup for CALC_ENGINE access via GET_CURRENT_ACCESSOR API
+	SET_CURRENT_ACCESSOR(p_ACCESSOR);
+
+	UT.CUT_DATE_RANGE(GA.ELECTRIC_MODEL, p_BEGIN_DATE, p_END_DATE, p_ACCESSOR.TIME_ZONE, v_CUT_BEGIN_DATE, v_CUT_END_DATE);
+
+	-- Evaluate!
+	CALC_ENGINE.RUN_FORMULA_COMPONENT(v_CHARGE_ID, NULL, p_COMPONENT, v_CUT_BEGIN_DATE, v_CUT_END_DATE,
+								TRUE, p_ACCESSOR.TIME_ZONE,
+								CONSTANTS.HIGH_DATE, -- as of
+								NULL, -- week begin
+								v_CONTEXT, 'Retail Charge Component Evaluation');
+	-- Prepare the results
+	RETAIL_DETERMINANTS.DETERMINANT_ACCESSOR_DATES(p_COMPONENT.RATE_INTERVAL, p_BEGIN_DATE, p_END_DATE, p_ACCESSOR.TIME_ZONE, v_DET_BEGIN_DATE, v_DET_END_DATE);
+	v_RESULT := NEW_PRICING_RESULT(v_DET_BEGIN_DATE, v_DET_END_DATE, p_PRODUCT_ID, p_COMPONENT, p_FACTOR);
+	v_RESULT.DETERMINANT_STATUS := RESET_CURRENT_ACCESSOR;
+	v_RESULT.FML_CHARGE_ID := v_CHARGE_ID;
+	-- Compute the tally
+	SELECT SUM(CHARGE_QUANTITY),
+		CASE WHEN SUM(CHARGE_QUANTITY) = 0 THEN AVG(CHARGE_RATE) -- avoid div-by-zero
+			ELSE SUM(CHARGE_AMOUNT) / SUM(CHARGE_QUANTITY)
+			END,
+		SUM(CHARGE_AMOUNT)
+	INTO v_RESULT.QUANTITY, v_RESULT.RATE, v_RESULT.AMOUNT
+	FROM FORMULA_CHARGE
+	WHERE CHARGE_ID = v_CHARGE_ID;
+
+	-- Done!
+	RETURN PRICING_RESULT_TABLE(v_RESULT);
+
+END EVALUATE_FORMULA_COMPONENT;
+-------------------------------------------------------------------------------
+-- Evaluates a Tax charge component for a specified date range
+-- using determinants provided by the specified accessor.
+-- %parm p_ACCESSOR		Object for retrieving charge determinants.
+-- %parm p_BEGIN_DATE	Start date of bill period.
+-- %parm p_END_DATE		End date of bill period.
+-- %parm p_PRODUCT_ID	Optional Product associated with specified
+--						Component.
+-- %parm p_COMPONENT	Component to evaluate.
+-- %parm p_FACTOR		Component's effective percentage.
+-- %return				Table of results.
+FUNCTION EVALUATE_TAX_COMPONENT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_PRODUCT_ID IN NUMBER,
+	p_COMPONENT IN COMPONENT%ROWTYPE,
+	p_FACTOR IN NUMBER
+	) RETURN PRICING_RESULT_TABLE AS
+
+v_TAXED_RESULTS	PRICING_RESULT_TABLE := p_ACCESSOR.GET_TAXABLE_CHARGES(p_BEGIN_DATE, p_END_DATE, CONSTANTS.ALL_ID);
+v_IDX			PLS_INTEGER;
+v_GEOGRAPHY_ID	NUMBER(9);
+v_LAST_END_DATE	DATE;
+v_RATE			NUMBER;
+v_RESULT		PRICING_RESULT;
+v_RESULTS		PRICING_RESULT_TABLE := PRICING_RESULT_TABLE();
+
+BEGIN
+
+	IF UPPER(p_COMPONENT.RATE_STRUCTURE) <> 'FLAT' THEN
+		LOGS.LOG_ERROR('Rate Structure '||p_COMPONENT.RATE_STRUCTURE||' is not supported for Tax charges. Only Flat rate structure is supported.');
+		RETURN v_RESULTS;
+	END IF;
+
+	-- no taxed components - nothing to do
+	IF v_TAXED_RESULTS IS NULL THEN
+		RETURN v_RESULTS;
+	END IF;
+
+	v_IDX := v_TAXED_RESULTS.FIRST;
+	WHILE v_TAXED_RESULTS.EXISTS(v_IDX) LOOP
+		v_RESULT := PRICING_RESULT(v_TAXED_RESULTS(v_IDX)); -- make a copy of taxed result
+		-- Move some values around for the taxes on the result
+		v_RESULT.TAXED_PRODUCT_ID := v_RESULT.PRODUCT_ID;
+		v_RESULT.TAXED_COMPONENT_ID := v_RESULT.COMPONENT_ID;
+		v_RESULT.PRODUCT_ID := p_PRODUCT_ID;
+		v_RESULT.COMPONENT_ID := p_COMPONENT.COMPONENT_ID;
+		v_RESULT.BASE_QUANTITY := NULL;
+		v_RESULT.FML_CHARGE_ID := NULL;
+		v_RESULT.DETERMINANT_STATUS := RETAIL_DETERMINANTS.c_STATUS_OK;
+
+		-- look-up geography (aka tax jurisdiction) for taxed component
+		SELECT MAX(EDA.GEOGRAPHY_ID)
+		INTO v_GEOGRAPHY_ID
+		FROM COMPONENT C,
+			CATEGORY CT,
+			ENTITY_DOMAIN_ADDRESS EDA
+		WHERE C.COMPONENT_ID = v_RESULT.TAXED_COMPONENT_ID
+			AND CT.CATEGORY_ALIAS = 'Locale'
+			AND EDA.ENTITY_DOMAIN_ID = EC.ED_SERVICE_POINT
+			AND EDA.OWNER_ENTITY_ID = C.SERVICE_POINT_ID
+			AND EDA.CATEGORY_ID = CT.CATEGORY_ID;
+
+		-- No geography? no taxes... keep going
+		IF v_GEOGRAPHY_ID IS NULL THEN
+			IF LOGS.IS_DEBUG_ENABLED THEN
+				LOGS.LOG_DEBUG('Taxed Component '||TEXT_UTIL.TO_CHAR_ENTITY(v_RESULT.TAXED_COMPONENT_ID, EC.ED_COMPONENT)||' has no associated geography!');
+			END IF;
+		ELSE
+			IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+				LOGS.LOG_DEBUG_DETAIL('Computing taxes for '||TEXT_UTIL.TO_CHAR_ENTITY(v_RESULT.TAXED_COMPONENT_ID, EC.ED_COMPONENT)
+									||' - '||TEXT_UTIL.TO_CHAR_ENTITY(v_GEOGRAPHY_ID, EC.ED_GEOGRAPHY, TRUE)||' (ID='||v_GEOGRAPHY_ID||')');
+			END IF;
+
+			-- look-up rate
+			IF v_LAST_END_DATE IS NULL OR v_LAST_END_DATE <> v_RESULT.END_DATE THEN
+				v_LAST_END_DATE := v_RESULT.END_DATE;
+
+				SELECT SUM(CFR.RATE)
+				INTO v_RATE
+				FROM COMPONENT_FLAT_RATE CFR,
+					(SELECT G.GEOGRAPHY_ID -- find all applicable tax jurisdictions from geography tree
+					 FROM GEOGRAPHY G
+					 START WITH G.GEOGRAPHY_ID = v_GEOGRAPHY_ID
+					 CONNECT BY G.GEOGRAPHY_ID = PRIOR G.PARENT_GEOGRAPHY_ID) G
+				WHERE CFR.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+					AND CFR.SUB_COMPONENT_TYPE = 'GEOGRAPHY'
+					AND CFR.SUB_COMPONENT_ID = G.GEOGRAPHY_ID
+					AND v_LAST_END_DATE BETWEEN CFR.BEGIN_DATE AND NVL(CFR.END_DATE, CONSTANTS.HIGH_DATE);
+			END IF;
+
+			IF LOGS.IS_DEBUG_DETAIL_ENABLED THEN
+				IF LOGS.IS_DEBUG_MORE_DETAIL_ENABLED THEN
+					-- show all individual applicable rates
+					FOR v_R IN (SELECT G.GEOGRAPHY_ID, CFR.RATE
+									FROM COMPONENT_FLAT_RATE CFR,
+										(SELECT G.GEOGRAPHY_ID -- find all applicable tax jurisdictions from geography tree
+										 FROM GEOGRAPHY G
+										 START WITH G.GEOGRAPHY_ID = v_GEOGRAPHY_ID
+										 CONNECT BY G.GEOGRAPHY_ID = PRIOR G.PARENT_GEOGRAPHY_ID) G
+									WHERE CFR.COMPONENT_ID = p_COMPONENT.COMPONENT_ID
+										AND CFR.SUB_COMPONENT_TYPE = 'GEOGRAPHY'
+										AND CFR.SUB_COMPONENT_ID = G.GEOGRAPHY_ID
+										AND v_LAST_END_DATE BETWEEN CFR.BEGIN_DATE AND NVL(CFR.END_DATE, CONSTANTS.HIGH_DATE)
+								) LOOP
+						LOGS.LOG_DEBUG_MORE_DETAIL(TEXT_UTIL.TO_CHAR_ENTITY(v_GEOGRAPHY_ID, EC.ED_GEOGRAPHY, TRUE)||' (ID='||v_GEOGRAPHY_ID||') rate = '||v_R.RATE);
+					END LOOP;
+				END IF;
+				LOGS.LOG_DEBUG_DETAIL('Total Tax rate = '||v_RATE);
+			END IF;
+
+			-- and calculate taxes
+			v_RESULT.FACTOR := p_FACTOR;
+			v_RESULT.QUANTITY := v_RESULT.AMOUNT; -- Taxed amount is the original record's charge amount
+			v_RESULT.RATE := v_RATE;
+			v_RESULT.AMOUNT := v_RESULT.QUANTITY * v_RATE * p_FACTOR;
+
+			v_RESULTS.EXTEND;
+			v_RESULTS(v_RESULTS.LAST) := v_RESULT;
+		END IF;
+
+		v_IDX := v_TAXED_RESULTS.NEXT(v_IDX);
+	END LOOP;
+
+	-- Done!
+	RETURN v_RESULTS;
+
+END EVALUATE_TAX_COMPONENT;
+-------------------------------------------------------------------------------
+FUNCTION EVALUATE_COMPONENT
+	(
+	p_ACCESSOR IN OUT NOCOPY DETERMINANT_ACCESSOR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_COMPONENT_ID IN NUMBER,
+	p_PRODUCT_ID IN NUMBER := NULL,
+	p_PERIOD_ID IN NUMBER := NULL,
+	p_SUPPRESS_PERIOD_WARNINGS IN BOOLEAN := FALSE
+	) RETURN PRICING_RESULT_TABLE AS
+
+v_COMPONENT					COMPONENT%ROWTYPE;
+v_FACTOR					NUMBER;
+v_RATE_STRUCTURE			COMPONENT.RATE_STRUCTURE%TYPE;
+v_RET						PRICING_RESULT_TABLE;
+v_IDX						PLS_INTEGER;
+b_USE_ZERO_MIN_INT_QTY_FLAG BOOLEAN;
+BEGIN
+	b_USE_ZERO_MIN_INT_QTY_FLAG := USING_ZERO_MIN_INT_QTY(p_COMPONENT_ID);
+
+	-- Get component details and effective factor
+
+	SELECT * INTO v_COMPONENT
+	FROM COMPONENT
+	WHERE COMPONENT_ID = p_COMPONENT_ID;
+
+	v_RATE_STRUCTURE := UPPER(v_COMPONENT.RATE_STRUCTURE);
+
+	IF b_USE_ZERO_MIN_INT_QTY_FLAG THEN
+		IF v_RATE_STRUCTURE IN ('BLOCK', 'TIERED') THEN
+			LOGS.LOG_WARN(p_EVENT_TEXT => '''Use Zero As Min Interval Qty'' flag is ignored for Block and Tiered Rate Structures');
+			b_USE_ZERO_MIN_INT_QTY_FLAG := FALSE;
+		END IF;
+
+		IF UPPER(v_COMPONENT.CHARGE_TYPE) IN ('DEMAND HOURS')THEN
+			LOGS.LOG_WARN(p_EVENT_TEXT => '''Use Zero As Min Interval Qty'' flag is ignored for Demand Hours Charge Type');
+			b_USE_ZERO_MIN_INT_QTY_FLAG := FALSE;
+		END IF;
+
+		IF v_COMPONENT.RATE_INTERVAL NOT IN ('Meter Period')THEN
+			LOGS.LOG_WARN(p_EVENT_TEXT => '''Use Zero As Min Interval Qty'' flag is ignored for all Interval Types other than ''Meter Period''');
+			b_USE_ZERO_MIN_INT_QTY_FLAG := FALSE;
+		END IF;
+	END IF;
+
+	SELECT NVL(MAX(PERCENT_VAL),100)/100 -- convert from percentage to factor
+	INTO v_FACTOR
+	FROM COMPONENT_PERCENTAGE
+	WHERE COMPONENT_ID = p_COMPONENT_ID
+		AND p_END_DATE BETWEEN BEGIN_DATE AND NVL(END_DATE, CONSTANTS.HIGH_DATE);
+
+	IF LOGS.IS_DEBUG_ENABLED THEN
+		LOGS.LOG_DEBUG('Evaluating Component: '||v_COMPONENT.COMPONENT_NAME||' (ID = '||p_COMPONENT_ID||')');
+		LOGS.LOG_DEBUG('  Rate Structure: '||v_COMPONENT.RATE_STRUCTURE);
+		LOGS.LOG_DEBUG('  Charge Type: '||v_COMPONENT.CHARGE_TYPE);
+		LOGS.LOG_DEBUG('  Factor: '||v_FACTOR);
+	END IF;
+
+	-- Log warning if period was specified but not usable
+	IF p_PERIOD_ID IS NOT NULL AND v_RATE_STRUCTURE NOT IN ('TIME OF USE', 'COMBINATION', 'COMPOSITE') THEN
+		IF NOT p_SUPPRESS_PERIOD_WARNINGS THEN
+			LOGS.LOG_WARN('Component: '||v_COMPONENT.COMPONENT_NAME||' does not support time of use periods, but '||TEXT_UTIL.TO_CHAR_ENTITY(p_PERIOD_ID,EC.ED_PERIOD,TRUE)||' was specified for evaluation.');
+		ELSIF LOGS.IS_DEBUG_ENABLED THEN
+			-- if suppressing warnings, but debug enabled, log a debug message
+			LOGS.LOG_DEBUG('Component: '||v_COMPONENT.COMPONENT_NAME||' does not support time of use periods, but '||TEXT_UTIL.TO_CHAR_ENTITY(p_PERIOD_ID,EC.ED_PERIOD,TRUE)||' was specified for evaluation.');
+		END IF;
+	END IF;
+
+	-- Add Component to accessor (used in CHECK_ACCOUNT_DETERMINANTS to identify DG6 charges)
+    p_ACCESSOR.COMPONENT_NAME := v_COMPONENT.COMPONENT_NAME;
+
+	-- Now delegate to appropriate evaluation sub-routine
+
+	IF UPPER(v_COMPONENT.CHARGE_TYPE) = 'TAX' THEN
+		v_RET := EVALUATE_TAX_COMPONENT(p_ACCESSOR, p_BEGIN_DATE, p_END_DATE, p_PRODUCT_ID, v_COMPONENT, v_FACTOR);
+	ELSIF v_RATE_STRUCTURE = 'FLAT' THEN
+		v_RET := EVALUATE_FLAT_COMPONENT(p_ACCESSOR, p_BEGIN_DATE, p_END_DATE, p_PRODUCT_ID, v_COMPONENT, v_FACTOR, b_USE_ZERO_MIN_INT_QTY_FLAG);
+	ELSIF v_RATE_STRUCTURE IN ('BLOCK','TIERED') THEN
+		v_RET := EVALUATE_BLOCK_TIER_COMPONENT(p_ACCESSOR, p_BEGIN_DATE, p_END_DATE, p_PRODUCT_ID, v_COMPONENT, v_FACTOR);
+	ELSIF v_RATE_STRUCTURE = 'TIME OF USE' THEN
+		v_RET := EVALUATE_TOU_COMPONENT(p_ACCESSOR, p_BEGIN_DATE, p_END_DATE, p_PRODUCT_ID, v_COMPONENT, v_FACTOR, p_PERIOD_ID, b_USE_ZERO_MIN_INT_QTY_FLAG);
+	ELSIF v_RATE_STRUCTURE = 'MARKET' THEN
+		v_RET := EVALUATE_MARKET_COMPONENT(p_ACCESSOR, p_BEGIN_DATE, p_END_DATE, p_PRODUCT_ID, v_COMPONENT, v_FACTOR);
+	ELSIF v_RATE_STRUCTURE = 'COMPOSITE' THEN
+		v_RET := EVALUATE_COMPOSITE_COMPONENT(p_ACCESSOR, p_BEGIN_DATE, p_END_DATE, p_PRODUCT_ID, v_COMPONENT, v_FACTOR, p_PERIOD_ID);
+	ELSIF v_RATE_STRUCTURE = 'COMBINATION' THEN
+		v_RET := EVALUATE_COMBINATION_COMPONENT(p_ACCESSOR, p_BEGIN_DATE, p_END_DATE, p_PRODUCT_ID, v_COMPONENT, v_FACTOR, p_PERIOD_ID);
+	ELSIF v_RATE_STRUCTURE = 'FORMULA' THEN
+		v_RET := EVALUATE_FORMULA_COMPONENT(p_ACCESSOR, p_BEGIN_DATE, p_END_DATE, p_PRODUCT_ID, v_COMPONENT, v_FACTOR);
+	END IF;
+
+	-- Provide taxed results to the accessor - for evaluating a tax charge later
+	IF v_COMPONENT.IS_TAXED = 1 THEN
+		IF LOGS.IS_DEBUG_ENABLED THEN
+			LOGS.LOG_DEBUG('Component is taxed - adding to accessor...');
+		END IF;
+		v_IDX := v_RET.FIRST;
+		WHILE v_RET.EXISTS(v_IDX) LOOP
+			p_ACCESSOR.ADD_TAXABLE_CHARGE(v_RET(v_IDX));
+			v_IDX := v_RET.NEXT(v_IDX);
+		END LOOP;
+	END IF;
+
+	RETURN v_RET;
+
+END EVALUATE_COMPONENT;
+-------------------------------------------------------------------------------
+END RETAIL_PRICING;
+/

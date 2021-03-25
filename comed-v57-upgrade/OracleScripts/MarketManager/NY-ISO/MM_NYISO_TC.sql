@@ -1,0 +1,25 @@
+CREATE OR REPLACE PACKAGE MM_NYISO_TC IS
+-- $Revision: 1.18 $
+
+  -- Author  : VGODYN
+  -- Created : 9/8/2005 4:04:29 PM
+  -- Purpose : Interface for NYISO ATC TTC IMPORT using MEX_NYISO
+
+FUNCTION WHAT_VERSION RETURN VARCHAR2;
+
+PROCEDURE MARKET_EXCHANGE
+(
+    p_BEGIN_DATE    IN DATE,
+    p_END_DATE      IN DATE,
+    p_EXCHANGE_TYPE IN VARCHAR2,
+    p_LOG_TYPE      IN NUMBER,
+    p_TRACE_ON      IN NUMBER,
+    p_STATUS        OUT NUMBER,
+    p_MESSAGE       OUT VARCHAR2
+);
+
+	--	Market_exchange constant
+	g_ET_QUERY_ATC_TC VARCHAR2(20) := 'Query ATC TTC';
+
+END MM_NYISO_TC;
+/

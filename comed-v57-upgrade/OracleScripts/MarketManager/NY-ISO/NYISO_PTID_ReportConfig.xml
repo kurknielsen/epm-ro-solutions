@@ -1,0 +1,120 @@
+<SystemObjectConfiguration xmlns="http://www.newenergyassoc.com/mighty/configuration" scriptCreateDate="2008-11-03 09:46:44" isProductScript="0"><MainObjects>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+        <Path>
+          <name>Scheduling.Other1</name>
+          <category>System View</category>
+        </Path>
+      </Path>
+    </Path>
+    <name>NYISO_PTID_RPT</name>
+    <category>Report</category>
+    <displayName>NYISO Node List</displayName>
+    <order>0</order>
+    <isHidden>0</isHidden>
+    <Attribute id="401" name="Get Procedure 1">MM_NYISO.NYISO_PTID_RPT</Attribute>
+    <Object>
+      <name>NYISO_PTID_RPT_Grid</name>
+      <category>Grid</category>
+      <order>0</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="301" name="Put Procedure Name">MM_NYISO.PUT_NYISO_PTID_RPT</Attribute>
+      <Attribute id="305" name="Can Change Row Count">0</Attribute>
+      <Attribute id="308" name="Hiding Single Data Column Label">0</Attribute>
+      <Attribute id="311" name="Disable Action Double Click">0</Attribute>
+      <Object>
+        <name>ADD_SVC_POINT</name>
+        <category>Column</category>
+        <displayName>Add Service Point</displayName>
+        <order>1</order>
+        <isHidden>0</isHidden>
+        <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+        <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+        <Attribute id="1" name="Edit Type">k (Checkbox)</Attribute>
+        <Attribute id="2" name="Not Null">0</Attribute>
+        <Attribute id="7" name="Merge ">0</Attribute>
+        <Attribute id="13" name="Hidden When Null">0</Attribute>
+        <Attribute id="20" name="Read Only">0</Attribute>
+        <Attribute id="24" name="Fixed">0</Attribute>
+        <Attribute id="31" name="Exclude From Duplicate">0</Attribute>
+        <Attribute id="34" name="Is Combo Box Editable">0</Attribute>
+      </Object>
+      <Object>
+        <name>DUMMY</name>
+        <category>Column</category>
+        <order>0</order>
+        <isHidden>1</isHidden>
+        <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+        <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+        <Attribute id="2" name="Not Null">0</Attribute>
+        <Attribute id="7" name="Merge ">0</Attribute>
+        <Attribute id="13" name="Hidden When Null">0</Attribute>
+        <Attribute id="20" name="Read Only">0</Attribute>
+        <Attribute id="24" name="Fixed">0</Attribute>
+        <Attribute id="31" name="Exclude From Duplicate">0</Attribute>
+        <Attribute id="34" name="Is Combo Box Editable">0</Attribute>
+      </Object>
+      <Object>
+        <name>PTID</name>
+        <category>Column</category>
+        <displayName>PTID</displayName>
+        <order>3</order>
+        <isHidden>0</isHidden>
+        <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+        <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+        <Attribute id="1" name="Edit Type">x (No Edit)</Attribute>
+        <Attribute id="2" name="Not Null">0</Attribute>
+        <Attribute id="7" name="Merge ">0</Attribute>
+        <Attribute id="13" name="Hidden When Null">0</Attribute>
+        <Attribute id="20" name="Read Only">0</Attribute>
+        <Attribute id="24" name="Fixed">0</Attribute>
+        <Attribute id="31" name="Exclude From Duplicate">0</Attribute>
+        <Attribute id="34" name="Is Combo Box Editable">0</Attribute>
+      </Object>
+      <Object>
+        <name>PTID_NAME</name>
+        <category>Column</category>
+        <displayName>PTID Name</displayName>
+        <order>2</order>
+        <isHidden>0</isHidden>
+        <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+        <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+        <Attribute id="1" name="Edit Type">x (No Edit)</Attribute>
+        <Attribute id="2" name="Not Null">0</Attribute>
+        <Attribute id="7" name="Merge ">0</Attribute>
+        <Attribute id="13" name="Hidden When Null">0</Attribute>
+        <Attribute id="20" name="Read Only">0</Attribute>
+        <Attribute id="24" name="Fixed">0</Attribute>
+        <Attribute id="31" name="Exclude From Duplicate">0</Attribute>
+        <Attribute id="34" name="Is Combo Box Editable">0</Attribute>
+      </Object>
+      <Object>
+        <name>PTID_TYPE</name>
+        <category>Column</category>
+        <displayName>PTID_Type</displayName>
+        <order>4</order>
+        <isHidden>0</isHidden>
+        <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+        <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+        <Attribute id="1" name="Edit Type">x (No Edit)</Attribute>
+        <Attribute id="2" name="Not Null">0</Attribute>
+        <Attribute id="7" name="Merge ">0</Attribute>
+        <Attribute id="13" name="Hidden When Null">0</Attribute>
+        <Attribute id="20" name="Read Only">0</Attribute>
+        <Attribute id="24" name="Fixed">0</Attribute>
+        <Attribute id="31" name="Exclude From Duplicate">0</Attribute>
+        <Attribute id="34" name="Is Combo Box Editable">0</Attribute>
+      </Object>
+    </Object>
+  </Object>
+</MainObjects>
+<ReferencedObjects/>
+<ConditionalFormats/>
+</SystemObjectConfiguration>

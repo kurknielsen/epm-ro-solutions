@@ -1,0 +1,390 @@
+<SystemObjectConfiguration xmlns="http://www.newenergyassoc.com/mighty/configuration" scriptCreateDate="2008-11-05 13:58:15" isProductScript="0"><MainObjects>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:BidPost:Query Physical and Virtual Load Bids</name>
+    <category>Data Exchange</category>
+    <displayName>NY: BidPost: Query Physical and Virtual Load Bids</displayName>
+    <order>401</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-4" name="Help Document Name">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:BidPost:Query Physical and Virtual Load Bids To Internal</name>
+    <category>Data Exchange</category>
+    <displayName>NY: BidPost: Query Physical and Virtual Load Bids To Internal</displayName>
+    <order>402</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:BidPost:Submit Physical and Virtual Load Bids</name>
+    <category>Data Exchange</category>
+    <displayName>NY: BidPost: Submit Physical and Virtual Load Bids</displayName>
+    <order>403</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">Bid Offer</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:LBMP:Query Price Nodes</name>
+    <category>Data Exchange</category>
+    <displayName>NY: LBMP: Query Price Nodes</displayName>
+    <order>404</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_NYISO_LBMP.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Price Nodes&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:LBMP:Query DA</name>
+    <category>Data Exchange</category>
+    <displayName>NY: LBMP: Query DA</displayName>
+    <order>405</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_NYISO_LBMP.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query DA LBMP&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:LBMP:Query RT</name>
+    <category>Data Exchange</category>
+    <displayName>NY: LBMP: Query RT</displayName>
+    <order>406</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_NYISO_LBMP.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query RT LBMP&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:LBMP:Query RTI</name>
+    <category>Data Exchange</category>
+    <displayName>NY: LBMP: Query RTI</displayName>
+    <order>407</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_NYISO_LBMP.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query RTI LBMP&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:LBMP:Query Archive</name>
+    <category>Data Exchange</category>
+    <displayName>NY: LBMP: Query Archive</displayName>
+    <order>408</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">MM_NYISO_LBMP.GET_ENTITY_LIST_FOR_LBMP</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>0</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_NYISO_LBMP.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Archive LBMP&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:LOAD:Query Actual RT</name>
+    <category>Data Exchange</category>
+    <displayName>NY: LOAD: Query Actual RT</displayName>
+    <order>409</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_NYISO_LOAD.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Real Time Load&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:LOAD:Query Actual RTI</name>
+    <category>Data Exchange</category>
+    <displayName>NY: LOAD: Query Actual RTI</displayName>
+    <order>410</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_NYISO_LOAD.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Integrated Real Time Load&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:LOAD:Query Forecast</name>
+    <category>Data Exchange</category>
+    <displayName>NY: LOAD: Query Forecast</displayName>
+    <order>411</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_NYISO_LOAD.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;ISO Load&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:TC:Query ATC TTC</name>
+    <category>Data Exchange</category>
+    <displayName>NY: TC: Query ATC TTC</displayName>
+    <order>414</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_NYISO_TC.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;QUERY ATC TTC&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:NY:Settlement:Import Settlement Statements</name>
+    <category>Data Exchange</category>
+    <displayName>NY: Settlement: Import Settlement Statements</displayName>
+    <order>415</order>
+    <isHidden>0</isHidden>
+  </Object>
+</MainObjects>
+<ReferencedObjects/>
+<ConditionalFormats/>
+</SystemObjectConfiguration>

@@ -1,0 +1,89 @@
+CREATE OR REPLACE PACKAGE MM_SEM_GEN_OFFER IS
+
+    -- Author  : JHUMPHRIES
+    --         : RARUL
+    --         :
+    -- Created : 4/3/2007 12:52:18 PM
+    -- Purpose : Build XML pieces of submission, query, and cancellation of Generation offers
+
+    --Revision: $Revision: 1.11 $
+    -- This function returns the version information, when queried. Used only for version management.
+    -- %return Version information.
+    FUNCTION WHAT_VERSION RETURN VARCHAR2;
+
+    FUNCTION CREATE_SUBMISSION_XML
+    (
+        p_DATE           IN DATE,
+        p_TRANSACTION_ID IN NUMBER,
+        p_LOGGER         IN OUT NOCOPY MM_LOGGER_ADAPTER
+    ) RETURN XMLTYPE;
+    
+    FUNCTION CREATE_UUT_SUBMISSION_XML
+    (
+        p_DATE           IN DATE,
+        p_TRANSACTION_ID IN NUMBER,
+        p_LOGGER         IN OUT NOCOPY MM_LOGGER_ADAPTER
+    ) RETURN XMLTYPE;
+
+    FUNCTION CREATE_QUERY_XML
+    (
+        p_DATE           IN DATE,
+        p_TRANSACTION_ID IN NUMBER,
+        p_LOGGER         IN OUT NOCOPY MM_LOGGER_ADAPTER
+    ) RETURN XMLTYPE;
+    
+    FUNCTION CREATE_UUT_QUERY_XML
+    (
+        p_DATE           IN DATE,
+        p_TRANSACTION_ID IN NUMBER,
+        p_LOGGER         IN OUT NOCOPY MM_LOGGER_ADAPTER
+    ) RETURN XMLTYPE;
+
+    FUNCTION PARSE_QUERY_XML
+    (
+        p_TRANSACTION_IDs IN NUMBER_COLLECTION,
+        p_DATE           IN DATE,
+        p_RESPONSE       IN XMLTYPE,
+        p_LOGGER         IN OUT NOCOPY MM_LOGGER_ADAPTER
+    ) RETURN VARCHAR2;
+
+    FUNCTION PARSE_SUBMISSION_RESPONSE_XML
+    (
+        p_TRANSACTION_IDs IN NUMBER_COLLECTION,
+        p_DATE           IN DATE,
+        p_RESPONSE       IN XMLTYPE,
+        p_LOGGER         IN OUT NOCOPY MM_LOGGER_ADAPTER
+    ) RETURN VARCHAR2;
+    
+     FUNCTION PARSE_UUT_SUBMISSION_RESP_XML
+     (
+		 p_TRANSACTION_IDs IN NUMBER_COLLECTION,
+		 p_DATE IN DATE,
+		 p_RESPONSE IN XMLTYPE,
+		 p_LOGGER IN OUT NOCOPY MM_LOGGER_ADAPTER
+     ) RETURN VARCHAR2;
+     
+    FUNCTION PARSE_UUT_QUERY_RESP_XML
+    (
+        p_TRANSACTION_IDs IN NUMBER_COLLECTION,
+        p_DATE           IN DATE,
+        p_RESPONSE       IN XMLTYPE,
+        p_LOGGER         IN OUT NOCOPY MM_LOGGER_ADAPTER
+    ) RETURN VARCHAR2;
+
+    FUNCTION GET_TRANSACTION_IDs
+	(
+		p_DATE IN DATE,
+		p_ACCOUNT_NAME IN VARCHAR2,
+		p_GATE_WINDOW IN VARCHAR2,
+		p_RESPONSE IN XMLTYPE
+	) RETURN NUMBER_COLLECTION;
+
+
+    k_FMT_ISO_DATE  CONSTANT VARCHAR2(12) := 'YYYY-MM-DD';
+    k_VERSION_NO    CONSTANT VARCHAR2(3) := '1.0';
+    k_STANDING_FLAG CONSTANT VARCHAR2(6) := 'FALSE';
+    k_1_SEC         CONSTANT INTERVAL DAY TO SECOND := INTERVAL '1' SECOND;
+    k_XML_NODE_NAME VARCHAR2(32) := 'sem_gen_offer';
+END MM_SEM_GEN_OFFER;
+/

@@ -1,0 +1,85 @@
+CREATE OR REPLACE PACKAGE MM_NYISO_SETTLEMENT IS
+-- $Revision: 1.14 $
+    g_PROCESS_REMAINING_REPORTS BOOLEAN := TRUE;
+FUNCTION WHAT_VERSION RETURN VARCHAR2;
+
+	PROCEDURE MARKET_EXCHANGE(p_BEGIN_DATE    IN DATE,
+							  p_END_DATE      IN DATE,
+					 		  p_EXCHANGE_TYPE IN VARCHAR2,
+							  p_LOG_TYPE 		IN NUMBER,
+							  p_TRACE_ON 		IN NUMBER,
+							  p_STATUS        OUT NUMBER,
+							  p_MESSAGE       OUT VARCHAR2);
+
+	PROCEDURE IMPORT_SETTLEMENT_STATEMENT(p_DATE    IN DATE,
+									  p_CRED    IN mex_credentials,
+									  p_STATUS  OUT NUMBER,
+									  p_LOGGER  IN OUT NOCOPY mm_logger_adapter);
+
+	PROCEDURE IMPORT_DAM_ENERGY(p_CSV        IN CLOB,
+								p_ISO_SOURCE IN VARCHAR2,
+								p_LOG_TYPE    IN NUMBER,
+   						    	p_TRACE_ON    IN NUMBER,
+								p_STATUS     OUT NUMBER,
+								p_MESSAGE OUT VARCHAR2);
+
+	PROCEDURE IMPORT_NYISO_RATES(p_CSV      IN CLOB,
+								 p_ISO_NAME IN VARCHAR2,
+								 p_LOG_TYPE    IN NUMBER,
+   						    	 p_TRACE_ON    IN NUMBER,
+								 p_STATUS   OUT NUMBER,
+								 p_MESSAGE  OUT VARCHAR2);
+
+	PROCEDURE IMPORT_NYISO_TOTALS(p_CSV        IN CLOB,
+								  p_ISO_SOURCE IN VARCHAR2,
+								  p_LOG_TYPE    IN NUMBER,
+   						    	  p_TRACE_ON    IN NUMBER,
+								  p_STATUS     OUT NUMBER,
+								  p_MESSAGE OUT VARCHAR2);
+
+	PROCEDURE IMPORT_NYISO_RESID(p_CSV        IN CLOB,
+								 p_ISO_SOURCE IN VARCHAR2,
+								 p_LOG_TYPE    IN NUMBER,
+   						    	p_TRACE_ON    IN NUMBER,
+								 p_STATUS     OUT NUMBER,
+								 p_MESSAGE OUT VARCHAR2);
+
+	PROCEDURE IMPORT_DAM_VIRTUAL_LOAD(p_CSV        IN CLOB,
+								  p_ISO_SOURCE IN VARCHAR2,
+								  p_LOG_TYPE    IN NUMBER,
+   						    	  p_TRACE_ON    IN NUMBER,
+								  p_STATUS     OUT NUMBER,
+								  p_MESSAGE OUT VARCHAR2);
+
+	PROCEDURE IMPORT_DAM_VIRTUAL_SUPPLY(p_CSV        IN CLOB,
+									p_ISO_SOURCE IN VARCHAR2,
+									p_LOG_TYPE    IN NUMBER,
+   						    		p_TRACE_ON    IN NUMBER,
+									p_STATUS     OUT NUMBER,
+									p_MESSAGE OUT VARCHAR2);
+
+	PROCEDURE IMPORT_BAL_MARKET_ENERGY(p_CSV     IN CLOB,
+						           p_ISO_SOURCE IN VARCHAR2,
+								   p_LOG_TYPE    IN NUMBER,
+   						    	   p_TRACE_ON    IN NUMBER,
+								   p_STATUS  OUT NUMBER,
+								   p_MESSAGE OUT VARCHAR2);
+
+	PROCEDURE IMPORT_BAL_MARKET_VIRT_SUPPLY(p_CSV        IN CLOB,
+										p_ISO_SOURCE IN VARCHAR2,
+										p_LOG_TYPE    IN NUMBER,
+   						    		    p_TRACE_ON    IN NUMBER,
+										p_STATUS     OUT NUMBER,
+										p_MESSAGE OUT VARCHAR2);
+
+	PROCEDURE IMPORT_BAL_MARKET_VIRT_LOAD(p_CSV        IN CLOB,
+									  p_ISO_SOURCE IN VARCHAR2,
+									  p_LOG_TYPE    IN NUMBER,
+   						    		  p_TRACE_ON    IN NUMBER,
+									  p_STATUS     OUT NUMBER,
+									  p_MESSAGE OUT VARCHAR2);
+
+
+
+END MM_NYISO_SETTLEMENT;
+/

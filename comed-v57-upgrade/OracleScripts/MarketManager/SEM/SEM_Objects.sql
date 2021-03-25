@@ -1,0 +1,38 @@
+
+------------------------------------------
+---- REPORT ATTRIBUTES
+------------------------------------------
+CREATE OR REPLACE TYPE SEM_REPORT_ATTR AS OBJECT
+(
+    APPLICATION_TYPE VARCHAR2(16),
+    REP_MODE         VARCHAR2(16),
+    REQUEST_TYPE     VARCHAR2(16),
+    ACTION          VARCHAR2(16),
+    REPORT_TYPE      VARCHAR2(16),
+    REPORT_SUB_TYPE  VARCHAR2(16),
+    PERIODICITY      VARCHAR2(16),
+    REPORT_NAME      VARCHAR2(64),
+    FILE_NAME        VARCHAR2(128),
+    ACCESS_CLASS     VARCHAR2(16),
+    FILE_TYPE        VARCHAR2(16),
+    VERSION_NO       VARCHAR2(16),
+    MULTIPLE_MESSAGES VARCHAR2(6)
+);
+/
+CREATE OR REPLACE TYPE SEM_REPORT_ATTR_TBL AS TABLE OF SEM_REPORT_ATTR;
+/
+
+------------------------------------------
+---- Used by the Settlement Validation report
+------------------------------------------
+CREATE OR REPLACE TYPE STATEMENT_DATE_TYPE AS OBJECT
+(
+    INVOICE_BEGIN_DATE DATE,
+    INVOICE_END_DATE DATE,
+    STATEMENT_DATE DATE
+);
+/
+CREATE OR REPLACE TYPE STATEMENT_DATE_TABLE IS TABLE OF STATEMENT_DATE_TYPE;
+/
+
+

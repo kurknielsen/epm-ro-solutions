@@ -1,0 +1,24 @@
+CREATE OR REPLACE FUNCTION INTERVAL_IS_ATLEAST_DAILY
+	(
+	p_INTERVAL VARCHAR
+	)
+	RETURN BOOLEAN IS
+
+--Revision: $Revision: 1.8 $
+
+-- If the interval is daily or above, return true.  Otherwise, return false.
+
+BEGIN
+
+	IF GET_INTERVAL_ABBREVIATION(p_INTERVAL) IN ('DD', 'DY', 'MM', 'Q', 'YY') THEN
+	   RETURN TRUE;
+	ELSE
+	   RETURN FALSE;
+	END IF;
+	
+EXCEPTION
+	WHEN OTHERS THEN
+		 RETURN FALSE; --ASSUME THE WORST
+	
+END INTERVAL_IS_ATLEAST_DAILY;
+/

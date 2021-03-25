@@ -1,0 +1,60 @@
+CREATE OR REPLACE FUNCTION IS_DAY_INTERVAL_OF_TYPE
+	(
+	p_DAY_INTERVAL_TYPE IN NUMBER,
+	p_SERVICE_DATE IN DATE,
+	p_IS_HOLIDAY IN NUMBER DEFAULT 0
+	) RETURN NUMBER IS
+
+--Revision: $Revision: 1.17 $
+
+-- Answer 1 if the the specified p_SERVICE_DATE is of the specified p_DAY_INTERVAL_TYPE; Otherwise answer 0.
+-- Day Interval Types: -10 - All Day, -11 - On Peak, 3 - Off Peak
+-- Holidays and Weekends are considered to be Off-Peak Intervals
+-- Note: p_SERVICE_DATE is local time zone date.
+c_ALL_DAY NUMBER(3) := -10;
+c_ON_PEAK NUMBER(3) := -11;
+c_OFF_PEAK NUMBER(3) := -12;
+
+v_PEAK_BEGIN NUMBER(4) := 601;  -- defined in terms of local time zone.
+v_PEAK_END NUMBER(4) := 2201;  -- defined in terms of local time zone.
+v_MILITARY NUMBER(4) := TO_CHAR(p_SERVICE_DATE, 'HH24MI');
+
+v_PEAK_BEGIN_STRING VARCHAR(4) := NULL;
+v_PEAK_END_STRING VARCHAR(4) := NULL;
+BEGIN
+
+	 --Get Peak Begin and End from System Label.
+	v_PEAK_BEGIN_STRING := MODEL_VALUE_AT_KEY(0,'On_Peak','Begin_Hour','?');
+	v_PEAK_END_STRING := MODEL_VALUE_AT_KEY(0,'On_Peak','End_Hour','?');
+	IF v_PEAK_BEGIN_STRING IS NOT NULL AND v_PEAK_END_STRING IS NOT NULL THEN
+		v_PEAK_BEGIN := TO_NUMBER(v_PEAK_BEGIN_STRING) * 100 + 1;
+		v_PEAK_END := TO_NUMBER(v_PEAK_END_STRING) * 100 + 1;
+	END IF;
+ 
+	IF p_IS_HOLIDAY = 1 OR TO_CHAR(p_SERVICE_DATE, 'DY') IN ('SAT','SUN') THEN
+		IF p_DAY_INTERVAL_TYPE = c_ON_PEAK THEN
+			RETURN 0;
+		ELSE
+			RETURN 1;
+		END IF;
+	ELSIF p_DAY_INTERVAL_TYPE = c_ALL_DAY THEN
+		RETURN 1;
+	ELSIF p_DAY_INTERVAL_TYPE = c_ON_PEAK THEN
+		IF v_MILITARY BETWEEN v_PEAK_BEGIN AND v_PEAK_END THEN
+			RETURN 1;
+		ELSE
+			RETURN 0;
+		END IF;
+	ELSIF p_DAY_INTERVAL_TYPE = c_OFF_PEAK THEN
+		IF v_MILITARY NOT  BETWEEN v_PEAK_BEGIN AND v_PEAK_END THEN
+			RETURN 1;
+		ELSE
+			RETURN 0;
+		END IF;
+	END IF;
+
+	RETURN 0;
+
+END IS_DAY_INTERVAL_OF_TYPE;
+/
+

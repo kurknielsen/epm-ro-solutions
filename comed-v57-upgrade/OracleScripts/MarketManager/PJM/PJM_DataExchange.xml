@@ -1,0 +1,2505 @@
+<SystemObjectConfiguration xmlns="http://www.newenergyassoc.com/mighty/configuration" scriptCreateDate="2009-09-21 12:04:55" isProductScript="0"><MainObjects>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:LMP:PNODES</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: LMP: Query PNode List</displayName>
+    <order>501</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_LMP.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query PNodes&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:LMP:DALMP</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: LMP: Day-ahead LMP</displayName>
+    <order>502</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_LMP.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Day-ahead LMP&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:LMP:RTLMP</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: LMP: Real-time LMP</displayName>
+    <order>503</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_LMP.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Real-time LMP&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:LMP:FTRZonalLMP</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: LMP: FTR Zonal LMP</displayName>
+    <order>504</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_LMP.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query FTR Zonal LMP&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:LMP:DALMPML</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: LMP: Day-ahead LMP ML from File</displayName>
+    <order>505</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>IMPORT_ACTION</name>
+      <category>Action</category>
+      <displayName>Import Action</displayName>
+      <order>1</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">12</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_LMP.MARKET_IMPORT_CLOB;EXCHANGE_TYPE=&quot;Import Day-ahead LMP from File&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1014" name="File Dialog FilterSet">txt;Text files (*.txt)</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:LMP:RTLMPFile</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: LMP: Real-time LMP from File</displayName>
+    <order>506</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>IMPORT_ACTION</name>
+      <category>Action</category>
+      <displayName>Import Action</displayName>
+      <order>1</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">12</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_LMP.MARKET_IMPORT_CLOB;EXCHANGE_TYPE=&quot;Import Real-time LMP from File&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1014" name="File Dialog FilterSet">csv;Comma Delimited files(*.csv)</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:OASIS:QueryLoadForecast</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: OASIS: Query Load Forecast</displayName>
+    <order>508</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_OASIS.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Load Forecast&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:OASIS:QueryOpResvRates</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: OASIS: Query Op Resv Rates</displayName>
+    <order>509</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_OASIS.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query OP Resv Rates&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eSchedule:QueryComps</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eSchedule: Query Companies</displayName>
+    <order>520</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_ESCHED.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Companies&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eSchedule:QueryCompsFromFile</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eSchedule: Query Companies From File</displayName>
+    <order>521</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>IMPORT_ACTION</name>
+      <category>Action</category>
+      <displayName>Import Action</displayName>
+      <order>1</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">12</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_IMPORT_CHUNK</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eSchedule:QueryContrs</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eSchedule: Query Contracts</displayName>
+    <order>522</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_ESCHED.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Contracts&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eSchedule:QueryContrsToInternal</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eSchedule: Query Contracts To Internal</displayName>
+    <order>523</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_ESCHED.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Contracts To Internal&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eSchedule:QuerySched</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eSchedule: Query Schedules</displayName>
+    <order>524</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_ESCHED.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Schedules&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eSchedule:QuerySchedsToInternal</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eSchedule: Query Schedules To Internal</displayName>
+    <order>525</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_ESCHED.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Schedules To Internal&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eSchedule:QueryRecon</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eSchedule: Query Reconciliation Data</displayName>
+    <order>528</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_ESCHED.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Reconciliation Data&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eSchedule:Schedule</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eSchedule:  Schedule</displayName>
+    <order>529</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:DALMP</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Day-Ahead LMPs</displayName>
+    <order>5001</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Day-Ahead LMPS&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryAllAncSvcOffers</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query All A/S Offers</displayName>
+    <order>5002</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.QUERY_ALL_BIDS_OF_TYPE;BID_TYPE=&quot;AS&quot;;SCHEDULE_STATE=2</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryAllAncSvcOffersInternal</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query All A/S Offers to Internal</displayName>
+    <order>5003</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.QUERY_ALL_BIDS_OF_TYPE;BID_TYPE=&quot;AS&quot;;SCHEDULE_STATE=1</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryAllBidsAndOffers</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query All Bids and Offers</displayName>
+    <order>5004</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.QUERY_ALL_BIDS_OF_TYPE;BID_TYPE=&quot;All&quot;;SCHEDULE_STATE=2</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryAllBidsAndOffersInternal</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query All Bids and Offers to Internal</displayName>
+    <order>5005</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.QUERY_ALL_BIDS_OF_TYPE;BID_TYPE=&quot;All&quot;;SCHEDULE_STATE=1</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryAllGenOffers</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query All Generation Offers</displayName>
+    <order>5006</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.QUERY_ALL_BIDS_OF_TYPE;BID_TYPE=&quot;Generation&quot;;SCHEDULE_STATE=2</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryAllGenOffersInternal</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query All Generation Offers to Internal</displayName>
+    <order>5007</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">my proc name goes here</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryAllVirtuals</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query All Virtuals</displayName>
+    <order>5008</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">aybabu</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryAllVirtualsInternal</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query All Virtuals to Internal</displayName>
+    <order>5009</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.QUERY_ALL_BIDS_OF_TYPE;BID_TYPE=&quot;Virtual&quot;;SCHEDULE_STATE=1</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryAncSvcMktPri</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Ancillary Service Market Prices</displayName>
+    <order>5010</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Ancillary Service Market Prices&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryBidNodeList</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Bid Node List</displayName>
+    <order>5011</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Bid Node List&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryDemandBids</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Demand Bids</displayName>
+    <order>5012</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Demand Bids&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryDemandBidsToInternal</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Demand Bids To Internal</displayName>
+    <order>5013</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Demand Bids To Internal&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryMessages</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Messages</displayName>
+    <order>5014</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Messages&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryMktResults</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Market Results</displayName>
+    <order>5015</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Market Results&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryNodeList</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Node List</displayName>
+    <order>5016</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Node List&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryRegOffer</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Regulation Offers</displayName>
+    <order>5017</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Regulation Offers&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryScheduleDetail</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Schedule Detail</displayName>
+    <order>5018</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Schedule Detail&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryScheduleOffer</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Schedule Offer</displayName>
+    <order>5019</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Schedule Offer&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryScheduleSelection</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Schedule Selection</displayName>
+    <order>5020</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Schedule Selection&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QuerySpinReserveOffer</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Spinning Reserve Offers</displayName>
+    <order>5021</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Spinning Reserve Offers&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QuerySpinReserveResults</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Spinning Reserve Results</displayName>
+    <order>5022</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Spinning Reserve Results&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QuerySpregAward</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query SPREG Awards</displayName>
+    <order>5023</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query SPREG Awards&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryUnitDetail</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Unit Detail</displayName>
+    <order>5024</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Unit Detail&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryUnitList</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Unit List</displayName>
+    <order>5025</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryUnitSchedule</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Unit Schedule</displayName>
+    <order>5026</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Unit Schedule&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryUnitUpdate</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Unit Update</displayName>
+    <order>5027</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Unit Update&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryVirtuals</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Virtual Bids</displayName>
+    <order>5028</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Virtual Bids&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:QueryVirtualsToInternal</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Query Virtual Bids To Internal</displayName>
+    <order>5029</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMKT.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Virtual Bids To Internal&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:SubmitRegOffer</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Submit Regulation Offer</displayName>
+    <order>5030</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:SubmitRegUpdate</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Submit Regulation Update</displayName>
+    <order>5031</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:SubmitScheduleDetail</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT:  Submit Schedule Detail</displayName>
+    <order>5032</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">i am screwed</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:SubmitScheduleOffer</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Submit Schedule Offer</displayName>
+    <order>5033</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:SubmitScheduleSelection</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Submit Schedule Selection</displayName>
+    <order>5034</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:SubmitSpinOffer</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Submit Spinning Reserve Offer</displayName>
+    <order>5035</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:SubmitSpinUpdate</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Submit Spinning Reserve Update</displayName>
+    <order>5036</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:SubmitUnitDetail</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Submit Unit Detail</displayName>
+    <order>5037</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:SubmitUnitSchedule</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Submit Unit Schedule</displayName>
+    <order>5038</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:SubmitUnitUpdate</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT: Submit Unit Update</displayName>
+    <order>5039</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:Dec Bid</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT:  Decrement Bid</displayName>
+    <order>5040</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:Inc Offer</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT:  Increment Offer</displayName>
+    <order>5041</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:FixedDemandBid</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT:  Fixed Demand Bid</displayName>
+    <order>5042</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMKT:PriceSensDemandBid</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMKT:  Price-sensitive Demand Bid</displayName>
+    <order>5043</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eRPM:QueryCapObligation</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eRPM: Query Capacity Obligation</displayName>
+    <order>8000</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_ERPM.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Capacity Obligation&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eRPM:QueryNSPL</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eRPM: Query NSPL</displayName>
+    <order>8000</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_ERPM.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query NSPL&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMTR:QueryMtrAccts</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMTR: Query Meter Accounts</displayName>
+    <order>9001</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMTR.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Meter Accounts&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMTR:QueryMtrs</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMTR: Query Allocated Meter Values</displayName>
+    <order>9002</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMTR.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Allocated Meter Values&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMTR:QueryLoad</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMTR: Query Load Values</displayName>
+    <order>9003</order>
+    <isHidden>1</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMTR.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Load Values&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eMTR:QueryMtrCorrectAl</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eMTR: Query Meter Correction Allocations</displayName>
+    <order>9004</order>
+    <isHidden>1</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EMTR.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Meter Correction Allocations&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eFTR:QueryMarketInfo</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eFTR: Query Market Info</displayName>
+    <order>9010</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EFTR.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query Market Info&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eFTR:QueryAuctionResul</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eFTR: Query FTR Auction Results</displayName>
+    <order>9011</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EFTR.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query FTR Auction Results&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eFTR:QueryFTRPosition</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eFTR: Query FTR Position</displayName>
+    <order>9012</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_EFTR.MARKET_EXCHANGE;EXCHANGE_TYPE=&quot;Query FTR Position&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eFTR:FTRQuotes</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eFTR:  FTR Quotes</displayName>
+    <order>9013</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Bid Offer</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.BID_OFFER_TRANSACTION_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eFTR:QueryNodes</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eFTR: Query FTR Nodes</displayName>
+    <order>9014</order>
+    <isHidden>1</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:eFTR:QueryQuotes</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: eFTR: Query FTR Quotes</displayName>
+    <order>9014</order>
+    <isHidden>1</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">XS.DATA_EXCHANGE</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:MSRS:ImportMonthToDateBill</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: MSRS: Import Month to Date Bill</displayName>
+    <order>9101</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+      <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_SETTLEMENT_MSRS.MARKET_EXCHANGE;&quot;Month-to-Date Bill - CSV and XML&quot;</Attribute>
+      <Attribute id="1011" name="Is Dialog Modal">0</Attribute>
+      <Attribute id="1015" name="Is Multi File Export">0</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:MSRS:ImportSettlementStatements</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: MSRS: Import PJM Settlement Statements</displayName>
+    <order>9102</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_SETTLEMENT_MSRS.IMPORT_ENTIRE_STATEMENT</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:MSRS:ImportLoadWithWithoutLosses</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: MSRS: Import Load with and without Losses</displayName>
+    <order>9103</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_ESCHED.IMPORT_ESCHED_W_WO_LOSSES_MSRS</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:MSRS:ImportMonthlyStatement</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: MSRS: Import PJM Monthly Statement</displayName>
+    <order>9104</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_SETTLEMENT_MSRS.IMPORT_MONTHLY_STATEMENT</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM:MSRS:ImportRTDailyTxns</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: MSRS: Import Real-Time Daily Transactions</displayName>
+    <order>9105</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_SETTLEMENT_MSRS.IMPORT_RT_DAILY_TX</Attribute>
+    </Object>
+  </Object>
+  <Object>
+    <Path>
+      <name>System</name>
+      <category>System</category>
+      <Path>
+        <name>Scheduling</name>
+        <category>Module</category>
+      </Path>
+    </Path>
+    <name>Sched:PJM::ImportFerc668Data</name>
+    <category>Data Exchange</category>
+    <displayName>PJM: Import Ferc 668 Data</displayName>
+    <order>9106</order>
+    <isHidden>0</isHidden>
+    <Attribute id="-3" name="Shared Conf - Override Is Hidden">0</Attribute>
+    <Attribute id="-2" name="Shared Conf - Override Disp Name">0</Attribute>
+    <Attribute id="1401" name="Type">Data Exchange</Attribute>
+    <Attribute id="1402" name="Entity List Procedure">XS.DATA_EXCHANGE_ENTITY_LIST</Attribute>
+    <Attribute id="1403" name="Show Delimiters">0</Attribute>
+    <Attribute id="1404" name="Single Select Entity List">0</Attribute>
+    <Object>
+      <name>EXCHANGE_ACTION</name>
+      <category>Action</category>
+      <displayName>Exchange Action</displayName>
+      <order>2</order>
+      <isHidden>0</isHidden>
+      <Attribute id="1006" name="Type">3</Attribute>
+      <Attribute id="1007" name="Type Reference">MM_PJM_FERC.IMPORT_FERC_668_DATA</Attribute>
+    </Object>
+  </Object>
+</MainObjects>
+<ReferencedObjects/>
+<ConditionalFormats/>
+</SystemObjectConfiguration>

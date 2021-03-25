@@ -1,0 +1,1045 @@
+********************************************************
+Building MINT using scripts in C:\ROv57\OracleScripts
+********************************************************
+Common tables and sequences
+Create sequence MMID...
+
+PL/SQL procedure successfully completed.
+
+compiling MEX and MINT package specs
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+Market: PJM
+Creating PJM objects
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+
+Type created.
+
+=================
+compiling PJM package specs
+=================
+MEX_PJM
+
+Package created.
+
+MEX_PJM_EFTR
+
+Package created.
+
+MEX_PJM_ESCHED
+
+Package created.
+
+MEX_PJM_SETTLEMENT
+
+Package created.
+
+MEX_PJM_SETTLEMENT_MSRS
+
+Package created.
+
+MEX_PJM_EES
+
+Package created.
+
+MEX_PJM_EMKT
+
+Package created.
+
+MEX_PJM_LMP
+
+Package created.
+
+MEX_PJM_OASIS
+
+Package created.
+
+MEX_PJM_ERPM
+
+Package created.
+
+MM_UTIL specs
+
+Package created.
+
+MarketManager packages
+market:PJM
+=================
+compiling PJM package specs
+=================
+MM_PJM_UTIL
+
+Package created.
+
+MM_PJM_REVENUE_REPORTS
+
+Package created.
+
+PJM_VIEWS
+
+View created.
+
+
+View created.
+
+
+View created.
+
+
+View created.
+
+
+View created.
+
+
+View created.
+
+
+View created.
+
+
+View created.
+
+
+View created.
+
+
+View created.
+
+
+View created.
+
+
+View created.
+
+DATE_CONST
+
+Package created.
+
+
+Package body created.
+
+MM_PJM_EFTR
+
+Package created.
+
+MM_PJM_EMKT_UTIL
+
+Package created.
+
+MM_PJM_EMKT_GEN
+
+Package created.
+
+MM_PJM_EMKT
+
+Package created.
+
+MM_PJM_GEN_REPORTS
+
+Package created.
+
+MM_PJM_EMTR
+
+Package created.
+
+MM_PJM_ESCHED
+
+Package created.
+
+MM_PJM_LMP
+
+Package created.
+
+MM_PJM_OASIS
+
+Package created.
+
+MM_PJM_SETTLEMENT
+
+Package created.
+
+MM_PJM_SETTLEMENT_MSRS
+
+Package created.
+
+MM_PJM_EES
+
+Package created.
+
+MM_PJM_ERPM
+
+Package created.
+
+MM_PJM
+
+Package created.
+
+MM_PJM_SHADOW_BILL
+
+Package created.
+
+MM_PJM_SCHEDULED
+
+Package created.
+
+MM_PJM_FERC
+
+Package created.
+
+MM_PJM_POWERMETER
+
+Package created.
+
+
+Package created.
+
+MEX build
+=================
+compiling PJM package bodies
+=================
+MEX_PJM
+
+Package body created.
+
+MEX_PJM_EFTR
+
+Package body created.
+
+MEX_PJM_ESCHED
+
+Package body created.
+
+MEX_PJM_SETTLEMENT
+
+Package body created.
+
+MEX_PJM_SETTLEMENT_MSRS
+
+Package body created.
+
+MEX_PJM_EES
+
+Package body created.
+
+MEX_PJM_EMKT
+
+Package body created.
+
+MEX_PJM_LMP
+
+Package body created.
+
+MEX_PJM_OASIS
+
+Package body created.
+
+MEX_PJM_ERPM
+
+Package body created.
+
+Other common
+
+Warning: Package Body created with compilation errors.
+
+MM_IS_MARKET_CLOSED
+
+Function created.
+
+MM_IS_MARKET_CLOSED_TXN
+
+Function created.
+
+building PJM...
+market:PJM
+=================
+compiling PJM package bodies
+=================
+MM_PJM_UTIL
+
+Package body created.
+
+MM_PJM_REVENUE_REPORTS
+
+Package body created.
+
+MM_PJM_EFTR
+
+Package body created.
+
+MM_PJM_EMKT_UTIL
+
+Package body created.
+
+MM_PJM_EMKT_GEN
+
+Package body created.
+
+MM_PJM_EMKT
+
+Package body created.
+
+MM_PJM_GEN_REPORTS
+
+Package body created.
+
+MM_PJM_EMTR
+
+Package body created.
+
+MM_PJM_ESCHED
+
+Package body created.
+
+MM_PJM_LMP
+
+Package body created.
+
+MM_PJM_OASIS
+
+Warning: Package Body created with compilation errors.
+
+MM_PJM_SETTLEMENT
+
+Package body created.
+
+MM_PJM_SETTLEMENT_MSRS
+
+Package body created.
+
+MM_PJM_EES
+
+Package body created.
+
+MM_PJM_ERPM
+
+Package body created.
+
+MM_PJM
+
+Package body created.
+
+MM_PJM_SHADOW_BILL
+
+Package body created.
+
+MM_PJM_SCHEDULED
+
+Package body created.
+
+MM_PJM_FERC
+
+Package body created.
+
+MM_PJM_POWERMETER
+
+Package body created.
+
+compiling MM package...
+
+Warning: Package Body created with compilation errors.
+
+Enabling MEX Switchboard external system...
+
+PL/SQL procedure successfully completed.
+
+Initializing layouts...
+
+3 rows updated.
+

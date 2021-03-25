@@ -1,0 +1,123 @@
+
+CREATE OR REPLACE TYPE MEX_OASIS_TRANS_PROFILE AS OBJECT
+(
+    START_TIME                    DATE,
+    STOP_TIME                     DATE,    
+    ASSIGNMENT_REF                VARCHAR2(12),
+    REASSIGNED_REF                VARCHAR2(12),
+    PATH_NAME                     VARCHAR2(50),
+    POINT_OF_RECEIPT              VARCHAR2(12),
+    POINT_OF_DELIVERY             VARCHAR2(12),
+    OFFER_PRICE                   NUMBER(9,4),
+    BID_PRICE                     NUMBER(9,4),
+    CAPACITY_REQUESTED            NUMBER(12),
+    CAPACITY_GRANTED              NUMBER(12),
+    REASSIGNED_CAPACITY           NUMBER(12),
+    REASSIGNED_START_TIME         DATE,
+    REASSIGNED_STOP_TIME          DATE,
+    CUSTOMER_COMMENTS             VARCHAR2(255),
+    CAPACITY                      NUMBER(12)
+);
+/
+CREATE OR REPLACE TYPE MEX_OASIS_TRANS_PROFILE_TBL AS TABLE OF MEX_OASIS_TRANS_PROFILE;
+/
+
+
+CREATE OR REPLACE TYPE MEX_OASIS_TRANS_DATA AS OBJECT
+(
+    RECORD_STATUS                 NUMBER(3),
+    SELLER_CODE                   VARCHAR2(6),
+    SELLER_DUNS                   NUMBER(9),
+    CUSTOMER_CODE                 VARCHAR2(6),
+    CUSTOMER_DUNS                 NUMBER(9),
+    AFFILIATE_FLAG                VARCHAR2(3),
+    SOURCE                        VARCHAR2(30),
+    SINK                          VARCHAR2(30),
+    SERVICE_INCREMENT             VARCHAR2(8),
+    TS_CLASS                      VARCHAR2(20),
+    TS_TYPE                       VARCHAR2(20),
+    TS_PERIOD                     VARCHAR2(20),
+    TS_WINDOW                     VARCHAR2(20),
+    TS_SUBCLASS                   VARCHAR2(20),
+    NERC_CURTAILEMENT_PRIORITY    NUMBER(1),
+    OTHER_CURTAILEMENT_PRIORITY   VARCHAR2(8),
+    CEILING_PRICE                 NUMBER(9,4),
+    PRICE_UNITS                   VARCHAR2(20),
+    PRECONFIRMED                  VARCHAR2(3),
+    ANC_SVC_LINK                  VARCHAR2(300),
+    ANC_SVC_REQ                   VARCHAR2(100),
+    POSTING_REF                   VARCHAR2(12),
+    SALE_REF                      VARCHAR2(12),
+    REQUEST_REF                   VARCHAR2(12),
+    DEAL_REF                      VARCHAR2(12), 
+    IMPACTED                      NUMBER(4),
+    COMPETING_REQUEST_FLAG        VARCHAR2(1),
+    REQUEST_TYPE                  VARCHAR2(12),
+    RELATED_REF                   VARCHAR2(12),
+    NEGOTIATED_PRICE_FLAG         VARCHAR2(1), 
+    STATUS                        VARCHAR2(25), 
+    STATUS_NOTIFICATION           VARCHAR2(200),
+    STATUS_COMMENTS               VARCHAR2(255),
+    TIME_QUEUED                   DATE,
+    START_TIME_QUEUED             DATE,
+    STOP_TIME_QUEUED              DATE,
+    RESPONSE_TIME_LIMIT           DATE,
+    TIME_OF_LAST_UPDATE           DATE,
+    PRIMARY_PROVIDER_COMMENTS     VARCHAR2(255),    
+    SELLER_REF                    VARCHAR2(12),        
+    SELLER_COMMENTS               VARCHAR2(255),    
+    SELLER_NAME                   VARCHAR2(25),
+    SELLER_PHONE                  VARCHAR2(20),
+    SELLER_FAX                    VARCHAR2(20),
+    SELLER_EMAIL                  VARCHAR2(60),
+    CUSTOMER_NAME                 VARCHAR2(25),
+    CUSTOMER_PHONE                VARCHAR2(20),
+    CUSTOMER_FAX                  VARCHAR2(20),
+    CUSTOMER_EMAIL                VARCHAR2(60),
+    ERROR_MESSAGE                 VARCHAR2(250),
+    POSTING_NAME                  VARCHAR2(25),
+    INTERFACE_TYPE                VARCHAR2(1),
+    OFFER_START_TIME              DATE,
+    OFFER_STOP_TIME               DATE,
+    SERVICE_DESCRIPTION           VARCHAR2(200),
+    CONTROL_AREA                  VARCHAR2(20),
+    AS_TYPE                       VARCHAR2(20),
+    ANC_SERVICE_POINT             VARCHAR2(12),
+    PROFILE_TABLE                 MEX_OASIS_TRANS_PROFILE_TBL
+);
+/
+
+CREATE OR REPLACE TYPE MEX_OASIS_TRANS_DATA_TBL AS TABLE OF MEX_OASIS_TRANS_DATA;
+/
+
+CREATE OR REPLACE TYPE MEX_OASIS_TRANS AS OBJECT
+(
+    TIME_STAMP            DATE,
+    PRIMARY_PROVIDER_CODE VARCHAR2(4),
+    PRIMARY_PROVIDER_DUNS NUMBER(9),
+    RETURN_TZ             VARCHAR2(2),
+    DATA_TABLE            MEX_OASIS_TRANS_DATA_TBL
+);
+/
+
+CREATE OR REPLACE TYPE MEX_OASIS_LIST_ELEM AS OBJECT
+(
+    LIST_NAME       VARCHAR2(50)
+ );
+/
+
+CREATE OR REPLACE TYPE MEX_OASIS_LIST_ELEM_TBL AS TABLE OF MEX_OASIS_LIST_ELEM;
+/
+
+CREATE OR REPLACE TYPE MEX_OASIS_LIST_RES AS OBJECT
+(
+    LIST_NAME       VARCHAR2(50),
+    LIST_ITEM       VARCHAR2(50),
+    LIST_ITEM_DESC  VARCHAR2(2000)
+);
+/
+
+CREATE OR REPLACE TYPE MEX_OASIS_LIST_RES_TBL AS TABLE OF MEX_OASIS_LIST_RES;
+/
+
+

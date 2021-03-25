@@ -1,0 +1,49 @@
+CREATE OR REPLACE FUNCTION HOLIDAY_OBSERVANCE_DAY
+	(
+	p_HOLIDAY_NAME VARCHAR,
+	p_HOLIDAY_YEAR IN CHAR
+	)
+ RETURN DATE IS
+--Revision: $Revision: 1.18 $
+
+--c	Answer the date of the occurrence of a holiday in a particular year.
+
+v_DATE DATE;
+
+BEGIN
+
+    IF p_HOLIDAY_NAME = 'US Memorial' THEN
+	    v_DATE := NEXT_DAY(TO_DATE('25-MAY-' || p_HOLIDAY_YEAR,'DD-MON-YYYY'),'MONDAY');
+	    IF TO_CHAR(v_DATE,'MON') = 'JUN' THEN
+	        v_DATE := v_DATE - 7;
+	    END IF;
+		RETURN v_DATE;
+	ELSIF p_HOLIDAY_NAME = 'US Labor' THEN
+	   RETURN NEXT_DAY(TO_DATE('31-AUG-' || p_HOLIDAY_YEAR,'DD-MON-YYYY'),'MONDAY');
+	ELSIF p_HOLIDAY_NAME = 'US Thanksgiving' THEN
+	   RETURN NEXT_DAY(TO_DATE('21-NOV-' || p_HOLIDAY_YEAR,'DD-MON-YYYY'),'THURSDAY');
+	ELSIF p_HOLIDAY_NAME = 'US New Years Day' THEN
+		v_DATE := TO_DATE('1-JAN-' || p_HOLIDAY_YEAR, 'DD-MON-YYYY');
+		IF TO_CHAR(v_DATE,'DY') = 'SUN' THEN
+			v_DATE := v_DATE + 1;
+		END IF;
+		RETURN v_DATE;
+	ELSIF p_HOLIDAY_NAME = 'US Independence Day' THEN
+		v_DATE := TO_DATE('4-JUL-' || p_HOLIDAY_YEAR, 'DD-MON-YYYY');
+		IF TO_CHAR(v_DATE,'DY') = 'SUN' THEN
+			v_DATE := v_DATE + 1;
+		END IF;
+		RETURN v_DATE;
+	ELSIF p_HOLIDAY_NAME = 'US Christmas' THEN
+		v_DATE := TO_DATE('25-DEC-' || p_HOLIDAY_YEAR, 'DD-MON-YYYY');
+		IF TO_CHAR(v_DATE,'DY') = 'SUN' THEN
+			v_DATE := v_DATE + 1;
+		END IF;
+		RETURN v_DATE;
+	END IF;
+
+	RETURN NULL;
+	
+END HOLIDAY_OBSERVANCE_DAY;
+/
+

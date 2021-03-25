@@ -1,0 +1,119 @@
+CREATE OR REPLACE PACKAGE BODY MM_MISO_UTIL AS
+
+CURSOR c_MISO_STATEMENT_TYPES IS
+	SELECT * FROM STATEMENT_TYPE WHERE STATEMENT_TYPE_ALIAS LIKE 'MISO:%';
+---------------------------------------------------------------------------------------------------
+FUNCTION WHAT_VERSION RETURN VARCHAR IS
+BEGIN
+    RETURN '$Revision: 1.1 $';
+END WHAT_VERSION;
+
+-------------------------------------------------------------------------------------
+FUNCTION ID_FOR_STATEMENT_TYPE
+	(
+	p_STATEMENT_TYPE_NAME IN VARCHAR2
+	) RETURN NUMBER IS
+v_STATEMENT_TYPE_ID NUMBER(9);
+BEGIN
+	SELECT STATEMENT_TYPE_ID
+	INTO v_STATEMENT_TYPE_ID
+	FROM STATEMENT_TYPE
+	WHERE STATEMENT_TYPE_ALIAS LIKE '%MISO:' || p_STATEMENT_TYPE_NAME || '%';
+
+	RETURN v_STATEMENT_TYPE_ID;
+
+--RAISE AN EXCEPTION IF IT DOESN'T EXIST.
+END ID_FOR_STATEMENT_TYPE;
+-------------------------------------------------------------------------------------
+FUNCTION GET_CONTRACT_FOR_ASSET_OWNER(
+    p_ASSET_OWNER_NAME IN VARCHAR2
+)
+    RETURN INTERCHANGE_CONTRACT%ROWTYPE IS
+    v_CONTRACT INTERCHANGE_CONTRACT%ROWTYPE;
+--RETURN THE CONTRACT FOR THE ASSET OWNER,
+--GENERALLY THE ONE NAMED 'MISO ' || p_ASSET_OWNER_NAME
+BEGIN
+    SELECT *
+    INTO   v_CONTRACT
+    FROM   INTERCHANGE_CONTRACT A
+    WHERE  CONTRACT_NAME = 'MISO ' || p_ASSET_OWNER_NAME;
+
+    RETURN v_CONTRACT;
+EXCEPTION
+    WHEN OTHERS THEN
+        RETURN NULL;
+END GET_CONTRACT_FOR_ASSET_OWNER;
+
+-------------------------------------------------------------------------------------
+FUNCTION GET_MISO_SC_ID RETURN NUMBER IS
+v_MISO_SC_ID NUMBER(9);
+BEGIN
+SELECT SC_ID
+    INTO   v_MISO_SC_ID
+    FROM   SCHEDULE_COORDINATOR
+    WHERE  SC_EXTERNAL_IDENTIFIER = 'MISO' AND ROWNUM = 1;
+
+RETURN v_MISO_SC_ID;
+END GET_MISO_SC_ID;
+
+-------------------------------------------------------------------------------------
+PROCEDURE PUT_IT_SCHEDULE_DATA(
+    p_TRANSACTION_ID IN NUMBER,
+    p_SCHEDULE_DATE IN DATE,
+    p_SCHEDULE_STATE IN NUMBER,
+    p_PRICE IN NUMBER,
+    p_AMOUNT IN NUMBER,
+    p_STATUS OUT NUMBER,
+    p_ERROR_MESSAGE OUT VARCHAR2
+) AS
+    v_AS_OF_DATE DATE := LOW_DATE;                                                                                                                                                                                         --ASSUME WE ARE NOT VERSIONING.
+    --For now, we are applying results to all defined schedule types.
+    v_STATEMENT_TYPE STATEMENT_TYPE.STATEMENT_TYPE_ID%TYPE;
+BEGIN
+    p_STATUS := GA.SUCCESS;
+    SECURITY_CONTROLS.SET_IS_INTERFACE(TRUE);
+
+    FOR v_ARRAY_INDEX IN 1 .. g_STATEMENT_TYPE_ID_ARRAY.COUNT LOOP
+        v_STATEMENT_TYPE := g_STATEMENT_TYPE_ID_ARRAY(v_ARRAY_INDEX);
+
+        UPDATE IT_SCHEDULE
+        SET AMOUNT = NVL(p_AMOUNT, AMOUNT),
+            PRICE = NVL(p_PRICE, PRICE)
+        WHERE  TRANSACTION_ID = p_TRANSACTION_ID AND SCHEDULE_TYPE = v_STATEMENT_TYPE AND SCHEDULE_STATE = p_SCHEDULE_STATE AND SCHEDULE_DATE = p_SCHEDULE_DATE AND AS_OF_DATE = v_AS_OF_DATE;
+
+        IF SQL%NOTFOUND THEN
+            INSERT INTO IT_SCHEDULE
+                        (TRANSACTION_ID, SCHEDULE_TYPE, SCHEDULE_STATE, SCHEDULE_DATE, AS_OF_DATE, AMOUNT, PRICE
+                        )
+            VALUES      (p_TRANSACTION_ID, v_STATEMENT_TYPE, p_SCHEDULE_STATE, p_SCHEDULE_DATE, v_AS_OF_DATE, p_AMOUNT, p_PRICE
+                        );
+        END IF;
+    END LOOP;
+
+    SECURITY_CONTROLS.SET_IS_INTERFACE(FALSE);
+EXCEPTION
+    WHEN OTHERS THEN
+        SECURITY_CONTROLS.SET_IS_INTERFACE(FALSE);
+        p_STATUS := SQLCODE;
+        p_ERROR_MESSAGE := SQLERRM;
+END PUT_IT_SCHEDULE_DATA;
+
+-------------------------------------------------------------------------------------
+BEGIN
+    -- PACKAGE INITIALIZATION
+    --Set up the Statement Type ID Array
+-- 17-jul-2007, jbc: don't hardwire statement type names; use table
+/*
+    FOR v_ARRAY_INDEX IN 1 .. g_STATEMENT_TYPE_ARRAY.COUNT LOOP
+        g_STATEMENT_TYPE_ID_ARRAY.EXTEND();
+        g_STATEMENT_TYPE_ID_ARRAY(v_ARRAY_INDEX) := ID_FOR_STATEMENT_TYPE(g_STATEMENT_TYPE_ARRAY(v_ARRAY_INDEX));
+    END LOOP;
+*/
+	FOR r_STATEMENT_TYPE IN c_MISO_STATEMENT_TYPES LOOP
+		g_STATEMENT_TYPE_ID_ARRAY.EXTEND();
+		g_STATEMENT_TYPE_ID_ARRAY(g_STATEMENT_TYPE_ID_ARRAY.LAST) := ID_FOR_STATEMENT_TYPE(SUBSTR(r_STATEMENT_TYPE.STATEMENT_TYPE_ALIAS, LENGTH('MISO:')+1));
+	END LOOP;
+
+---------------------------------------------------------------------------------------------------
+END MM_MISO_UTIL;
+/

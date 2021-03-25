@@ -1,0 +1,2453 @@
+CREATE OR REPLACE PACKAGE BODY "MM_SEM_SHADOW_BILL" IS
+
+g_HIGH_DATE DATE := HIGH_DATE;
+c_IU_AGREEMENT_TYPE_DEFAULT CONSTANT VARCHAR2(3) := MM_SEM_UTIL.g_EXTID_MKT_SCHED_EA_ABR;
+
+FUNCTION WHAT_VERSION RETURN VARCHAR IS
+BEGIN
+    RETURN '$Revision: 1.26 $';
+END WHAT_VERSION;
+
+FUNCTION GET_TRADING_DAY_DATE
+    (
+    p_DATE IN DATE
+    ) RETURN DATE IS
+v_DATE DATE;
+BEGIN
+    --if not the first six hours of the day, use day of p_DATE
+    IF p_DATE > TRUNC(p_DATE) + 6/24 THEN
+        v_DATE := TRUNC(p_DATE);
+    ELSE
+    --if the first six hours of the day, use previous trading day
+        v_DATE := TRUNC(p_DATE) - 1;
+    END IF;
+
+    RETURN v_DATE;
+
+END GET_TRADING_DAY_DATE;
+--------------------------------------------------------------------------------------------
+FUNCTION GET_TLAF
+    (
+    p_DATE IN DATE,
+    p_SERVICE_POINT IN VARCHAR2,
+    p_BILLING_ENTITY IN VARCHAR2
+    ) RETURN NUMBER IS
+v_TLAF NUMBER;
+v_PSE_ID PSE.PSE_ID%TYPE;
+BEGIN
+
+    SELECT PARTICIPANT_PSE_ID INTO v_PSE_ID
+    FROM SEM_SETTLEMENT_ENTITY
+    WHERE SETTLEMENT_PSE_ID = p_BILLING_ENTITY;
+
+    SELECT LOSS_FACTOR
+    INTO v_TLAF
+    FROM SEM_LOSS_FACTOR S,
+		SERVICE_POINT SP
+    WHERE SP.SERVICE_POINT_NAME = p_SERVICE_POINT
+		AND S.POD_ID = SP.SERVICE_POINT_ID
+	    AND S.SCHEDULE_DATE = p_DATE
+	    AND (S.PSE_ID = v_PSE_ID OR (p_SERVICE_POINT IN (MM_SEM_UTIL.g_INTERCONNECT_I_NIMOYLE, MM_SEM_UTIL.g_INTERCONNECT_I_ROIEWIC)));
+
+	IF v_TLAF = 0 THEN
+		v_TLAF := 1;
+	END IF; 
+		
+    RETURN NVL(v_TLAF, 1);
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        v_TLAF := 1;
+        RETURN v_TLAF;
+END GET_TLAF;
+----------------------------------------------------------------------------------------------------------------
+FUNCTION GET_CURRENCY
+    (
+    p_PSE_ID IN NUMBER,
+	p_STATEMENT_DATE IN DATE,
+	p_IS_PARTICIPANT_PSE IN NUMBER DEFAULT 0
+    ) RETURN NUMBER IS
+v_CURRENCY VARCHAR(8);
+v_PSE_ID PSE.PSE_ID%TYPE;
+BEGIN
+
+	IF p_IS_PARTICIPANT_PSE = 0 THEN
+		SELECT PARTICIPANT_PSE_ID INTO v_PSE_ID
+		FROM SEM_SETTLEMENT_ENTITY
+		WHERE SETTLEMENT_PSE_ID = p_PSE_ID;
+	ELSE
+		v_PSE_ID := p_PSE_ID;
+	END IF;
+
+	v_CURRENCY := NVL(RO.GET_ENTITY_ATTRIBUTE('Currency', EC.ED_PSE, v_PSE_ID, p_STATEMENT_DATE), 'EUR');
+
+	RETURN CASE WHEN UPPER(v_CURRENCY) = 'EUR' THEN 0 ELSE 1 END;
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 0; --Euro
+END GET_CURRENCY;
+------------------------------------------------------------------------------------------------------------------
+FUNCTION GET_REGISTERED_CAPACITY
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_TXN_TYPE IN VARCHAR2
+    ) RETURN NUMBER IS
+
+v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_REG_CAP IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+--registration trait; no need for logic @settlement day vs trading day
+v_REG_CAP_TRAIT NUMBER(9) := MM_SEM_UTIL.g_TG_GEN_REG_FIRM_CAPACITY;
+v_GATE_WINDOW IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+BEGIN
+    v_GATE_WINDOW := MM_SEM_UTIL.g_EXTID_MKT_SCHED_EA_ABR; -- The gate is alway EA for this charge
+    v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID( p_TRANSACTION_TYPE => p_TXN_TYPE,
+												p_RESOURCE_NAME => p_SERV_POINT,
+												p_CREATE_IF_NOT_FOUND => FALSE,
+												p_AGREEMENT_TYPE => v_GATE_WINDOW );
+
+    SELECT TRAIT_VAL INTO v_REG_CAP
+    FROM IT_TRAIT_SCHEDULE
+    WHERE TRANSACTION_ID = v_TXN_ID
+    AND SCHEDULE_STATE = GA.INTERNAL_STATE
+    AND (p_DATE - 1/86400) BETWEEN SCHEDULE_DATE AND NVL(SCHEDULE_END_DATE, g_HIGH_DATE)
+    AND TRAIT_GROUP_ID = v_REG_CAP_TRAIT;
+
+    RETURN NVL(TO_NUMBER(v_REG_CAP),0);
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 0;
+END GET_REGISTERED_CAPACITY;
+----------------------------------------------------------------------------------------------------------
+FUNCTION GET_FIXED_MO_CHARGE
+    (
+    p_DATE IN DATE,
+    p_BILL_ENTITY IN NUMBER,
+    p_COMPONENT_ID IN NUMBER,
+    p_SERVICE_POINT IN VARCHAR2,
+    p_SCHEDULE_TYPE IN NUMBER,
+    p_INTERCONNECT IN NUMBER
+    ) RETURN NUMBER IS
+v_CHARGE_ID BILLING_STATEMENT.CHARGE_ID%TYPE;
+v_CHARGE_AMOUNT SEM_DETAIL_CHARGE.CHARGE_AMOUNT%TYPE;
+BEGIN
+    SELECT CHARGE_ID
+    INTO v_CHARGE_ID
+    FROM BILLING_STATEMENT
+    WHERE COMPONENT_ID = p_COMPONENT_ID
+    AND ENTITY_ID = p_BILL_ENTITY
+    AND STATEMENT_DATE = TRUNC(p_DATE)
+    AND STATEMENT_TYPE = p_SCHEDULE_TYPE
+    AND STATEMENT_STATE = GA.EXTERNAL_STATE;
+
+    IF p_INTERCONNECT = 1 THEN
+    --the resource name is not included in interconnector statement so can't include it
+    --in the query. If there can be more than one interconnector this needs to be modified
+        SELECT SUM(CHARGE_AMOUNT)
+        INTO v_CHARGE_AMOUNT
+        FROM SEM_DETAIL_CHARGE
+        WHERE CHARGE_ID = v_CHARGE_ID;
+
+    ELSE
+        SELECT SUM(CHARGE_AMOUNT)
+        INTO v_CHARGE_AMOUNT
+        FROM SEM_DETAIL_CHARGE
+        WHERE RESOURCE_NAME = p_SERVICE_POINT
+        AND CHARGE_ID = v_CHARGE_ID;
+
+    END IF;
+
+    RETURN NVL(v_CHARGE_AMOUNT,0);
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 0;
+END GET_FIXED_MO_CHARGE;
+------------------------------------------------------------------------------------------------------------------
+FUNCTION GET_IS_SUPPLIER_UNIT
+    (
+    p_DATE IN DATE,
+    p_SERVICE_POINT IN VARCHAR2
+    ) RETURN NUMBER IS
+v_IS_SUPPLIER NUMBER := 0;
+v_RO_RESOURCE_TYPE TEMPORAL_ENTITY_ATTRIBUTE.ATTRIBUTE_VAL%TYPE;
+v_SERV_PT_ID SERVICE_POINT.SERVICE_POINT_ID%TYPE;
+BEGIN
+    v_SERV_PT_ID := MM_SEM_UTIL.GET_SERVICE_POINT_ID(p_SERVICE_POINT, FALSE);
+
+    v_RO_RESOURCE_TYPE := RO.GET_ENTITY_ATTRIBUTE('Resource Type', EC.ED_SERVICE_POINT, v_SERV_PT_ID, (p_DATE - 1/86400));
+    IF UPPER(v_RO_RESOURCE_TYPE) = 'SU' THEN
+        v_IS_SUPPLIER := 1;
+    END IF;
+
+    RETURN v_IS_SUPPLIER;
+
+END GET_IS_SUPPLIER_UNIT;
+------------------------------------------------------------------------------------------------------------------
+FUNCTION GET_CAP_PAY_PRICE_FACT
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_EA IN NUMBER,
+    p_MSQ IN NUMBER,
+    p_SMP IN NUMBER,
+    p_VOLL IN NUMBER,
+    p_CPPF IN NUMBER,
+    p_TXN_TYPE IN VARCHAR2
+    ) RETURN NUMBER IS
+v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_OFFER_FORECAST_TRAIT NUMBER(9) := MM_SEM_UTIL.g_TG_OFFER_FORECAST;
+v_MIN_OUTPUT_TRAIT NUMBER(4) := MM_SEM_UTIL.g_TI_GEN_FORECAST_MIN_OUTPUT;
+v_UCOP NUMBER := 0;
+v_UCOQ NUMBER := 0;
+v_UCOQ_TOTAL NUMBER := 0;
+v_QU_PRIOR NUMBER;
+v_ADD_1 NUMBER := 0;
+v_MIN_OUTPUT NUMBER;
+v_CPGPF NUMBER := 0;
+v_DATE DATE;
+v_GATE_WINDOW IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+--generator bid offer data is daily by trading day
+CURSOR c_PQ(v_TXN_ID IN NUMBER, v_DATE IN DATE) IS
+    SELECT QUANTITY, PRICE FROM BID_OFFER_SET
+    WHERE SCHEDULE_STATE = GA.INTERNAL_STATE
+    AND SCHEDULE_DATE = v_DATE
+    AND TRANSACTION_ID = v_TXN_ID
+    ORDER BY SET_NUMBER;
+BEGIN
+    v_DATE := GET_TRADING_DAY_DATE(p_DATE - 1/86400) + (1/(24*60*60));
+    v_GATE_WINDOW := GET_GATE_WINDOW(TO_CUT(p_DATE, LOCAL_TIME_ZONE()));
+
+	-- [BZ 30717] If the Transaction does not exist, CPGPF should equal CPPF
+	-- The GET_TRANSACTION_ID was changed to use just the lookup version
+	-- since in the other version, if the Transaction cannot be found,
+	-- an error will be logged as well as raised.  We don't want that.
+	v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID(p_TRANSACTION_TYPE => p_TXN_TYPE,
+                                               p_RESOURCE_NAME => p_SERV_POINT,
+                                               p_COMMODITY_NAME => MM_SEM_CREDIT_SHADOW.c_COMMODITY_ALIAS_ENERGY,
+                                               p_AGREEMENT_TYPE => v_GATE_WINDOW);
+	IF v_TXN_ID IS NULL THEN
+	    RETURN p_CPPF;
+    END IF;
+
+    BEGIN
+        --min output has a 30 minute interval, use p_DATE
+        SELECT I.TRAIT_VAL
+        INTO v_MIN_OUTPUT
+        FROM IT_TRAIT_SCHEDULE I
+        WHERE I.TRANSACTION_ID = v_TXN_ID
+        AND I.SCHEDULE_STATE = GA.INTERNAL_STATE
+        AND I.SCHEDULE_DATE = p_DATE
+        AND I.TRAIT_GROUP_ID = v_OFFER_FORECAST_TRAIT
+        AND I.TRAIT_INDEX = v_MIN_OUTPUT_TRAIT
+        AND I.SET_NUMBER = 1;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            v_MIN_OUTPUT := 0;
+    END;
+
+    v_QU_PRIOR := NVL(v_MIN_OUTPUT,0);
+    FOR v_PQ IN c_PQ(v_TXN_ID, v_DATE) LOOP
+        v_UCOP := GREATEST(p_SMP, v_PQ.PRICE);
+        v_UCOQ := LEAST(p_EA, GREATEST(v_PQ.QUANTITY, p_MSQ)) -
+                    LEAST(p_EA, GREATEST(v_QU_PRIOR, p_MSQ));
+        v_QU_PRIOR := v_PQ.QUANTITY;
+        IF p_VOLL <> 0 THEN
+            v_ADD_1 := v_ADD_1 + (v_UCOQ * GREATEST((p_VOLL - v_UCOP) / p_VOLL, 0));
+        END IF;
+        v_UCOQ_TOTAL := v_UCOQ_TOTAL + v_UCOQ;
+    END LOOP;
+
+    IF p_MSQ + v_UCOQ_TOTAL <> 0 THEN
+        v_CPGPF := ((p_MSQ * p_CPPF) + v_ADD_1) / (p_MSQ + v_UCOQ_TOTAL);
+    END IF;
+
+    RETURN NVL(v_CPGPF,0);
+END GET_CAP_PAY_PRICE_FACT;
+-----------------------------------------------------------------------------------------------------------------
+FUNCTION GET_CAP_PAY_PRICE_FACT_IU
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_EA IN NUMBER,
+    p_MSQ IN NUMBER,
+    p_SMP IN NUMBER,
+    p_VOLL IN NUMBER,
+    p_CPPF IN NUMBER,
+    p_TXN_TYPE IN VARCHAR2
+    ) RETURN NUMBER IS
+v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_OFFER_FORECAST_TRAIT NUMBER(9) := MM_SEM_UTIL.g_TG_OFFER_FORECAST;
+v_MIN_OUTPUT_TRAIT NUMBER(4) := MM_SEM_UTIL.g_TI_GEN_FORECAST_MIN_OUTPUT;
+v_UCOP NUMBER := 0;
+v_UCOQ NUMBER := 0;
+v_UCOQ_TOTAL NUMBER := 0;
+v_QU_PRIOR NUMBER;
+v_ADD_1 NUMBER := 0;
+v_MIN_OUTPUT NUMBER;
+v_CPGPF NUMBER := 0;
+--interconnector bid offer data is half hourly; use parameter p_DATE, also half-hourly
+CURSOR c_PQ(v_TXN_ID IN NUMBER) IS
+    SELECT QUANTITY, PRICE FROM BID_OFFER_SET
+    WHERE SCHEDULE_STATE = GA.INTERNAL_STATE
+    AND SCHEDULE_DATE = p_DATE
+    AND TRANSACTION_ID = v_TXN_ID
+    ORDER BY SET_NUMBER;
+BEGIN
+    v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID( p_TRANSACTION_TYPE => p_TXN_TYPE,
+												p_RESOURCE_NAME => p_SERV_POINT,
+												p_CREATE_IF_NOT_FOUND => FALSE);
+    BEGIN
+        SELECT I.TRAIT_VAL
+        INTO v_MIN_OUTPUT
+        FROM IT_TRAIT_SCHEDULE I
+        WHERE I.TRANSACTION_ID = v_TXN_ID
+        AND I.SCHEDULE_STATE = GA.INTERNAL_STATE
+        AND I.SCHEDULE_DATE = p_DATE
+        AND I.TRAIT_GROUP_ID = v_OFFER_FORECAST_TRAIT
+        AND I.TRAIT_INDEX = v_MIN_OUTPUT_TRAIT
+        AND I.SET_NUMBER = 1;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            v_MIN_OUTPUT := 0;
+    END;
+
+	-- 16-jan-2009, jbc: found when looking at BZ 18053. For Moyle, EA=DQ (T&SC 5.87);
+	-- and from T&SC 5.78, MINOUT=0 when DQ>=0.
+	v_MIN_OUTPUT := CASE WHEN p_EA >= 0 THEN 0 ELSE p_EA END;
+    v_QU_PRIOR := NVL(v_MIN_OUTPUT,0);
+    FOR v_PQ IN c_PQ(v_TXN_ID) LOOP
+        v_UCOP := GREATEST(p_SMP, v_PQ.PRICE);
+        v_UCOQ := LEAST(p_EA, GREATEST(v_PQ.QUANTITY, p_MSQ)) -
+                    LEAST(p_EA, GREATEST(v_QU_PRIOR, p_MSQ));
+        v_QU_PRIOR := v_PQ.QUANTITY;
+        IF p_VOLL <> 0 THEN
+            v_ADD_1 := v_ADD_1 + (v_UCOQ * GREATEST((p_VOLL - v_UCOP) / p_VOLL, 0));
+        END IF;
+        v_UCOQ_TOTAL := v_UCOQ_TOTAL + v_UCOQ;
+    END LOOP;
+
+    IF p_MSQ + v_UCOQ_TOTAL <> 0 THEN
+        v_CPGPF := ((p_MSQ * p_CPPF) + v_ADD_1) / (p_MSQ + v_UCOQ_TOTAL);
+    END IF;
+
+    RETURN NVL(v_CPGPF,0);
+END GET_CAP_PAY_PRICE_FACT_IU;
+-----------------------------------------------------------------------------------------------------------------
+FUNCTION GET_BEST_AVAIL_TXN_ID
+(
+	p_REF_GATE_WINDOW     IN  EXTERNAL_SYSTEM_IDENTIFIER.EXTERNAL_IDENTIFIER%TYPE,
+	p_TXN_TYPE            IN  VARCHAR2,
+	p_SERV_POINT          IN  VARCHAR2,
+	p_DATE                IN  DATE
+) RETURN NUMBER IS
+	v_WORK_ID   RTO_WORK.WORK_ID%TYPE;
+	v_TXN_ID    INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+	v_TRAIT_VAL NUMBER;
+
+	v_RTO_WORK_REC RTO_WORK_TABLE := RTO_WORK_TABLE();
+
+BEGIN
+	-- Get the work_id for populating the Work Table
+	UT.GET_RTO_WORK_ID(v_WORK_ID);
+
+	-- Loop for the available GATE_WINDOWs based on the GATE_WINDOW returned by the GET_GATE_WINDOW api
+	FOR c_GATE_WINDOW IN (SELECT ST.STATEMENT_TYPE_ORDER, IDENT.EXTERNAL_IDENTIFIER
+						  FROM STATEMENT_TYPE ST,  EXTERNAL_SYSTEM_IDENTIFIER IDENT
+						  WHERE IDENT.IDENTIFIER_TYPE = MM_SEM_UTIL.g_STATEMENT_TYPE_GATE_WINDOW
+						  AND ST.STATEMENT_TYPE_ID = IDENT.ENTITY_ID
+						  AND ST.STATEMENT_TYPE_ORDER <= (SELECT REF_GW.STATEMENT_TYPE_ORDER
+														  FROM EXTERNAL_SYSTEM_IDENTIFIER REF_GW_IDENT,
+															   STATEMENT_TYPE REF_GW
+														  WHERE REF_GW_IDENT.IDENTIFIER_TYPE = MM_SEM_UTIL.g_STATEMENT_TYPE_GATE_WINDOW
+														  AND	REF_GW_IDENT.EXTERNAL_IDENTIFIER = p_REF_GATE_WINDOW
+														  AND   REF_GW.STATEMENT_TYPE_ID = REF_GW_IDENT.ENTITY_ID)
+						  ORDER BY ST.STATEMENT_TYPE_ORDER DESC) LOOP -- RSA -- Remember, we want the "best available" and so ordering by DESC
+
+		-- Get the TRANSACTION_ID based on the Gate_Window
+		v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID( p_TRANSACTION_TYPE => p_TXN_TYPE,
+													p_RESOURCE_NAME => p_SERV_POINT,
+													p_CREATE_IF_NOT_FOUND => FALSE,
+													p_AGREEMENT_TYPE => c_GATE_WINDOW.EXTERNAL_IDENTIFIER);
+
+
+		-- Populate the Transaction_Id and Statement_type_order in the work table
+		v_RTO_WORK_REC.EXTEND;
+		v_RTO_WORK_REC(v_RTO_WORK_REC.COUNT) := RTO_WORK_TYPE(v_WORK_ID, c_GATE_WINDOW.STATEMENT_TYPE_ORDER, v_TXN_ID, NULL, NULL);
+	END LOOP;
+
+	v_TXN_ID := NULL;
+
+	-- This analytical query will return the "best available" value. Just get the TRANSACTION_ID associated with that so that it can be returned
+	-- This is for scalar trait value
+	SELECT FIRST_VALUE(S.TRAIT_VAL IGNORE NULLS) OVER (PARTITION BY SCHEDULE_DATE ORDER BY TXN_IDS.WORK_SEQ DESC) TRAIT_VAL,
+		   FIRST_VALUE(S.TRANSACTION_ID IGNORE NULLS) OVER (PARTITION BY SCHEDULE_DATE ORDER BY TXN_IDS.WORK_SEQ DESC) TRANSACTION_ID
+	INTO v_TRAIT_VAL, v_TXN_ID
+	FROM TABLE(CAST(v_RTO_WORK_REC AS RTO_WORK_TABLE)) TXN_IDS,
+		 IT_TRAIT_SCHEDULE S
+	WHERE TXN_IDS.WORK_ID = v_WORK_ID
+		AND S.TRANSACTION_ID = TXN_IDS.WORK_XID
+		AND SCHEDULE_STATE = GA.INTERNAL_STATE
+		AND SCHEDULE_DATE = p_DATE
+		AND ROWNUM = 1;  --- RSA : LIMIT TO FIRST
+
+	-- Return the TRANSACTION_ID
+	RETURN v_TXN_ID;
+END GET_BEST_AVAIL_TXN_ID;
+-------------------------------------------------------------------------------------------------------------
+FUNCTION GET_DISPATCH_OFFER_PRICE
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_DQ IN NUMBER,
+    p_TXN_TYPE IN VARCHAR2
+    ) RETURN NUMBER IS
+v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_DOP NUMBER;
+v_DATE DATE;
+v_GATE_WINDOW IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+
+--generator bid offer data is daily by trading day
+CURSOR c_PQ(v_TXN_ID IN NUMBER, v_DATE IN DATE) IS
+    SELECT QUANTITY, PRICE FROM BID_OFFER_SET
+    WHERE SCHEDULE_STATE = GA.INTERNAL_STATE
+    AND SCHEDULE_DATE = v_DATE
+    AND TRANSACTION_ID = v_TXN_ID
+    ORDER BY SET_NUMBER;
+BEGIN
+    v_DATE := GET_TRADING_DAY_DATE(p_DATE - 1/86400) + (1/(24*60*60));
+    v_GATE_WINDOW := GET_GATE_WINDOW(TO_CUT(p_DATE, LOCAL_TIME_ZONE()));
+/*    v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID( p_TRANSACTION_TYPE => p_TXN_TYPE,
+												p_RESOURCE_NAME => p_SERV_POINT,
+												p_CREATE_IF_NOT_FOUND => FALSE,
+												p_AGREEMENT_TYPE => v_GATE_WINDOW );*/
+
+	v_TXN_ID := GET_BEST_AVAIL_TXN_ID(v_GATE_WINDOW, p_TXN_TYPE, p_SERV_POINT, v_DATE);
+
+    --Dispatch Offer Price (DOPuh) is defined as: If DQuh <= Quh1 then DOPuh = Puh1
+    --else DOPuh = Puhi where i satisfies the equation Quh(i-1) < DQuh <= Quhi
+    --In production, DQ has been > the highest Quh; in that case it is equal to highest Puh
+    --This function is also used to return Market Offer Price (MOP) where MSQ is passed in
+    --and the same logic applies
+
+    FOR v_PQ IN c_PQ(v_TXN_ID, v_DATE) LOOP
+        v_DOP := v_PQ.PRICE;
+        IF p_DQ <= v_PQ.QUANTITY THEN
+            EXIT;
+        END IF;
+    END LOOP;
+
+    RETURN NVL(v_DOP,0);
+
+END GET_DISPATCH_OFFER_PRICE;
+-----------------------------------------------------------------------------------------------
+FUNCTION GET_DISPATCH_OFFER_PRICE_IU
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_DQ IN NUMBER,
+    p_TXN_TYPE IN VARCHAR2,
+	p_AGREEMENT_TYPE IN VARCHAR2 DEFAULT NULL
+    ) RETURN NUMBER IS
+v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_DOP NUMBER;
+--interconnector bid offer data is half hourly; use parameter p_DATE, also half-hourly
+CURSOR c_PQ(v_TXN_ID IN NUMBER) IS
+    SELECT QUANTITY, PRICE FROM BID_OFFER_SET
+    WHERE SCHEDULE_STATE = GA.INTERNAL_STATE
+    AND SCHEDULE_DATE = p_DATE
+    AND TRANSACTION_ID = v_TXN_ID
+    ORDER BY SET_NUMBER;
+BEGIN
+	-- VERY IMPORTANT change:
+	v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID(
+												p_TRANSACTION_TYPE => p_TXN_TYPE,
+												p_RESOURCE_NAME => p_SERV_POINT,
+												p_CREATE_IF_NOT_FOUND => FALSE,
+												p_AGREEMENT_TYPE => p_AGREEMENT_TYPE
+											   );
+
+    --Dispatch Offer Price (DOPuh) is defined as: If DQuh <= Quh1 then DOPuh = Puh1
+    --else DOPuh = Puhi where i satisfies the equation Quh(i-1) < DQuh <= Quhi
+    --In production, DQ has been > the highest Quh; in that case it is equal to highest Puh
+    --This function is also used to return Market Offer Price (MOP) where MSQ is passed in
+    --and the same logic applies
+    FOR v_PQ IN c_PQ(v_TXN_ID) LOOP
+        v_DOP := v_PQ.PRICE;
+        IF p_DQ <= v_PQ.QUANTITY THEN
+            EXIT;
+        END IF;
+    END LOOP;
+
+    RETURN NVL(v_DOP,0);
+
+END GET_DISPATCH_OFFER_PRICE_IU;
+-----------------------------------------------------------------------------------------------
+FUNCTION GET_NO_LOAD_COST
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_TXN_TYPE IN VARCHAR2
+    ) RETURN NUMBER IS
+v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_NO_LOAD_COST IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+v_NLC_TRAIT NUMBER(9) := MM_SEM_UTIL.g_TG_OFFER_NO_LOAD_COST;
+v_DATE DATE;
+v_GATE_WINDOW IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+BEGIN
+    v_DATE := GET_TRADING_DAY_DATE(p_DATE - 1/86400) + (1/(24*60*60));
+    v_GATE_WINDOW := GET_GATE_WINDOW(TO_CUT(p_DATE, LOCAL_TIME_ZONE()));
+/*    v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID( p_TRANSACTION_TYPE => p_TXN_TYPE,
+												p_RESOURCE_NAME => p_SERV_POINT,
+												p_CREATE_IF_NOT_FOUND => FALSE,
+												p_AGREEMENT_TYPE => v_GATE_WINDOW );*/
+
+	v_TXN_ID := GET_BEST_AVAIL_TXN_ID(v_GATE_WINDOW, p_TXN_TYPE, p_SERV_POINT, v_DATE);
+
+    SELECT TRAIT_VAL INTO v_NO_LOAD_COST
+    FROM IT_TRAIT_SCHEDULE
+    WHERE TRANSACTION_ID = v_TXN_ID
+    AND SCHEDULE_STATE = GA.INTERNAL_STATE
+    AND SCHEDULE_DATE = v_DATE
+    AND TRAIT_GROUP_ID = v_NLC_TRAIT;
+
+    RETURN NVL(TO_NUMBER(v_NO_LOAD_COST),0);
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 0;
+END GET_NO_LOAD_COST;
+-----------------------------------------------------------------------------------------------
+FUNCTION GET_MAX_WARM_TIME
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_TXN_TYPE IN VARCHAR2
+    ) RETURN NUMBER IS
+v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_MAX_WARM_TIME IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+--registration trait; no need for logic @settlement day vs trading day
+v_SYNC_TIME_TRAIT NUMBER(9) := MM_SEM_UTIL.g_TG_GEN_SYNC_TIME;
+v_INDEX NUMBER(9) := MM_SEM_UTIL.g_TI_GEN_SYNC_TIME_WARM;
+BEGIN
+    v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID( p_TRANSACTION_TYPE => p_TXN_TYPE,
+												p_RESOURCE_NAME => p_SERV_POINT,
+												p_CREATE_IF_NOT_FOUND => FALSE
+											   );
+
+    SELECT TRAIT_VAL INTO v_MAX_WARM_TIME
+    FROM IT_TRAIT_SCHEDULE T
+    WHERE TRANSACTION_ID = v_TXN_ID
+    AND SCHEDULE_STATE = GA.INTERNAL_STATE
+    AND (p_DATE - 1/86400) BETWEEN SCHEDULE_DATE AND NVL(SCHEDULE_END_DATE, g_HIGH_DATE)
+    AND TRAIT_GROUP_ID = v_SYNC_TIME_TRAIT
+    AND T.TRAIT_INDEX = v_INDEX;
+
+    RETURN NVL(TO_NUMBER(v_MAX_WARM_TIME),0);
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 0;
+END GET_MAX_WARM_TIME;
+-----------------------------------------------------------------------------------------------------
+FUNCTION GET_MAX_HOT_TIME
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_TXN_TYPE IN VARCHAR2
+    ) RETURN NUMBER IS
+v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_MAX_HOT_TIME IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+--registration trait; no need for logic @settlement day vs trading day
+v_SYNC_TIME_TRAIT NUMBER(9) := MM_SEM_UTIL.g_TG_GEN_SYNC_TIME;
+v_INDEX NUMBER(9) := MM_SEM_UTIL.g_TI_GEN_SYNC_TIME_HOT;
+BEGIN
+    v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID(
+												p_TRANSACTION_TYPE => p_TXN_TYPE,
+												p_RESOURCE_NAME => p_SERV_POINT,
+												p_CREATE_IF_NOT_FOUND => FALSE
+											   );
+
+    SELECT TRAIT_VAL INTO v_MAX_HOT_TIME
+    FROM IT_TRAIT_SCHEDULE T
+    WHERE TRANSACTION_ID = v_TXN_ID
+    AND SCHEDULE_STATE = GA.INTERNAL_STATE
+    AND (p_DATE - 1/86400) BETWEEN SCHEDULE_DATE AND NVL(SCHEDULE_END_DATE, g_HIGH_DATE)
+    AND TRAIT_GROUP_ID = v_SYNC_TIME_TRAIT
+    AND T.TRAIT_INDEX = v_INDEX;
+
+    RETURN NVL(TO_NUMBER(v_MAX_HOT_TIME),0);
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 0;
+END GET_MAX_HOT_TIME;
+----------------------------------------------------------------------------------------------------------
+FUNCTION GET_START_UP_COST
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_TXN_TYPE IN VARCHAR2,
+    p_WARMTH_STATE IN BINARY_INTEGER
+    ) RETURN NUMBER IS
+v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_START_UP_COST IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+v_START_UP_TRAIT NUMBER(9) := MM_SEM_UTIL.g_TG_GEN_STARTUP_COSTS;
+v_INDEX NUMBER(9) := MM_SEM_UTIL.g_TI_GEN_SYNC_TIME_HOT;
+v_DATE DATE;
+v_GATE_WINDOW IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+BEGIN
+    v_DATE := GET_TRADING_DAY_DATE(p_DATE - 1/86400) + (1/(24*60*60));
+    v_GATE_WINDOW := GET_GATE_WINDOW(TO_CUT(p_DATE, LOCAL_TIME_ZONE()));
+/*    v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID(
+												p_TRANSACTION_TYPE => p_TXN_TYPE,
+												p_RESOURCE_NAME    =>p_SERV_POINT,
+												p_CREATE_IF_NOT_FOUND => FALSE,
+												p_AGREEMENT_TYPE => v_GATE_WINDOW );*/
+	v_TXN_ID := GET_BEST_AVAIL_TXN_ID(v_GATE_WINDOW, p_TXN_TYPE, p_SERV_POINT, v_DATE);
+
+    CASE p_WARMTH_STATE
+        WHEN 1 THEN v_INDEX := MM_SEM_UTIL.g_TI_GEN_COLD_START_COST;
+        WHEN 2 THEN v_INDEX := MM_SEM_UTIL.g_TI_GEN_WARM_START_COST;
+        WHEN 3 THEN v_INDEX := MM_SEM_UTIL.g_TI_GEN_HOT_START_COST;
+    ELSE
+        NULL;
+    END CASE;
+
+    SELECT TRAIT_VAL INTO v_START_UP_COST
+    FROM IT_TRAIT_SCHEDULE T
+    WHERE TRANSACTION_ID = v_TXN_ID
+    AND SCHEDULE_STATE = GA.INTERNAL_STATE
+    AND SCHEDULE_DATE = v_DATE
+    AND TRAIT_GROUP_ID = v_START_UP_TRAIT
+    AND T.TRAIT_INDEX = v_INDEX;
+
+    RETURN NVL(TO_NUMBER(v_START_UP_COST),0);
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 0;
+END GET_START_UP_COST;
+----------------------------------------------------------------------------------------------------------
+FUNCTION GET_HOURS_DOWN_FROM_DISP_INSTR
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_TXN_TYPE IN VARCHAR2,
+    p_MAX_TIME_WARM IN NUMBER,
+    p_SCHED_TYPE IN NUMBER,
+    p_COMMODITY IN VARCHAR2,
+	p_BILLING_ENTITY IN NUMBER,
+	p_STATEMENT_DATE IN DATE
+    ) RETURN NUMBER IS
+v_PARTICIPANT_PSE_ID NUMBER(9);
+v_POD_ID NUMBER(9);
+v_INTERVAL_END_DATE DATE;
+v_INTERVAL_BEGIN_DATE DATE;
+v_INTERVAL NUMBER;
+v_HOURS_DOWN NUMBER := 0;
+v_NON_ZERO_COUNT NUMBER;
+v_DATE_STR VARCHAR2(512);
+v_PREVIOUS_INTERPRETATION VARCHAR2(64);
+v_POTENTIAL_STARTUP_TIME DATE;
+v_PRIOR_RUN_TIME DATE;
+v_SHUT_DOWN_TIME DATE;
+
+FUNCTION GET_NON_ZERO_COUNT
+    (
+    p_INTERVAL_BEGIN_DATE IN DATE,
+	p_INTERVAL_END_DATE IN DATE,
+	p_PSE_ID IN NUMBER,
+	p_SP_ID IN NUMBER
+	) RETURN NUMBER AS
+v_COUNT NUMBER;
+BEGIN
+	SELECT COUNT(1)
+	INTO v_COUNT
+	FROM SEM_DISPATCH_EFFECTIVE_INSTR I
+	WHERE I.INSTRUCTION_TIME_STAMP BETWEEN p_INTERVAL_BEGIN_DATE AND p_INTERVAL_END_DATE
+	  AND I.PSE_ID = p_PSE_ID
+	  AND I.POD_ID = p_SP_ID
+	  AND I.INSTRUCTION_INTERPRETATION = c_INSTR_INTER_NON_ZERO;
+	RETURN v_COUNT;
+END;
+
+BEGIN
+	v_INTERVAL := 1/48;
+
+	v_INTERVAL_END_DATE := p_DATE;
+	v_INTERVAL_BEGIN_DATE := v_INTERVAL_END_DATE - v_INTERVAL;
+	LOGS.LOG_DEBUG_MORE_DETAIL('GET_HOURS_DOWN for: ' || TEXT_UTIL.TO_CHAR_TIME(v_INTERVAL_BEGIN_DATE) || ' -> ' || TEXT_UTIL.TO_CHAR_TIME(v_INTERVAL_END_DATE));
+
+	-- Get the Participant PSE_ID
+	SELECT MAX(PARTICIPANT_PSE_ID)
+	INTO v_PARTICIPANT_PSE_ID
+    FROM SEM_SETTLEMENT_ENTITY
+    WHERE SETTLEMENT_PSE_ID = p_BILLING_ENTITY;
+
+	ASSERT(v_PARTICIPANT_PSE_ID IS NOT NULL, 'Participant PSE_ID = NULL', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(v_PARTICIPANT_PSE_ID > 0, 'Participant PSE_ID = ' || v_PARTICIPANT_PSE_ID, MSGCODES.c_ERR_ARGUMENT);
+
+	LOGS.LOG_DEBUG_MORE_DETAIL('Participant PSE for Billing Entity  ' || p_BILLING_ENTITY
+		|| ': NAME=' || EI.GET_ENTITY_NAME(EC.ED_PSE,v_PARTICIPANT_PSE_ID) || ',ID=' || v_PARTICIPANT_PSE_ID);
+
+	-- Get the unit Service Point
+	v_POD_ID := EI.GET_ID_FROM_NAME(p_SERV_POINT, EC.ED_SERVICE_POINT);
+
+	ASSERT(v_POD_ID IS NOT NULL, 'POD_ID = NULL', MSGCODES.c_ERR_ARGUMENT);
+	ASSERT(v_POD_ID > 0, 'POD_ID = ' || v_POD_ID, MSGCODES.c_ERR_ARGUMENT);
+
+	LOGS.LOG_DEBUG_MORE_DETAIL('POD_ID for Service Point ' || p_SERV_POINT || ': ' || v_POD_ID);
+
+	-- Logging
+	IF LOGS.IS_DEBUG_MORE_DETAIL_ENABLED THEN
+		LOGS.LOG_DEBUG_MORE_DETAIL('=====================================================');
+		LOGS.LOG_DEBUG_MORE_DETAIL('  INSTRUCTION_TIME_STAMP:INSTRUCTION_INTERPRETATION  ');
+		LOGS.LOG_DEBUG_MORE_DETAIL('=====================================================');
+		FOR v_REC IN (SELECT I.INSTRUCTION_TIME_STAMP, I.INSTRUCTION_INTERPRETATION
+					  FROM SEM_DISPATCH_EFFECTIVE_INSTR I
+					  WHERE I.INSTRUCTION_TIME_STAMP BETWEEN v_INTERVAL_BEGIN_DATE AND v_INTERVAL_END_DATE
+					    AND I.PSE_ID = v_PARTICIPANT_PSE_ID
+					    AND I.POD_ID = v_POD_ID
+					  ORDER BY I.INSTRUCTION_TIME_STAMP) LOOP
+			LOGS.LOG_DEBUG_MORE_DETAIL(TEXT_UTIL.TO_CHAR_TIME(v_REC.INSTRUCTION_TIME_STAMP) || ':' || v_REC.INSTRUCTION_INTERPRETATION);
+		END LOOP;
+		LOGS.LOG_DEBUG_MORE_DETAIL('=====================================================');
+	END IF;
+
+	-- Lookup the count of Non-zero instructions for the selected interval
+	v_NON_ZERO_COUNT := GET_NON_ZERO_COUNT(v_INTERVAL_BEGIN_DATE,v_INTERVAL_END_DATE,v_PARTICIPANT_PSE_ID,v_POD_ID);
+
+	IF v_NON_ZERO_COUNT > 0 THEN
+		LOGS.LOG_DEBUG_MORE_DETAIL('Found a NON-ZERO instruction during the interval (Potential Startup)');
+		-- Find the Potential Startup
+		SELECT A.INSTRUCTION_TIME_STAMP
+		INTO v_POTENTIAL_STARTUP_TIME
+		FROM (SELECT I.INSTRUCTION_TIME_STAMP
+				FROM SEM_DISPATCH_EFFECTIVE_INSTR I
+				WHERE I.INSTRUCTION_TIME_STAMP BETWEEN v_INTERVAL_BEGIN_DATE AND v_INTERVAL_END_DATE
+				  AND I.PSE_ID = v_PARTICIPANT_PSE_ID
+				  AND I.POD_ID = v_POD_ID
+				  AND I.INSTRUCTION_INTERPRETATION = c_INSTR_INTER_NON_ZERO
+				ORDER BY I.INSTRUCTION_TIME_STAMP ASC) A
+		WHERE ROWNUM = 1;
+
+		v_DATE_STR := TEXT_UTIL.TO_CHAR_TIME(v_POTENTIAL_STARTUP_TIME);
+		LOGS.LOG_DEBUG_MORE_DETAIL('Potential Startup Time = ' || v_DATE_STR);
+
+		-- Find the first previous timestamp where the interpretaion was not IGNORE
+		BEGIN
+			SELECT MAX(X.INTERPRETATION)
+			INTO v_PREVIOUS_INTERPRETATION
+			FROM (SELECT FIRST_VALUE(I.INSTRUCTION_INTERPRETATION) OVER(ORDER BY I.INSTRUCTION_TIME_STAMP DESC) AS INTERPRETATION
+				  FROM SEM_DISPATCH_EFFECTIVE_INSTR I
+				  WHERE I.PSE_ID = v_PARTICIPANT_PSE_ID
+				  		AND I.POD_ID = v_POD_ID
+						AND I.INSTRUCTION_INTERPRETATION <> c_INSTR_INTER_IGNORE
+						AND I.INSTRUCTION_TIME_STAMP < v_POTENTIAL_STARTUP_TIME) X;
+			LOGS.LOG_DEBUG_MORE_DETAIL('Previous Interpretation = ' || v_PREVIOUS_INTERPRETATION);
+		EXCEPTION
+			WHEN NO_DATA_FOUND THEN
+				v_PREVIOUS_INTERPRETATION := NULL;
+		END;
+
+		IF v_PREVIOUS_INTERPRETATION IS NULL THEN
+			LOGS.LOG_DEBUG_MORE_DETAIL('No previous non-IGNORE interpretation found. Assume that this is a cold start with  MAX_TIME_WARM = ' || p_MAX_TIME_WARM);
+			v_HOURS_DOWN := p_MAX_TIME_WARM;
+		ELSIF v_PREVIOUS_INTERPRETATION = c_INSTR_INTER_ZERO THEN
+			LOGS.LOG_DEBUG_MORE_DETAIL('Looking up Prior Run Time...');
+			BEGIN
+				-- Find the Prior Run Time, the first Non-Zero instruction prior to the Potential Start Up Time
+				SELECT MAX(X.INSTRUCTION_TIME_STAMP)
+				INTO v_PRIOR_RUN_TIME
+				FROM (SELECT FIRST_VALUE(I.INSTRUCTION_TIME_STAMP) OVER(ORDER BY I.INSTRUCTION_TIME_STAMP DESC) AS INSTRUCTION_TIME_STAMP
+					  FROM SEM_DISPATCH_EFFECTIVE_INSTR I
+					  WHERE I.PSE_ID = v_PARTICIPANT_PSE_ID
+							AND I.POD_ID = v_POD_ID
+							AND I.INSTRUCTION_INTERPRETATION = c_INSTR_INTER_NON_ZERO -- <--NON-ZERO
+							AND I.INSTRUCTION_TIME_STAMP < v_POTENTIAL_STARTUP_TIME) X;
+			EXCEPTION
+				WHEN NO_DATA_FOUND THEN
+					-- No prior run time found, Assume that this is a cold start.
+					LOGS.LOG_DEBUG_MORE_DETAIL('No prior run time found, Assume that this is a cold start with MAX_TIME_WARM = ' || p_MAX_TIME_WARM);
+					v_HOURS_DOWN := p_MAX_TIME_WARM;
+			END;
+
+			IF v_PRIOR_RUN_TIME IS NOT NULL THEN
+				v_DATE_STR := TEXT_UTIL.TO_CHAR_TIME(v_PRIOR_RUN_TIME);
+				LOGS.LOG_DEBUG_MORE_DETAIL('Prior Run Time = ' || v_DATE_STR);
+
+				-- Find the Shut Down Time, the first Zero instruction after the Prior Run Time
+				SELECT A.INSTRUCTION_TIME_STAMP
+				INTO v_SHUT_DOWN_TIME
+				FROM (SELECT I.INSTRUCTION_TIME_STAMP
+						FROM SEM_DISPATCH_EFFECTIVE_INSTR I
+						WHERE I.INSTRUCTION_TIME_STAMP BETWEEN v_PRIOR_RUN_TIME AND v_POTENTIAL_STARTUP_TIME
+						  AND I.PSE_ID = v_PARTICIPANT_PSE_ID
+						  AND I.POD_ID = v_POD_ID
+						  AND I.INSTRUCTION_INTERPRETATION = c_INSTR_INTER_ZERO -- <--ZERO
+						ORDER BY I.INSTRUCTION_TIME_STAMP ASC) A
+				WHERE ROWNUM = 1;
+
+				v_DATE_STR := TEXT_UTIL.TO_CHAR_TIME(v_SHUT_DOWN_TIME);
+				LOGS.LOG_DEBUG_MORE_DETAIL('Shut Down Time = ' || v_DATE_STR);
+
+				-- Calculate the Hours down
+				v_HOURS_DOWN := (v_POTENTIAL_STARTUP_TIME - v_SHUT_DOWN_TIME) * 24;
+
+				LOGS.LOG_DEBUG_MORE_DETAIL('Hours Down = ' || v_HOURS_DOWN);
+				LOGS.LOG_DEBUG_MORE_DETAIL('Max Time Warm  = ' || p_MAX_TIME_WARM);
+
+				-- Compare Hours down against the Max Time Warm to get the final Hours Down number
+				v_HOURS_DOWN := LEAST(NVL(v_HOURS_DOWN, 0), NVL(p_MAX_TIME_WARM, 0));
+
+				LOGS.LOG_DEBUG_MORE_DETAIL('Final Hours Down = ' || v_HOURS_DOWN);
+			ELSE
+				-- No prior run time found, Assume that this is a cold start.
+				LOGS.LOG_DEBUG_MORE_DETAIL('No prior run time found, Assume that this is a cold start with MAX_TIME_WARM = ' || p_MAX_TIME_WARM);
+				v_HOURS_DOWN := p_MAX_TIME_WARM;
+			END IF;
+		ELSE
+			-- No a start up interval
+			LOGS.LOG_DEBUG_MORE_DETAIL('Not a startup interval. Previous instruction was NON-ZERO.');
+			v_HOURS_DOWN := 0;
+		END IF;
+
+	ELSE
+		-- Not a startup interval
+		LOGS.LOG_DEBUG_MORE_DETAIL('Not a startup interval. Interval was ZERO or IGNORE.');
+		v_HOURS_DOWN := 0;
+	END IF;
+
+	RETURN NVL(v_HOURS_DOWN,0);
+END GET_HOURS_DOWN_FROM_DISP_INSTR;
+----------------------------------------------------------------------------------------------------------
+FUNCTION GET_HOURS_DOWN_FROM_SCHEDULES
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_TXN_TYPE IN VARCHAR2,
+    p_MAX_TIME_WARM IN NUMBER,
+    p_SCHED_TYPE IN NUMBER,
+    p_COMMODITY IN VARCHAR2
+    ) RETURN NUMBER IS
+    
+    v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+    v_MAX_LOOKBACK_INTERVAL DATE;
+    v_HOURS_DOWN NUMBER;
+    v_PREV_WEEK_SCHED_TYPE IT_SCHEDULE.SCHEDULE_TYPE%TYPE;
+    v_RUN_IDENTIFIER EXTERNAL_SYSTEM_IDENTIFIER.EXTERNAL_IDENTIFIER%TYPE;
+    v_CATEGORY PLS_INTEGER;
+    v_SCHEDULE_TYPE IT_SCHEDULE.SCHEDULE_TYPE%TYPE;
+    v_STATEMENT_ID_TBL NUMBER_COLLECTION := NUMBER_COLLECTION();
+    v_PUBLICATION_DATE DATE;
+    v_MAX_TIME_WARM NUMBER;
+
+BEGIN
+    v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID(
+                                                p_TRANSACTION_TYPE      => p_TXN_TYPE,
+                                                p_RESOURCE_NAME         => p_SERV_POINT,
+                                                p_CREATE_IF_NOT_FOUND   => FALSE,
+                                                p_TRANSACTION_NAME      => NULL,
+                                                p_EXTERNAL_IDENTIFIER   => NULL,
+                                                p_ACCOUNT_NAME          => NULL,
+                                                p_COMMODITY             => p_COMMODITY
+                                              );
+
+    -- bz 18050: units can have a cooling boundary time of 0 minutes (??!!??), so if they're
+    -- off, we have to assume they're off for at least 30 minutes otherwise the calc won't work right.
+    v_MAX_TIME_WARM := CASE WHEN p_MAX_TIME_WARM = 0 THEN 0.5 ELSE p_MAX_TIME_WARM END;
+                                              
+    -- figure out the maximum previous interval we have to look back to
+    v_MAX_LOOKBACK_INTERVAL := p_DATE - v_MAX_TIME_WARM/24;
+    
+    IF v_MAX_LOOKBACK_INTERVAL < TRUNC(p_DATE, 'D') THEN
+        -- we are looking back across billing weeks, so we need to consult the settlement calendar
+        -- for the correct previous week's schedule type
+        
+        -- get the run identifier and category from the schedule type for looking up in the settlement calendar
+        BEGIN
+            MM_SEM_UTIL.GET_STATEMENT_TYPE_INFO(p_SCHED_TYPE, v_RUN_IDENTIFIER, v_CATEGORY);
+        EXCEPTION
+        WHEN MSGCODES.e_ERR_NO_SUCH_ENTRY THEN
+            v_CATEGORY := -1;
+            v_SCHEDULE_TYPE := p_SCHED_TYPE;
+        WHEN OTHERS THEN
+            RAISE;
+        END;
+        
+        -- get the most recently published statement type for the previous billing week 
+        -- that's published on or before the publication date of the in context run
+        BEGIN
+            WITH SC_RANKING AS (
+                SELECT RUN_IDENTIFIER, 
+                       RANK() OVER (ORDER BY PUBLICATION_DATE DESC) RANKING
+                FROM SEM_SETTLEMENT_CALENDAR SSC
+                WHERE SSC.PUBLICATION_TYPE = 'Report'
+                  AND SSC.MARKET = 'Energy'
+                  AND SSC.PUBLICATION_DATE <= (
+                        -- get the publication date of the in context run; we won't want to look at entries in
+                        -- the settlement calendar beyond this point
+                        SELECT PUBLICATION_DATE
+                        FROM SEM_SETTLEMENT_CALENDAR SSC
+                        WHERE SSC.PUBLICATION_TYPE = 'Report'
+                          AND SSC.MARKET = 'Energy'
+                          AND SSC.RUN_IDENTIFIER = v_RUN_IDENTIFIER
+                          AND TRUNC(p_DATE) BETWEEN SSC.BEGIN_DATE AND NVL(SSC.END_DATE, CONSTANTS.HIGH_DATE)
+                      )
+                  AND (TRUNC(p_DATE) - 1) BETWEEN SSC.BEGIN_DATE AND NVL(SSC.END_DATE, CONSTANTS.HIGH_DATE)
+            )
+            SELECT MM_SEM_UTIL.GET_STATEMENT_TYPE_FROM_INFO(RUN_IDENTIFIER, v_CATEGORY)
+            INTO v_PREV_WEEK_SCHED_TYPE
+            FROM SC_RANKING
+            WHERE RANKING = 1;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                v_PREV_WEEK_SCHED_TYPE := p_SCHED_TYPE;
+        END;
+    END IF;
+    
+    BEGIN
+        WITH ITS AS (
+            SELECT SCHEDULE_DATE, AMOUNT
+            FROM IT_SCHEDULE
+            WHERE TRANSACTION_ID = v_TXN_ID
+              AND SCHEDULE_STATE = GA.INTERNAL_STATE
+              AND SCHEDULE_DATE BETWEEN v_MAX_LOOKBACK_INTERVAL AND (p_DATE - 30/1440)
+              AND SCHEDULE_TYPE = CASE WHEN SCHEDULE_DATE > TO_CUT(TRUNC(FROM_CUT(p_DATE, 'EDT'), 'D'), 'EDT') THEN p_SCHED_TYPE ELSE v_PREV_WEEK_SCHED_TYPE END
+              AND AS_OF_DATE = CONSTANTS.LOW_DATE
+        ),
+        PREV_ON_INTERVAL AS (
+            SELECT SCHEDULE_DATE
+            FROM (
+                SELECT SCHEDULE_DATE,
+                       RANK() OVER (ORDER BY SCHEDULE_DATE DESC) AS RANKING
+                FROM ITS
+                WHERE AMOUNT <> 0
+            )
+            WHERE RANKING = 1
+        )
+        SELECT (p_DATE - 30/1440 - SCHEDULE_DATE) * 24
+        INTO v_HOURS_DOWN
+        FROM PREV_ON_INTERVAL;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            v_HOURS_DOWN := v_MAX_TIME_WARM;
+    END;
+
+    RETURN v_HOURS_DOWN;
+END GET_HOURS_DOWN_FROM_SCHEDULES;
+----------------------------------------------------------------------------------------------------------
+FUNCTION GET_HOURS_DOWN
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_TXN_TYPE IN VARCHAR2,
+    p_MAX_TIME_WARM IN NUMBER,
+    p_SCHED_TYPE IN NUMBER,
+    p_COMMODITY IN VARCHAR2,
+	p_BILLING_ENTITY IN NUMBER := NULL,
+	p_STATEMENT_DATE IN DATE := NULL
+    ) RETURN NUMBER IS
+v_HOURS_DOWN NUMBER;
+v_SEM18_DATE DATE := TO_DATE(NVL(GET_DICTIONARY_VALUE('Cross Border VAT Start Date',
+        CONSTANTS.GLOBAL_MODEL,'MarketExchange','SEM','Settlement'),CONSTANTS.HIGH_DATE),'YYYY-MM-DD');
+BEGIN
+	IF p_TXN_TYPE = MM_SEM_UTIL.c_TXN_TYPE_DISPATCH_INSTR AND p_STATEMENT_DATE > v_SEM18_DATE THEN
+		-- POST SEM1.8 go live
+		-- Use the instructions from the SEM_DISPATCH_INSTR table.
+		v_HOURS_DOWN := GET_HOURS_DOWN_FROM_DISP_INSTR(p_DATE,p_SERV_POINT,p_TXN_TYPE,p_MAX_TIME_WARM,p_SCHED_TYPE,p_COMMODITY,p_BILLING_ENTITY,p_STATEMENT_DATE);
+	ELSE
+		-- PRE SEM1.8 go live
+		-- Use the old way of looking up via schedules.
+		v_HOURS_DOWN := GET_HOURS_DOWN_FROM_SCHEDULES(p_DATE,p_SERV_POINT,p_TXN_TYPE,p_MAX_TIME_WARM,p_SCHED_TYPE,p_COMMODITY);
+	END IF;
+	RETURN v_HOURS_DOWN;
+END GET_HOURS_DOWN;
+-----------------------------------------------------------------------------------------------------------
+FUNCTION GET_COST_CORRECTION
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_TXN_TYPE IN VARCHAR2,
+    p_QTY IN NUMBER,
+	p_IS_INTERCONNECTOR IN NUMBER := 0,
+	p_AGREEMENT_TYPE	IN VARCHAR2 DEFAULT NULL
+    ) RETURN NUMBER IS
+v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_SET_NUMBER BINARY_INTEGER := 1;
+N BINARY_INTEGER;
+K BINARY_INTEGER;
+v_CCX1 NUMBER;
+v_CCX2 NUMBER;
+v_CCX3 NUMBER;
+v_CCX4 NUMBER;
+v_CCX5 NUMBER;
+v_CCX6 NUMBER;
+v_CCX7 NUMBER;
+v_CCX8 NUMBER;
+v_CCX9 NUMBER;
+v_CCX10 NUMBER;
+v_P_1 NUMBER;
+v_P_2 NUMBER;
+v_P_3 NUMBER;
+v_P_4 NUMBER;
+v_P_5 NUMBER;
+v_P_6 NUMBER;
+v_P_7 NUMBER;
+v_P_8 NUMBER;
+v_P_9 NUMBER;
+v_P_10 NUMBER;
+v_Q_1 NUMBER;
+v_Q_2 NUMBER;
+v_Q_3 NUMBER;
+v_Q_4 NUMBER;
+v_Q_5 NUMBER;
+v_Q_6 NUMBER;
+v_Q_7 NUMBER;
+v_Q_8 NUMBER;
+v_Q_9 NUMBER;
+v_Q_10 NUMBER;
+v_DQCC NUMBER;
+v_DATE DATE;
+
+-- 21-may-2008, jbc: if DQ > max offer Q, then DQCC is calculated as if
+-- DQ = max offer Q. See BZ 16109.
+v_EFFECTIVE_DQ NUMBER;
+v_GATE_WINDOW IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+
+--generator bid offer data is daily by trading day
+CURSOR c_PQ(v_TXN_ID IN NUMBER, v_DATE IN DATE) IS
+    SELECT QUANTITY, PRICE FROM BID_OFFER_SET
+    WHERE SCHEDULE_STATE = GA.INTERNAL_STATE
+    AND SCHEDULE_DATE = v_DATE
+    AND TRANSACTION_ID = v_TXN_ID
+    ORDER BY SET_NUMBER;
+BEGIN
+    IF p_IS_INTERCONNECTOR = 1 THEN
+		v_DATE := p_DATE;
+	ELSE
+		v_DATE := GET_TRADING_DAY_DATE(p_DATE - 1/86400) + (1/(24*60*60));
+	END IF;
+
+    IF (p_AGREEMENT_TYPE IS NULL)
+    THEN
+      v_GATE_WINDOW := GET_GATE_WINDOW(TO_CUT(p_DATE, LOCAL_TIME_ZONE()));
+    ELSE
+      v_GATE_WINDOW := p_AGREEMENT_TYPE;
+    END IF;
+
+	-- VERY IMPORTANT change: If the AGREEMENT_TYPE is NULL, we do the following:
+/*	v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID(
+												p_TRANSACTION_TYPE => p_TXN_TYPE,
+												p_RESOURCE_NAME => p_SERV_POINT,
+												p_CREATE_IF_NOT_FOUND => FALSE,
+												p_AGREEMENT_TYPE => v_GATE_WINDOW );*/
+
+	v_TXN_ID := GET_BEST_AVAIL_TXN_ID(v_GATE_WINDOW, p_TXN_TYPE, p_SERV_POINT, v_DATE);
+
+    SELECT MAX(SET_NUMBER) INTO N
+    FROM BID_OFFER_SET
+    WHERE TRANSACTION_ID = v_TXN_ID
+    AND SCHEDULE_DATE = v_DATE
+    AND SCHEDULE_STATE = GA.INTERNAL_STATE;
+
+	SELECT SET_NUMBER, QUANTITY INTO N, v_EFFECTIVE_DQ
+	  FROM BID_OFFER_SET
+	 WHERE TRANSACTION_ID = v_TXN_ID
+		   AND SCHEDULE_DATE = v_DATE
+		   AND SCHEDULE_STATE = GA.INTERNAL_STATE
+		   AND SET_NUMBER = (SELECT MAX(SET_NUMBER)
+							   FROM BID_OFFER_SET
+							  WHERE TRANSACTION_ID = v_TXN_ID
+									AND SCHEDULE_DATE = v_DATE
+									AND SCHEDULE_STATE = GA.INTERNAL_STATE);
+
+	-- only use the "real" DQ if it's on the offer curve. If it's outside,
+	-- then use the max offer quantity as the effective DQ.
+	IF p_QTY < v_EFFECTIVE_DQ THEN
+		v_EFFECTIVE_DQ := p_QTY;
+	END IF;
+
+    FOR v_PQ IN c_PQ(v_TXN_ID, v_DATE) LOOP
+        IF v_PQ.QUANTITY > 0 THEN
+            K := v_SET_NUMBER;
+            EXIT;
+        END IF;
+        v_SET_NUMBER := v_SET_NUMBER + 1;
+    END LOOP;
+
+    IF K IS NULL THEN K := N + 1; END IF;
+    v_SET_NUMBER := 1;
+
+    FOR v_PQ IN c_PQ(v_TXN_ID, v_DATE) LOOP
+        IF v_SET_NUMBER = 1 THEN
+            v_P_1 := v_PQ.PRICE;
+            v_Q_1 := v_PQ.QUANTITY;
+        ELSIF v_SET_NUMBER = 2 THEN
+            v_P_2 := v_PQ.PRICE;
+            v_Q_2 := v_PQ.QUANTITY;
+        ELSIF v_SET_NUMBER = 3 THEN
+            v_P_3 := v_PQ.PRICE;
+            v_Q_3 := v_PQ.QUANTITY;
+        ELSIF v_SET_NUMBER = 4 THEN
+            v_P_4 := v_PQ.PRICE;
+            v_Q_4 := v_PQ.QUANTITY;
+        ELSIF v_SET_NUMBER = 5 THEN
+            v_P_5 := v_PQ.PRICE;
+            v_Q_5 := v_PQ.QUANTITY;
+        ELSIF v_SET_NUMBER = 6 THEN
+            v_P_6 := v_PQ.PRICE;
+            v_Q_6 := v_PQ.QUANTITY;
+        ELSIF v_SET_NUMBER = 7 THEN
+            v_P_7 := v_PQ.PRICE;
+            v_Q_7 := v_PQ.QUANTITY;
+        ELSIF v_SET_NUMBER = 8 THEN
+            v_P_8 := v_PQ.PRICE;
+            v_Q_8 := v_PQ.QUANTITY;
+        ELSIF v_SET_NUMBER = 9 THEN
+            v_P_9 := v_PQ.PRICE;
+            v_Q_9 := v_PQ.QUANTITY;
+        ELSIF v_SET_NUMBER = 10 THEN
+            v_P_10 := v_PQ.PRICE;
+            v_Q_10 := v_PQ.QUANTITY;
+        END IF;
+        v_SET_NUMBER := v_SET_NUMBER + 1;
+    END LOOP;
+
+    IF K = 1 THEN
+        v_CCX1 := 0;
+        v_CCX2 := v_CCX1 + (v_P_1 - v_P_2) * v_Q_1;
+        v_CCX3 := v_CCX2 + (v_P_2 - v_P_3) * v_Q_2;
+        v_CCX4 := v_CCX3 + (v_P_3 - v_P_4) * v_Q_3;
+        v_CCX5 := v_CCX4 + (v_P_4 - v_P_5) * v_Q_4;
+        v_CCX6 := v_CCX5 + (v_P_5 - v_P_6) * v_Q_5;
+        v_CCX7 := v_CCX6 + (v_P_6 - v_P_7) * v_Q_6;
+        v_CCX8 := v_CCX7 + (v_P_7 - v_P_8) * v_Q_7;
+        v_CCX9 := v_CCX8 + (v_P_8 - v_P_9) * v_Q_8;
+        v_CCX10 := v_CCX9 + (v_P_9 - v_P_10) * v_Q_9;
+    ELSIF K = 2 THEN
+        v_CCX2 := 0;
+        v_CCX1 := v_CCX2 - (v_P_1 - v_P_2) * v_Q_1;
+        v_CCX3 := v_CCX2 + (v_P_2 - v_P_3) * v_Q_2;
+        v_CCX4 := v_CCX3 + (v_P_3 - v_P_4) * v_Q_3;
+        v_CCX5 := v_CCX4 + (v_P_4 - v_P_5) * v_Q_4;
+        v_CCX6 := v_CCX5 + (v_P_5 - v_P_6) * v_Q_5;
+        v_CCX7 := v_CCX6 + (v_P_6 - v_P_7) * v_Q_6;
+        v_CCX8 := v_CCX7 + (v_P_7 - v_P_8) * v_Q_7;
+        v_CCX9 := v_CCX8 + (v_P_8 - v_P_9) * v_Q_8;
+        v_CCX10 := v_CCX9 + (v_P_9 - v_P_10) * v_Q_9;
+    ELSIF K = 3 THEN
+        v_CCX3 := 0;
+        v_CCX2 := v_CCX3 - (v_P_2 - v_P_3) * v_Q_2;
+        v_CCX1 := v_CCX2 - (v_P_1 - v_P_2) * v_Q_1;
+        v_CCX4 := v_CCX3 + (v_P_3 - v_P_4) * v_Q_3;
+        v_CCX5 := v_CCX4 + (v_P_4 - v_P_5) * v_Q_4;
+        v_CCX6 := v_CCX5 + (v_P_5 - v_P_6) * v_Q_5;
+        v_CCX7 := v_CCX6 + (v_P_6 - v_P_7) * v_Q_6;
+        v_CCX8 := v_CCX7 + (v_P_7 - v_P_8) * v_Q_7;
+        v_CCX9 := v_CCX8 + (v_P_8 - v_P_9) * v_Q_8;
+        v_CCX10 := v_CCX9 + (v_P_9 - v_P_10) * v_Q_9;
+    ELSIF K = 4 THEN
+        v_CCX4 := 0;
+        v_CCX3 := v_CCX4 - (v_P_3 - v_P_4) * v_Q_3;
+        v_CCX2 := v_CCX3 - (v_P_2 - v_P_3) * v_Q_2;
+        v_CCX1 := v_CCX2 - (v_P_1 - v_P_2) * v_Q_1;
+        v_CCX5 := v_CCX4 + (v_P_4 - v_P_5) * v_Q_4;
+        v_CCX6 := v_CCX5 + (v_P_5 - v_P_6) * v_Q_5;
+        v_CCX7 := v_CCX6 + (v_P_6 - v_P_7) * v_Q_6;
+        v_CCX8 := v_CCX7 + (v_P_7 - v_P_8) * v_Q_7;
+        v_CCX9 := v_CCX8 + (v_P_8 - v_P_9) * v_Q_8;
+        v_CCX10 := v_CCX9 + (v_P_9 - v_P_10) * v_Q_9;
+    ELSIF K = 5 THEN
+        v_CCX5 := 0;
+        v_CCX4 := v_CCX5 - (v_P_4 - v_P_5) * v_Q_4;
+        v_CCX3 := v_CCX4 - (v_P_3 - v_P_4) * v_Q_3;
+        v_CCX2 := v_CCX3 - (v_P_2 - v_P_3) * v_Q_2;
+        v_CCX1 := v_CCX2 - (v_P_1 - v_P_2) * v_Q_1;
+        v_CCX6 := v_CCX5 + (v_P_5 - v_P_6) * v_Q_5;
+        v_CCX7 := v_CCX6 + (v_P_6 - v_P_7) * v_Q_6;
+        v_CCX8 := v_CCX7 + (v_P_7 - v_P_8) * v_Q_7;
+        v_CCX9 := v_CCX8 + (v_P_8 - v_P_9) * v_Q_8;
+        v_CCX10 := v_CCX9 + (v_P_9 - v_P_10) * v_Q_9;
+    ELSIF K = 6 THEN
+        v_CCX6 := 0;
+        v_CCX5 := v_CCX6 - (v_P_5 - v_P_6) * v_Q_5;
+        v_CCX4 := v_CCX5 - (v_P_4 - v_P_5) * v_Q_4;
+        v_CCX3 := v_CCX4 - (v_P_3 - v_P_4) * v_Q_3;
+        v_CCX2 := v_CCX3 - (v_P_2 - v_P_3) * v_Q_2;
+        v_CCX1 := v_CCX2 - (v_P_1 - v_P_2) * v_Q_1;
+        v_CCX7 := v_CCX6 + (v_P_6 - v_P_7) * v_Q_6;
+        v_CCX8 := v_CCX7 + (v_P_7 - v_P_8) * v_Q_7;
+        v_CCX9 := v_CCX8 + (v_P_8 - v_P_9) * v_Q_8;
+        v_CCX10 := v_CCX9 + (v_P_9 - v_P_10) * v_Q_9;
+    ELSIF K = 7 THEN
+        v_CCX7 := 0;
+        v_CCX6 := v_CCX7 - (v_P_6 - v_P_7) * v_Q_6;
+        v_CCX5 := v_CCX6 - (v_P_5 - v_P_6) * v_Q_5;
+        v_CCX4 := v_CCX5 - (v_P_4 - v_P_5) * v_Q_4;
+        v_CCX3 := v_CCX4 - (v_P_3 - v_P_4) * v_Q_3;
+        v_CCX2 := v_CCX3 - (v_P_2 - v_P_3) * v_Q_2;
+        v_CCX1 := v_CCX2 - (v_P_1 - v_P_2) * v_Q_1;
+        v_CCX8 := v_CCX7 + (v_P_7 - v_P_8) * v_Q_7;
+        v_CCX9 := v_CCX8 + (v_P_8 - v_P_9) * v_Q_8;
+        v_CCX10 := v_CCX9 + (v_P_9 - v_P_10) * v_Q_9;
+    ELSIF K = 8 THEN
+        v_CCX8 := 0;
+        v_CCX7 := v_CCX8 - (v_P_7 - v_P_8) * v_Q_7;
+        v_CCX6 := v_CCX7 - (v_P_6 - v_P_7) * v_Q_6;
+        v_CCX5 := v_CCX6 - (v_P_5 - v_P_6) * v_Q_5;
+        v_CCX4 := v_CCX5 - (v_P_4 - v_P_5) * v_Q_4;
+        v_CCX3 := v_CCX4 - (v_P_3 - v_P_4) * v_Q_3;
+        v_CCX2 := v_CCX3 - (v_P_2 - v_P_3) * v_Q_2;
+        v_CCX1 := v_CCX2 - (v_P_1 - v_P_2) * v_Q_1;
+        v_CCX9 := v_CCX8 + (v_P_8 - v_P_9) * v_Q_8;
+        v_CCX10 := v_CCX9 + (v_P_9 - v_P_10) * v_Q_9;
+    ELSIF K = 9 THEN
+        v_CCX9 := 0;
+        v_CCX8 := v_CCX9 - (v_P_8 - v_P_9) * v_Q_8;
+        v_CCX7 := v_CCX8 - (v_P_7 - v_P_8) * v_Q_7;
+        v_CCX6 := v_CCX7 - (v_P_6 - v_P_7) * v_Q_6;
+        v_CCX5 := v_CCX6 - (v_P_5 - v_P_6) * v_Q_5;
+        v_CCX4 := v_CCX5 - (v_P_4 - v_P_5) * v_Q_4;
+        v_CCX3 := v_CCX4 - (v_P_3 - v_P_4) * v_Q_3;
+        v_CCX2 := v_CCX3 - (v_P_2 - v_P_3) * v_Q_2;
+        v_CCX1 := v_CCX2 - (v_P_1 - v_P_2) * v_Q_1;
+        v_CCX10 := v_CCX9 + (v_P_9 - v_P_10) * v_Q_9;
+    ELSIF K = 10 THEN
+        v_CCX10 := 0;
+        v_CCX9 := v_CCX10 - (v_P_9 - v_P_10) * v_Q_9;
+        v_CCX8 := v_CCX9 - (v_P_8 - v_P_9) * v_Q_8;
+        v_CCX7 := v_CCX8 - (v_P_7 - v_P_8) * v_Q_7;
+        v_CCX6 := v_CCX7 - (v_P_6 - v_P_7) * v_Q_6;
+        v_CCX5 := v_CCX6 - (v_P_5 - v_P_6) * v_Q_5;
+        v_CCX4 := v_CCX5 - (v_P_4 - v_P_5) * v_Q_4;
+        v_CCX3 := v_CCX4 - (v_P_3 - v_P_4) * v_Q_3;
+        v_CCX2 := v_CCX3 - (v_P_2 - v_P_3) * v_Q_2;
+        v_CCX1 := v_CCX2 - (v_P_1 - v_P_2) * v_Q_1;
+    END IF;
+
+    IF v_EFFECTIVE_DQ <= v_Q_1 THEN
+        v_DQCC := v_CCX1;
+    ELSIF v_EFFECTIVE_DQ <= v_Q_2 AND v_EFFECTIVE_DQ > v_Q_1 THEN
+        v_DQCC := v_CCX2;
+    ELSIF v_EFFECTIVE_DQ <= v_Q_3 AND v_EFFECTIVE_DQ > v_Q_2 THEN
+        v_DQCC := v_CCX3;
+    ELSIF v_EFFECTIVE_DQ <= v_Q_4 AND v_EFFECTIVE_DQ > v_Q_3 THEN
+        v_DQCC := v_CCX4;
+    ELSIF v_EFFECTIVE_DQ <= v_Q_5 AND v_EFFECTIVE_DQ > v_Q_4 THEN
+        v_DQCC := v_CCX5;
+    ELSIF v_EFFECTIVE_DQ <= v_Q_6 AND v_EFFECTIVE_DQ > v_Q_5 THEN
+        v_DQCC := v_CCX6;
+    ELSIF v_EFFECTIVE_DQ <= v_Q_7 AND v_EFFECTIVE_DQ > v_Q_6 THEN
+        v_DQCC := v_CCX7;
+    ELSIF v_EFFECTIVE_DQ <= v_Q_8 AND v_EFFECTIVE_DQ > v_Q_7 THEN
+        v_DQCC := v_CCX8;
+    ELSIF v_EFFECTIVE_DQ <= v_Q_9 AND v_EFFECTIVE_DQ > v_Q_8 THEN
+        v_DQCC := v_CCX9;
+    ELSIF v_EFFECTIVE_DQ > v_Q_9 THEN
+        v_DQCC := v_CCX10;
+    END IF;
+
+    RETURN v_DQCC;
+
+END GET_COST_CORRECTION;
+---------------------------------------------------------------------------------------------------------
+FUNCTION GET_COST_CORRECTION_IU
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_TXN_TYPE IN VARCHAR2,
+    p_QTY IN NUMBER,
+	p_AGREEMENT_TYPE IN VARCHAR2 DEFAULT NULL
+    ) RETURN NUMBER IS
+v_DQCC NUMBER;
+BEGIN
+	v_DQCC := GET_COST_CORRECTION(p_DATE, p_SERV_POINT, p_TXN_TYPE, p_QTY, 1, p_AGREEMENT_TYPE);
+	RETURN v_DQCC;
+END GET_COST_CORRECTION_IU;
+---------------------------------------------------------------------------------------------------------
+FUNCTION GET_AVGFRQ
+    (
+    p_DATE IN DATE
+    ) RETURN NUMBER IS
+v_FRQ SEM_SYSTEM_FREQUENCY.AVERAGE_FREQUENCY%TYPE;
+BEGIN
+	-- 2009-feb-24, jbc (bz 18599): use rownum=1 to handle undocumented MPUD6 change of pse name
+	-- in system frequency report (rather than keying off a hard-wired pse name of EIRGRID)
+    SELECT AVERAGE_FREQUENCY INTO v_FRQ
+    FROM SEM_SYSTEM_FREQUENCY
+    WHERE SCHEDULE_DATE = p_DATE
+	AND ROWNUM=1;
+
+    RETURN NVL(TO_NUMBER(v_FRQ),0);
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN --Error on Select
+        RETURN 0;
+	WHEN MSGCODES.e_ERR_NO_SUCH_ENTRY THEN --Error on EI.GET call
+		RETURN 0;
+
+END GET_AVGFRQ;
+----------------------------------------------------------------------------------------------------------
+FUNCTION GET_NORFRQ
+    (
+    p_DATE IN DATE
+    ) RETURN NUMBER IS
+v_FRQ SEM_SYSTEM_FREQUENCY.NORMAL_FREQUENCY%TYPE;
+BEGIN
+	-- 2009-feb-24, jbc (bz 18599): use rownum=1 to handle undocumented MPUD6 change of pse name
+	-- in system frequency report (rather than keying off a hard-wired pse name of EIRGRID)
+    SELECT NORMAL_FREQUENCY INTO v_FRQ
+    FROM SEM_SYSTEM_FREQUENCY
+    WHERE SCHEDULE_DATE = p_DATE
+	AND ROWNUM=1;
+
+    RETURN NVL(TO_NUMBER(v_FRQ),0);
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN --Error on Select
+        RETURN 0;
+	WHEN MSGCODES.e_ERR_NO_SUCH_ENTRY THEN --Error on EI.GET call
+		RETURN 0;
+END GET_NORFRQ;
+----------------------------------------------------------------------------------------------------------
+FUNCTION GET_TAX_RATE
+    (
+	p_STATEMENT_DATE IN DATE,
+    p_PSE_ID IN NUMBER,
+	p_IS_PARTICIPANT_PSE IN NUMBER DEFAULT 0
+	) RETURN NUMBER IS
+v_SC_ID NUMBER(9) := MM_SEM_UTIL.SEM_SC_ID;
+v_TAX_RATE NUMBER;
+v_JURISDICTION VARCHAR2(32);
+v_VAT_JURISDICTION VARCHAR2(32);
+v_TAX_ATTRIBUTE VARCHAR2(32);
+v_PSE_UNIT_TYPE VARCHAR2(1);
+v_PARTICIPANT_PSE_ID NUMBER(9);
+v_PSE_MARKET_NAME SEM_SETTLEMENT_ENTITY.MARKET_NAME%TYPE;
+BEGIN
+
+	--Get the proper Setttlement PSE ID.
+	IF p_IS_PARTICIPANT_PSE = 1 THEN
+		v_PARTICIPANT_PSE_ID := p_PSE_ID;
+	ELSE
+		-- if we're a billing entity, get the market name as well for MO tax rates
+		SELECT SSE.PARTICIPANT_PSE_ID, SSE.MARKET_NAME
+		INTO v_PARTICIPANT_PSE_ID, v_PSE_MARKET_NAME
+		FROM SEM_SETTLEMENT_ENTITY SSE
+		WHERE SSE.SETTLEMENT_PSE_ID = p_PSE_ID;
+	END IF;
+
+	--Get the Jurisdiction and the VAT Jurisdiction of the Billing Entity.
+	v_JURISDICTION := RO.GET_ENTITY_ATTRIBUTE(MM_SEM_UTIL.g_EA_PSE_JURISDICTION, EC.ED_PSE, v_PARTICIPANT_PSE_ID, p_STATEMENT_DATE);
+    v_VAT_JURISDICTION := RO.GET_ENTITY_ATTRIBUTE(MM_SEM_UTIL.g_EA_PSE_VAT_JURISDICTION, EC.ED_PSE, v_PARTICIPANT_PSE_ID, p_STATEMENT_DATE);
+
+	IF v_PSE_MARKET_NAME IN ('MO', 'FMO') THEN
+		IF v_JURISDICTION = 'NI' THEN
+			v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_NI_MO_TAX_RATE;
+		ELSIF v_JURISDICTION = 'ROI' THEN
+			v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_ROI_MO_TAX_RATE;
+		ELSE
+			v_TAX_ATTRIBUTE := NULL;
+		END IF;
+	ELSE
+		v_PSE_UNIT_TYPE := MM_SEM_UTIL.GET_PSE_UNIT_TYPE(v_PARTICIPANT_PSE_ID, 1, p_STATEMENT_DATE);
+
+		--Use the Jurisdiction of the Billing Entity to determine which tax rate to use.
+		IF v_VAT_JURISDICTION = 'UK' THEN
+			IF v_PSE_UNIT_TYPE = MM_SEM_UTIL.g_PSE_TYPE_SUPPLIER_UNITS THEN
+				v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_NI_TAX_RATE;
+			ELSE
+				v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_NI_GEN_TAX_RATE;
+			END IF;
+		ELSIF v_VAT_JURISDICTION = 'ROI' THEN
+			IF v_PSE_UNIT_TYPE = MM_SEM_UTIL.g_PSE_TYPE_SUPPLIER_UNITS THEN
+				v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_ROI_TAX_RATE;
+			ELSE
+				v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_ROI_GEN_TAX_RATE;
+			END IF;
+		ELSE
+			v_TAX_ATTRIBUTE := NULL;
+		END IF;
+	END IF;
+
+	--Look on the SEM SC to find the current rate for the selected Attribute.
+	IF v_TAX_ATTRIBUTE IS NOT NULL THEN
+		v_TAX_RATE := RO.GET_ENTITY_ATTRIBUTE(v_TAX_ATTRIBUTE, EC.ED_SC, v_SC_ID, p_STATEMENT_DATE);
+	ELSE
+		v_TAX_RATE := NULL;
+	END IF;
+
+	RETURN v_TAX_RATE;
+END GET_TAX_RATE;
+-------------------------------------------------------------------------------------------------------------------------------
+FUNCTION GET_TESTING_TARIFF
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_COMPONENT_ID IN NUMBER
+    ) RETURN NUMBER IS
+v_REG_CAPACITY NUMBER;
+v_TARIFF NUMBER;
+BEGIN
+    v_REG_CAPACITY := GET_REGISTERED_CAPACITY(p_DATE, p_SERV_POINT, 'Generation');
+    v_TARIFF := CU.GET_COMPONENT_BLOCK_RATE(p_COMPONENT_ID, v_REG_CAPACITY, p_DATE);
+
+    RETURN NVL(v_TARIFF,0);
+END GET_TESTING_TARIFF;
+------------------------------------------------------------------------------------------------------------
+FUNCTION GET_SUM_OF_CHARGES
+    (
+    p_DATE IN DATE,
+    p_COMPONENT_CAT IN VARCHAR2,
+    p_BILLING_ENTITY IN NUMBER,
+    p_SCHEDULE_TYPE IN NUMBER
+    ) RETURN NUMBER IS
+v_COMPONENT_ID NUMBER;
+v_CHARGE_AMT NUMBER;
+v_TOTAL_CHG_AMT NUMBER := 0;
+CURSOR c_CHARGES IS
+    SELECT VALUE
+    FROM SYSTEM_LABEL
+    WHERE MODULE = 'MarketExchange'
+    AND KEY1 = 'SEM'
+    AND KEY2 = 'Settlement'
+    AND KEY3 = p_COMPONENT_CAT || ' Currency Conversion Charges';
+BEGIN
+
+    FOR v_CHARGE IN c_CHARGES LOOP
+         v_COMPONENT_ID := EI.GET_ID_FROM_IDENTIFIER(v_CHARGE.VALUE, EC.ED_COMPONENT);
+         IF p_COMPONENT_CAT = 'Energy' THEN
+            --gather charge amount for current day
+            BEGIN
+                SELECT B.CHARGE_AMOUNT INTO v_CHARGE_AMT
+                FROM BILLING_STATEMENT B
+                WHERE B.ENTITY_ID = p_BILLING_ENTITY
+                AND B.STATEMENT_DATE = TRUNC(p_DATE, 'DD')
+                AND B.COMPONENT_ID = v_COMPONENT_ID
+                AND B.STATEMENT_STATE = GA.INTERNAL_STATE
+                AND B.STATEMENT_TYPE = p_SCHEDULE_TYPE;
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    v_CHARGE_AMT := 0;
+            END;
+        ELSE
+            --Component category is Capacity; gather charge amount for month
+             BEGIN
+                SELECT SUM(B.CHARGE_AMOUNT) INTO v_CHARGE_AMT
+                FROM BILLING_STATEMENT B
+                WHERE B.ENTITY_ID = p_BILLING_ENTITY
+                AND B.STATEMENT_DATE BETWEEN TRUNC(p_DATE, 'DD') AND LAST_DAY(p_DATE)
+                AND B.COMPONENT_ID = v_COMPONENT_ID
+                AND B.STATEMENT_STATE = GA.INTERNAL_STATE
+                AND B.STATEMENT_TYPE = p_SCHEDULE_TYPE;
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    v_CHARGE_AMT := 0;
+            END;
+        END IF;
+        v_TOTAL_CHG_AMT := v_TOTAL_CHG_AMT + NVL(v_CHARGE_AMT,0);
+        v_CHARGE_AMT := 0;
+    END LOOP;
+
+    RETURN NVL(v_TOTAL_CHG_AMT,0);
+
+END GET_SUM_OF_CHARGES;
+------------------------------------------------------------------------------------------------------------
+FUNCTION GET_IS_UNIT_UNDER_TEST
+    (
+    p_DATE IN DATE,
+    p_SERV_POINT IN VARCHAR2,
+    p_TXN_TYPE IN VARCHAR2
+    ) RETURN NUMBER IS
+v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_IS_UNDER_TEST BOOLEAN;
+v_GATE_WINDOW IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+BEGIN
+    v_GATE_WINDOW := MM_SEM_UTIL.g_EXTID_MKT_SCHED_EA_ABR; -- The gate is alway EA for this charge
+    v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID(
+												p_TRANSACTION_TYPE 		=> p_TXN_TYPE,
+												p_RESOURCE_NAME 		=> p_SERV_POINT,
+												p_CREATE_IF_NOT_FOUND 	=> FALSE,
+												p_AGREEMENT_TYPE => v_GATE_WINDOW );
+    v_IS_UNDER_TEST := MM_SEM_UTIL.IS_UNDER_TEST(v_TXN_ID, GET_TRADING_DAY_DATE(p_DATE));
+
+    IF v_IS_UNDER_TEST = TRUE THEN
+        RETURN 1;
+    ELSE
+        RETURN 0;
+    END IF;
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 0;
+END GET_IS_UNIT_UNDER_TEST;
+------------------------------------------------------------------------------------------------------------
+FUNCTION GET_RATE_PRIOR_DAY
+    (
+    p_DATE IN DATE,
+    p_EXT_ID IN VARCHAR2
+    ) RETURN NUMBER IS
+v_MKT_PRICE_ID MARKET_PRICE.MARKET_PRICE_ID%TYPE;
+v_MKT_PRICE_VALUE MARKET_PRICE_VALUE.PRICE%TYPE;
+BEGIN
+    v_MKT_PRICE_ID := EI.GET_ID_FROM_IDENTIFIER(p_EXT_ID, EC.ED_MARKET_PRICE);
+
+    SELECT PRICE INTO v_MKT_PRICE_VALUE
+    FROM MARKET_PRICE_VALUE
+    WHERE MARKET_PRICE_ID = v_MKT_PRICE_ID
+    AND PRICE_CODE = 'A'
+    AND PRICE_DATE = TRUNC(p_DATE) - 1;
+
+    RETURN v_MKT_PRICE_VALUE;
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN --Error on Select
+        RETURN 0;
+	WHEN MSGCODES.e_ERR_NO_SUCH_ENTRY THEN --Error on EI.GET call
+		RETURN 0;
+END GET_RATE_PRIOR_DAY;
+-------------------------------------------------------------------------------------------------------------
+FUNCTION CALC_TOTAL_MWPEX(p_DATE IN DATE,
+						  p_PSE_ID IN PSE.PSE_ID%TYPE,
+						  p_PRODUCT_ID IN PRODUCT.PRODUCT_ID%TYPE,
+						  p_COMPONENT_ID IN COMPONENT.COMPONENT_ID%TYPE,
+						  p_STATEMENT_TYPE IN STATEMENT_TYPE.STATEMENT_TYPE_ID%TYPE,
+						  p_SERVICE_POINT_NAME IN VARCHAR2,
+						  p_MWPEX_UH_CURR IN NUMBER) RETURN NUMBER IS
+	v_BEGIN_DATE DATE;
+	v_END_DATE   DATE;
+	v_RET_VAL    NUMBER := 0;
+BEGIN
+	-- 18-mar-2008, jbc: fix for BZ 15485
+	-- MWPEX is non-zero only if the sum of MWPEXuh over the billing period
+	-- is positive. Here, we figure out if we're on that last interval of the billing
+	-- period (Saturday 2400); if we are, then we sum up all the MWPEXuh we've already
+	-- calculated. Because we haven't yet persisted MWPEXuh for the last interval,
+	-- we tack that on if needed.
+	-- JBH: have to subtract one second - because if it is correct interval (HE 24 on Saturday) then
+	-- these APIs interpret that as midnight of Sunday - which is the *next* invoice period (doh)
+	v_END_DATE := PC.END_DATE_FOR_INTERVAL(PC.BEGIN_DATE_FOR_INTERVAL(p_DATE-1/86400, 'Week', p_PSE_ID, 'Sunday'), 'Week',p_PSE_ID, 'Sunday');
+
+	IF p_DATE = v_END_DATE + 1
+	    THEN
+		v_BEGIN_DATE := v_END_DATE - 6;
+
+		SELECT SUM(FCV.VARIABLE_VAL + CASE WHEN FCV.CHARGE_DATE = p_DATE THEN p_MWPEX_UH_CURR ELSE 0 END)
+		INTO v_RET_VAL
+		FROM BILLING_STATEMENT B, FORMULA_CHARGE_ITERATOR FCI, FORMULA_CHARGE_VARIABLE FCV
+		WHERE B.ENTITY_ID = p_PSE_ID -- 14673
+		AND B.COMPONENT_ID = p_COMPONENT_ID -- 11186
+		AND B.PRODUCT_ID = p_PRODUCT_ID --7693
+		AND B.STATEMENT_DATE BETWEEN v_BEGIN_DATE AND v_END_DATE -- DATE'2007-11-01' AND DATE'2007-11-03'
+		AND B.STATEMENT_STATE = GA.INTERNAL_STATE
+		AND B.STATEMENT_TYPE = p_STATEMENT_TYPE --43303
+		AND B.CHARGE_ID = FCV.CHARGE_ID
+		AND FCV.VARIABLE_NAME = 'MWPEXuh'
+		AND FCI.CHARGE_ID = FCV.CHARGE_ID
+		AND FCI.ITERATOR_ID = FCV.ITERATOR_ID
+		AND FCI.ITERATOR1 = p_SERVICE_POINT_NAME;
+
+		-- MWPEX can only be positive
+		IF v_RET_VAL < 0 THEN
+			v_RET_VAL := 0;
+		END IF;
+	END IF;
+
+	RETURN v_RET_VAL;
+END CALC_TOTAL_MWPEX;
+-------------------------------------------------------------------------------------------------------------
+FUNCTION GET_FMOC_PUBLICATION_DATE
+    (
+    p_STATEMENT_TYPE_ID IN NUMBER,
+    p_STATEMENT_DATE IN DATE
+    ) RETURN DATE IS
+v_RUN_IDENTIFIER   SEM_SETTLEMENT_CALENDAR.RUN_IDENTIFIER%TYPE;
+v_PUBLICATION_DATE SEM_SETTLEMENT_CALENDAR.PUBLICATION_DATE%TYPE;
+v_CATEGORY PLS_INTEGER;
+BEGIN
+    MM_SEM_UTIL.GET_STATEMENT_TYPE_INFO(p_STATEMENT_TYPE_ID,v_RUN_IDENTIFIER,v_CATEGORY);
+
+	v_PUBLICATION_DATE := MM_SEM_SETTLEMENT_CALENDAR.GET_PUBLICATION_DATE(
+    				MM_SEM_SETTLEMENT_CALENDAR.c_PUBLICATION_TYPE_REPORT,
+    				MM_SEM_SETTLEMENT_CALENDAR.c_MARKET_FMOC,
+    				v_RUN_IDENTIFIER,
+    				p_STATEMENT_DATE);
+
+    RETURN v_PUBLICATION_DATE;
+END GET_FMOC_PUBLICATION_DATE;
+
+-------------------------------------------------------------------------------------------------------------
+FUNCTION GET_ENERGY_STATEMENT_TYPE
+    (
+	p_MARKET IN VARCHAR2,
+	p_STATEMENT_TYPE_ID IN NUMBER,
+	p_STATEMENT_DATE IN DATE
+    ) RETURN NUMBER IS
+v_MARKET				   	VARCHAR2(16);
+v_RUN_IDENTIFIER		   	SEM_SETTLEMENT_CALENDAR.RUN_IDENTIFIER%TYPE;
+v_STATEMENT_CATEGORY	   	NUMBER(1);
+v_PUBLICATION_DATE 		   	SEM_SETTLEMENT_CALENDAR.PUBLICATION_DATE%TYPE;
+v_ENERGY_RUN_IDENTIFIER    	SEM_SETTLEMENT_CALENDAR.RUN_IDENTIFIER%TYPE;
+v_ENERGY_STATEMENT_TYPE_ID 	STATEMENT_TYPE.STATEMENT_TYPE_ID%TYPE;
+BEGIN
+	LOGS.LOG_DEBUG_MORE_DETAIL('GET_ENERGY_STATEMENT_TYPE called with MARKET=' || p_MARKET
+		|| ', STATEMENT_TYPE_ID=' || p_STATEMENT_TYPE_ID
+		|| ', STATEMENT_DATE=' || TEXT_UTIL.TO_CHAR_TIME(p_STATEMENT_DATE));
+
+    v_MARKET := MM_SEM_SETTLEMENT_CALENDAR.GET_MARKET_NAME_FOR_ABBREV(p_MARKET);
+
+    LOGS.LOG_DEBUG_MORE_DETAIL('MARKET = ' || v_MARKET);
+
+    MM_SEM_UTIL.GET_STATEMENT_TYPE_INFO(p_STATEMENT_TYPE_ID,v_RUN_IDENTIFIER,v_STATEMENT_CATEGORY);
+
+    LOGS.LOG_DEBUG_MORE_DETAIL('RUN_IDENTIFIER = ' || v_RUN_IDENTIFIER);
+    LOGS.LOG_DEBUG_MORE_DETAIL('STATEMENT_CATEGORY = ' || v_STATEMENT_CATEGORY);
+
+    v_PUBLICATION_DATE := MM_SEM_SETTLEMENT_CALENDAR.GET_PUBLICATION_DATE(
+    				MM_SEM_SETTLEMENT_CALENDAR.c_PUBLICATION_TYPE_REPORT,
+    				v_MARKET,
+    				v_RUN_IDENTIFIER,
+    				p_STATEMENT_DATE);
+
+    LOGS.LOG_DEBUG_MORE_DETAIL('PUBLICATION_DATE = ' || v_PUBLICATION_DATE);
+
+    v_ENERGY_RUN_IDENTIFIER := MM_SEM_SETTLEMENT_CALENDAR.GET_RUN_IDENTIFIER(
+    				v_PUBLICATION_DATE,
+    				MM_SEM_SETTLEMENT_CALENDAR.c_PUBLICATION_TYPE_REPORT,
+    				MM_SEM_SETTLEMENT_CALENDAR.c_MARKET_ENERGY,
+    				p_STATEMENT_DATE);
+
+    LOGS.LOG_DEBUG_MORE_DETAIL('ENERGY_RUN_IDENTIFIER = ' || v_ENERGY_RUN_IDENTIFIER);
+
+    v_ENERGY_STATEMENT_TYPE_ID :=	MM_SEM_UTIL.GET_STATEMENT_TYPE_FROM_INFO(v_ENERGY_RUN_IDENTIFIER,v_STATEMENT_CATEGORY);
+
+    LOGS.LOG_DEBUG_MORE_DETAIL('ENERGY_STATEMENT_TYPE_ID = ' || v_ENERGY_STATEMENT_TYPE_ID);
+
+    RETURN v_ENERGY_STATEMENT_TYPE_ID;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		ERRS.LOG_AND_CONTINUE();
+		RETURN p_STATEMENT_TYPE_ID;
+END GET_ENERGY_STATEMENT_TYPE;
+-------------------------------------------------------------------------------------------------------------
+FUNCTION GET_NDLF
+    (
+	p_MARKET IN VARCHAR2,
+	p_SERVICE_POINT IN VARCHAR2,
+	p_STATEMENT_TYPE_ID IN NUMBER,
+    p_SCHEDULE_DATE IN DATE,
+	p_STATEMENT_DATE IN DATE
+    ) RETURN NUMBER IS
+v_NDLF					   	NUMBER;
+v_TRANSACTION_ID		   	INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_TXN_TYPE_SUFFIX			VARCHAR2(16);
+v_ENERGY_TRANSACTION_ID	   	INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_ENERGY_STATEMENT_TYPE_ID 	STATEMENT_TYPE.STATEMENT_TYPE_ID%TYPE;
+BEGIN
+	LOGS.LOG_DEBUG_MORE_DETAIL('GET_NDLF called with MARKET=' || p_MARKET
+		|| ', SERVICE_POINT=' || p_SERVICE_POINT
+		|| ', STATEMENT_TYPE_ID=' || p_STATEMENT_TYPE_ID
+		|| ', SCHEDULE_DATE=' || TEXT_UTIL.TO_CHAR_TIME(p_SCHEDULE_DATE)
+		|| ', STATEMENT_DATE=' || TEXT_UTIL.TO_CHAR_TIME(p_STATEMENT_DATE));
+
+	-- First, try to get the NDLF value for the SERVICE_POINT, STATEMENT_TYPE, DATE using the
+	-- market specific NDLF transaction
+	IF p_MARKET IN ('CA', 'VMOC') THEN
+		v_TXN_TYPE_SUFFIX := ' ' || p_MARKET;
+	END IF;
+
+	v_TRANSACTION_ID := MM_SEM_UTIL.GET_TRANSACTION_ID(
+														p_TRANSACTION_TYPE 	=> 'Net Demand' || v_TXN_TYPE_SUFFIX,
+														p_RESOURCE_NAME		=> p_SERVICE_POINT,
+														p_COMMODITY_NAME	=> 'Energy'
+													  );
+
+	IF v_TRANSACTION_ID IS NOT NULL THEN
+		LOGS.LOG_DEBUG_MORE_DETAIL('TRANSACTION_ID = ' || v_TRANSACTION_ID);
+    	SELECT SUM(S.AMOUNT)
+    	INTO v_NDLF
+    	FROM IT_SCHEDULE S
+    	WHERE S.TRANSACTION_ID = v_TRANSACTION_ID
+    		AND S.SCHEDULE_TYPE = p_STATEMENT_TYPE_ID
+			AND S.SCHEDULE_STATE = CONSTANTS.INTERNAL_STATE
+    		AND S.SCHEDULE_DATE = p_SCHEDULE_DATE;
+	ELSE
+		LOGS.LOG_DEBUG_MORE_DETAIL('TRANSACTION_ID was not found');
+	END IF;
+
+	IF p_MARKET IN ('CA', 'VMOC') THEN
+    	IF v_NDLF IS NULL THEN
+        	LOGS.LOG_DEBUG_MORE_DETAIL('NDLF is null. Checking Energy TXN...');
+
+			-- Fall back to querying the values from the Energy NDLF transaction.
+        	-- First, translate the current STATEMENT_TYPE to a corresponding Energy STATEMENT_TYPE
+        	v_ENERGY_STATEMENT_TYPE_ID := GET_ENERGY_STATEMENT_TYPE(p_MARKET, p_STATEMENT_TYPE_ID, p_STATEMENT_DATE);
+
+			LOGS.LOG_DEBUG_MORE_DETAIL('ENERGY_STATEMENT_TYPE_ID = ' || v_ENERGY_STATEMENT_TYPE_ID);
+
+    		v_ENERGY_TRANSACTION_ID := MM_SEM_UTIL.GET_TRANSACTION_ID(
+																		p_TRANSACTION_TYPE 	=> 'Net Demand',
+																		p_RESOURCE_NAME		=> p_SERVICE_POINT,
+																		p_COMMODITY_NAME	=> 'Energy'
+																	 );
+
+			LOGS.LOG_DEBUG_MORE_DETAIL('ENERGY_TRANSACTION_ID = ' || v_ENERGY_TRANSACTION_ID);
+
+			SELECT SUM(S.AMOUNT)
+        	INTO v_NDLF
+        	FROM IT_SCHEDULE S
+        	WHERE S.TRANSACTION_ID = v_ENERGY_TRANSACTION_ID
+        		AND S.SCHEDULE_TYPE = v_ENERGY_STATEMENT_TYPE_ID
+				AND S.SCHEDULE_STATE = CONSTANTS.INTERNAL_STATE
+        		AND S.SCHEDULE_DATE = p_SCHEDULE_DATE;
+
+			LOGS.LOG_DEBUG_MORE_DETAIL('NDLF = ' || v_NDLF);
+
+    	END IF;
+	END IF;
+
+    RETURN v_NDLF;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		ERRS.LOG_AND_CONTINUE();
+		RETURN v_NDLF;
+END GET_NDLF;
+-------------------------------------------------------------------------------------------------------------
+PROCEDURE GET_SETTLEMENT_PSE_INFORMATION
+    (
+    p_PSE_ID IN NUMBER,
+    p_IS_MARKET_OPERATOR OUT BOOLEAN,
+    p_MARKET_NAME OUT VARCHAR2,
+    p_PARTICIPANT_PSE_ID OUT NUMBER
+    ) AS
+
+BEGIN
+
+    BEGIN
+        SELECT SSE.MARKET_NAME, SSE.PARTICIPANT_PSE_ID
+        INTO p_MARKET_NAME, p_PARTICIPANT_PSE_ID
+        FROM SEM_SETTLEMENT_ENTITY SSE
+        WHERE SSE.SETTLEMENT_PSE_ID = p_PSE_ID;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            -- This isn't a billing PSE
+            ERRS.RAISE(MSGCODES.c_ERR_NO_SUCH_ENTRY, 'The specified PSE is not a Billing PSE: '
+                || EI.GET_ENTITY_NAME(p_PSE_ID, EC.ED_PSE));
+    END;
+
+    IF p_MARKET_NAME IN ('FMO','MO') THEN
+        p_IS_MARKET_OPERATOR := TRUE;
+    ELSE
+        p_IS_MARKET_OPERATOR := FALSE;
+    END IF;
+
+END GET_SETTLEMENT_PSE_INFORMATION;
+-------------------------------------------------------------------------------------------------------------
+FUNCTION GET_TAX_ATTRIBUTE
+    (
+    p_JURISDICTION IN VARCHAR2,
+    p_IS_MARKET_OPERATOR IN BOOLEAN,
+    p_PART_PSE_UNIT_TYPE IN VARCHAR2,
+    p_USE_CROSS_BORDER IN BOOLEAN
+    ) RETURN VARCHAR2 IS
+
+    v_TAX_ATTRIBUTE VARCHAR2(32);
+
+BEGIN
+
+    ASSERT(p_JURISDICTION IN (MM_SEM_UTIL.c_SEM_JURIDICTION_ROI,MM_SEM_UTIL.c_SEM_JURIDICTION_NI), 'Jurisdiction must be in (' || MM_SEM_UTIL.c_SEM_JURIDICTION_ROI || ',' || MM_SEM_UTIL.c_SEM_JURIDICTION_NI || '). JURISDICTION = ' || p_JURISDICTION, MSGCODES.c_ERR_ARGUMENT);
+    ASSERT(p_PART_PSE_UNIT_TYPE IN (MM_SEM_UTIL.g_PSE_TYPE_SUPPLIER_UNITS, MM_SEM_UTIL.g_PSE_TYPE_GENERATOR_UNITS),
+        'The PSE Type must be either ' || MM_SEM_UTIL.g_PSE_TYPE_SUPPLIER_UNITS || ' or ' || MM_SEM_UTIL.g_PSE_TYPE_GENERATOR_UNITS,
+        MSGCODES.c_ERR_ARGUMENT);
+
+    -- We always use the MO rate for market operators
+    IF p_IS_MARKET_OPERATOR THEN
+        IF p_JURISDICTION = 'NI' THEN
+            v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_NI_MO_TAX_RATE;
+        ELSE -- ROI
+            v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_ROI_MO_TAX_RATE;
+        END IF;
+    ELSE
+        IF p_USE_CROSS_BORDER THEN
+            -- IF UNABLE TO FIND THE PROPORTION, THEN USE THE BLENDED RATE
+            IF p_PART_PSE_UNIT_TYPE = MM_SEM_UTIL.g_PSE_TYPE_SUPPLIER_UNITS THEN
+                IF p_JURISDICTION = 'NI' THEN
+                    v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_NI_CB_TAX_RATE;
+                ELSE -- ROI
+                    v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_ROI_CB_TAX_RATE;
+                END IF;
+            ELSE -- GEN UNIT
+                IF p_JURISDICTION = 'NI' THEN
+                    v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_NI_GEN_CB_TAX_RATE;
+                ELSE -- ROI
+                    v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_ROI_GEN_CB_TAX_RATE;
+                END IF;
+            END IF;
+        ELSE
+            -- WE WERE ABLE TO FIND THE PROPORTION, RETURN THE NEW VAT RATE
+            IF p_PART_PSE_UNIT_TYPE = MM_SEM_UTIL.g_PSE_TYPE_SUPPLIER_UNITS THEN
+                IF p_JURISDICTION = 'NI' THEN
+                    v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_NI_TAX_RATE;
+                ELSE -- ROI
+                    v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_ROI_TAX_RATE;
+                END IF;
+            ELSE -- GEN UNIT
+                IF p_JURISDICTION = 'NI' THEN
+                    v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_NI_GEN_TAX_RATE;
+                ELSE -- ROI
+                    v_TAX_ATTRIBUTE := MM_SEM_UTIL.g_EA_ROI_GEN_TAX_RATE;
+                END IF;
+            END IF;
+        END IF;
+    END IF;
+
+    RETURN v_TAX_ATTRIBUTE;
+END GET_TAX_ATTRIBUTE;
+-------------------------------------------------------------------------------------------------------------
+FUNCTION GET_GP_VAR_TYPE
+    (
+    p_MARKET_NAME IN VARCHAR2,
+    p_PSE_UNIT_TYPE IN VARCHAR2,
+    p_CHARGE_TYPE IN VARCHAR2 := NULL
+    ) RETURN VARCHAR2 IS
+
+    v_RESULT SEM_GP_SETTLEMENT.VARIABLE_TYPE%TYPE;
+
+BEGIN
+
+    ASSERT(p_MARKET_NAME IN ('EN','CA'), 'Market Name must be EN or CA');
+    ASSERT(p_PSE_UNIT_TYPE IN (MM_SEM_UTIL.g_PSE_TYPE_SUPPLIER_UNITS, MM_SEM_UTIL.g_PSE_TYPE_GENERATOR_UNITS),
+        'The PSE Type must be either ' || MM_SEM_UTIL.g_PSE_TYPE_SUPPLIER_UNITS || ' or ' || MM_SEM_UTIL.g_PSE_TYPE_GENERATOR_UNITS);
+
+    IF p_MARKET_NAME = 'EN' THEN
+        -- ENERGY
+        IF p_PSE_UNIT_TYPE = MM_SEM_UTIL.g_PSE_TYPE_SUPPLIER_UNITS THEN
+            -- SUPPLIERS USE IMPORT
+            IF INSTR(UPPER(p_CHARGE_TYPE), '_W') > 0 THEN
+                 v_RESULT := MM_SEM_UTIL.c_TYPE_CB_EN_SUP_LOC_EXP_PROP;
+            ELSIF INSTR(UPPER(p_CHARGE_TYPE), '_EU') > 0 THEN
+                 v_RESULT := MM_SEM_UTIL.c_TYPE_CB_EN_SUP_EU_EXP_PROP;
+            ELSIF INSTR(UPPER(p_CHARGE_TYPE), '_NEU') > 0 THEN
+                 v_RESULT := MM_SEM_UTIL.c_TYPE_CB_EN_SUP_NEU_EXP_PROP;
+            ELSE
+                 v_RESULT := MM_SEM_UTIL.c_TYPE_CB_ENERGY_IMPORT_PROP;
+            END IF;
+        ELSE
+            -- GENERATORS USE EXPORT
+            v_RESULT := MM_SEM_UTIL.c_TYPE_CB_ENERGY_EXPORT_PROP;
+        END IF;
+    ELSE -- CAPACITY
+        IF p_PSE_UNIT_TYPE = MM_SEM_UTIL.g_PSE_TYPE_SUPPLIER_UNITS THEN
+            -- SUPPLIERS USE IMPORT
+            IF INSTR(UPPER(p_CHARGE_TYPE), '_W') > 0 THEN
+                 v_RESULT := MM_SEM_UTIL.c_TYPE_CB_CA_SUP_LOC_EXP_PROP;
+            ELSIF INSTR(UPPER(p_CHARGE_TYPE), '_EU') > 0 THEN
+                 v_RESULT := MM_SEM_UTIL.c_TYPE_CB_CA_SUP_EU_EXP_PROP;
+            ELSIF INSTR(UPPER(p_CHARGE_TYPE), '_NEU') > 0 THEN
+                 v_RESULT := MM_SEM_UTIL.c_TYPE_CB_CA_SUP_NEU_EXP_PROP;
+            ELSE v_RESULT := MM_SEM_UTIL.c_TYPE_CB_CAPACITY_IMPORT_PROP;
+            END IF;
+        ELSE
+            -- GENERATORS USE EXPORT
+            v_RESULT := MM_SEM_UTIL.c_TYPE_CB_CAPACITY_EXPORT_PROP;
+        END IF;
+    END IF;
+
+    RETURN v_RESULT;
+
+END GET_GP_VAR_TYPE;
+-------------------------------------------------------------------------------------------------------------
+/* This Function is used to retrieve the Gate window for a Generator Offer it performs the following Task:
+ * Identify the correct gate window from the trait_val in the IT_TRAIT_SCHEDULE table
+ * for that current date and interval; if that exists then return the gate from the trait_val column.
+ * Sometimes the gate window will not exist on that date/interval combination.
+ * If that is the case then grab the gate from the default interval (this is a default record stored in
+ * IT_TRAIT_TABLE by Day, where day is 01-JAN-1900, and by hour, 30 min intervals
+ */
+FUNCTION GET_GATE_WINDOW
+    (
+    p_CUT_DATE DATE
+    ) RETURN IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE IS
+
+    v_GATE_WINDOW IT_TRAIT_SCHEDULE.TRAIT_VAL%TYPE;
+    v_TRAIT_GROUP_NAME TRANSACTION_TRAIT_GROUP.TRAIT_GROUP_NAME%TYPE;
+    v_COMPARE_DATE DATE;
+    v_HOUR NUMBER;
+BEGIN
+    v_TRAIT_GROUP_NAME  := MM_SEM_UTIL.g_STATEMENT_TYPE_SEM_G_REF;
+
+    -- Get the hour in the 1-24 range
+    v_HOUR := MM_SEM_UTIL.GET_HOUR_FROM_DATE(p_CUT_DATE);
+    IF v_HOUR = 25
+      THEN v_HOUR :=2;
+    END IF;
+    -- Get the interval for the default value
+    v_COMPARE_DATE := MM_SEM_UTIL.GET_SCHEDULE_DATE(LOW_DATE(),
+                                 TO_NUMBER(v_HOUR),
+                                 TO_NUMBER(MM_SEM_UTIL.GET_INTERVAL_FROM_DATE(p_CUT_DATE)));
+
+    SELECT NVL(ITG2.TRAIT_VAL,ITG1.TRAIT_VAL) INTO v_GATE_WINDOW
+    FROM
+      TRANSACTION_TRAIT_GROUP TTG,
+      IT_TRAIT_SCHEDULE ITG1,
+      IT_TRAIT_SCHEDULE ITG2
+    WHERE
+      TTG.TRAIT_GROUP_NAME = v_TRAIT_GROUP_NAME
+      AND ITG1.TRAIT_GROUP_ID = TTG.TRAIT_GROUP_ID
+      AND ITG1.SCHEDULE_DATE = v_COMPARE_DATE
+      AND ITG2.TRAIT_GROUP_ID(+) = ITG1.TRAIT_GROUP_ID
+      AND ITG2.SCHEDULE_DATE(+) = p_CUT_DATE;
+
+    RETURN v_GATE_WINDOW;
+
+END GET_GATE_WINDOW;
+-------------------------------------------------------------------------------------------------------------
+PROCEDURE GET_CROSS_BORDER_DATA
+    (
+    p_STATEMENT_TYPE IN NUMBER,
+    p_STATEMENT_DATE IN DATE,
+    p_BILLING_ENTITY_ID IN NUMBER,
+    p_CHARGE_TYPE IN VARCHAR2 := NULL,
+    p_PROPORTION_TAXED OUT NUMBER,
+    p_TAX_RATE OUT NUMBER
+    ) AS
+
+    v_JURISDICTION VARCHAR2(32);
+    v_PSE_UNIT_TYPE VARCHAR2(32);
+
+    -- PSE info
+    v_MARKET_NAME SEM_SETTLEMENT_ENTITY.MARKET_NAME%TYPE;
+    v_PARTICIPANT_PSE_ID PURCHASING_SELLING_ENTITY.PSE_ID%TYPE;
+    v_IS_MARKET_OPERATOR BOOLEAN := FALSE;
+
+    v_USE_CB_RATE BOOLEAN := TRUE;
+
+    v_TAX_ATTRIBUTE VARCHAR2(32);
+    v_VAR_TYPE SEM_GP_SETTLEMENT.VARIABLE_TYPE%TYPE;
+
+    v_RUN_IDENTIFIER EXTERNAL_SYSTEM_IDENTIFIER.EXTERNAL_IDENTIFIER%TYPE;
+    v_CATEGORY PLS_INTEGER;
+    v_STATEMENT_TYPE STATEMENT_TYPE.STATEMENT_TYPE_ID%TYPE;
+
+	v_VAT_JURISDICTION VARCHAR2(32);
+
+BEGIN
+	LOGS.LOG_DEBUG_MORE_DETAIL('GET_CROSS_BORDER_DATA called with BILLING_ENTITY_ID=' || p_BILLING_ENTITY_ID
+		|| ', STATEMENT_TYPE=' || p_STATEMENT_TYPE
+		|| ', STATEMENT_DATE=' || TEXT_UTIL.TO_CHAR_TIME(p_STATEMENT_DATE));
+
+    -- GET INFORMATION WHICH MUST BE PRESENT BEFORE DETERMINING PROPORTION OR TAX RATE
+    -- GET THE PARTICIPANT PSE ID AND DETERMINE WHETHER THIS PSE IS A MARKET OPERATOR
+    GET_SETTLEMENT_PSE_INFORMATION(p_BILLING_ENTITY_ID, v_IS_MARKET_OPERATOR, v_MARKET_NAME, v_PARTICIPANT_PSE_ID);
+
+    -- GET THE PSE'S UNIT TYPE
+    v_PSE_UNIT_TYPE := MM_SEM_UTIL.GET_PSE_UNIT_TYPE(v_PARTICIPANT_PSE_ID, 1, p_STATEMENT_DATE);
+
+    -- GET THE JURISDICTION OF THE PSE
+	v_JURISDICTION := RO.GET_ENTITY_ATTRIBUTE(MM_SEM_UTIL.g_EA_PSE_JURISDICTION, EC.ED_PSE, v_PARTICIPANT_PSE_ID, p_STATEMENT_DATE);
+
+    -- FIRST DETERMINE THE PROPORTION
+    IF v_IS_MARKET_OPERATOR THEN
+        -- MARKET OPERATORS JUST USE 1 AS PROPORTION
+        p_PROPORTION_TAXED := 1;
+    ELSE
+        v_VAR_TYPE := GET_GP_VAR_TYPE(v_MARKET_NAME, v_PSE_UNIT_TYPE, p_CHARGE_TYPE);
+       BEGIN
+        MM_SEM_UTIL.GET_STATEMENT_TYPE_INFO(p_STATEMENT_TYPE, v_RUN_IDENTIFIER, v_CATEGORY);
+
+            v_STATEMENT_TYPE := MM_SEM_UTIL.GET_STATEMENT_TYPE_FROM_INFO(
+                                            -- MIRs are just P or F - so use F for revised statements
+                                            CASE WHEN SUBSTR(v_RUN_IDENTIFIER,1,1) = 'F' THEN 'F' ELSE v_RUN_IDENTIFIER END,
+                                            -- always use internal statement type since that is where
+                                            -- MIR data is stored
+                                            MM_SEM_UTIL.c_STATEMENT_CATEGORY_INTERNAL
+                                            );
+        EXCEPTION
+            WHEN MSGCODES.e_ERR_NO_SUCH_ENTRY THEN
+                v_STATEMENT_TYPE := p_STATEMENT_TYPE;
+        END;
+
+        BEGIN
+            SELECT CASE WHEN v_VAR_TYPE IN (MM_SEM_UTIL.c_TYPE_CB_EN_SUP_LOC_EXP_PROP,
+                                            MM_SEM_UTIL.c_TYPE_CB_EN_SUP_EU_EXP_PROP,
+                                            MM_SEM_UTIL.c_TYPE_CB_EN_SUP_NEU_EXP_PROP,
+                                            MM_SEM_UTIL.c_TYPE_CB_CA_SUP_LOC_EXP_PROP,
+                                            MM_SEM_UTIL.c_TYPE_CB_CA_SUP_EU_EXP_PROP,
+                                            MM_SEM_UTIL.c_TYPE_CB_CA_SUP_NEU_EXP_PROP)
+                        THEN SGS.VALUE
+                        ELSE (1-SGS.VALUE)
+                   END CASE
+            INTO p_PROPORTION_TAXED
+            FROM SEM_GP_SETTLEMENT SGS
+            WHERE SGS.STATEMENT_TYPE = v_STATEMENT_TYPE
+                AND TRUNC(SGS.CHARGE_DATE) = p_STATEMENT_DATE
+                AND SGS.MARKET = v_MARKET_NAME
+                AND SGS.VARIABLE_TYPE = v_VAR_TYPE
+                AND SGS.JURISDICTION = v_JURISDICTION;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                -- NO PROPORTION PRESENT FOR THIS DATE / MARKET / JURISDICTION / PSE UNIT TYPE
+                -- USE 1 AS PROPORTION AND DON'T USE CROSS BORDER VAT RATES
+                p_PROPORTION_TAXED := 1;
+                v_USE_CB_RATE := FALSE;
+        END;
+    END IF;
+
+    -- 2013-06-24, JBC Now determine the rate (SFDC 158070)
+	-- Per SEMO helpdesk query F0054360, "The Cross Border Proportion to be used in calculating the
+	-- split between local and cross border trades should be the one relating to the jurisdiction in which the units are based.
+	-- So for an NI PT trading on EWIC,  the variable CBEEP_ROI should be used. "
+
+    IF v_VAR_TYPE IN (MM_SEM_UTIL.c_TYPE_CB_CAPACITY_EXPORT_PROP, MM_SEM_UTIL.c_TYPE_CB_ENERGY_EXPORT_PROP) THEN
+		v_VAT_JURISDICTION := RO.GET_ENTITY_ATTRIBUTE('VAT Jurisdiction', EC.ED_PSE, v_PARTICIPANT_PSE_ID, p_STATEMENT_DATE);
+
+		-- If the participant jurisdiction for the PSE is not set, the results become invalid and the tax rate and proportion value remains unchanged.
+		IF v_VAT_JURISDICTION IS NULL THEN
+			LOGS.LOG_WARN('PSE ' || ENTITY_NAME_FROM_IDS(EC.ED_PSE, v_PARTICIPANT_PSE_ID) ||
+					   ' does not have the participant jurisdiction entity attribute set.');
+			v_TAX_ATTRIBUTE := GET_TAX_ATTRIBUTE(v_JURISDICTION, v_IS_MARKET_OPERATOR, v_PSE_UNIT_TYPE, v_USE_CB_RATE);
+			p_TAX_RATE := TO_NUMBER(RO.GET_ENTITY_ATTRIBUTE(v_TAX_ATTRIBUTE, EC.ED_SC, MM_SEM_UTIL.SEM_SC_ID, p_STATEMENT_DATE));
+		ELSE
+			IF v_VAT_JURISDICTION IN ('EU', 'NEU') THEN
+			  p_TAX_RATE := 0;
+			ELSIF (v_VAT_JURISDICTION = 'UK' AND v_JURISDICTION = MM_SEM_UTIL.c_SEM_JURIDICTION_NI)
+				  OR (v_VAT_JURISDICTION = MM_SEM_UTIL.c_SEM_JURIDICTION_ROI AND v_JURISDICTION = MM_SEM_UTIL.c_SEM_JURIDICTION_ROI) THEN
+				-- VAT juris is the same as PT juris, so _Z rate is zero and _N rate is juris rate
+			    IF p_CHARGE_TYPE LIKE '%_Z' THEN
+				    p_TAX_RATE := 0;
+					p_PROPORTION_TAXED := 1-p_PROPORTION_TAXED;
+				ELSE
+					v_TAX_ATTRIBUTE := GET_TAX_ATTRIBUTE(v_JURISDICTION, v_IS_MARKET_OPERATOR, v_PSE_UNIT_TYPE, v_USE_CB_RATE);
+					p_TAX_RATE := TO_NUMBER(RO.GET_ENTITY_ATTRIBUTE(v_TAX_ATTRIBUTE, EC.ED_SC, MM_SEM_UTIL.SEM_SC_ID, p_STATEMENT_DATE));
+				END IF;
+			ELSE
+			  -- VAT juris is different than juris, so _N rate is zero and _Z rate is "other" juris
+				IF p_CHARGE_TYPE LIKE '%_N' THEN
+					p_TAX_RATE := 0;
+				ELSE
+					-- _Z proportion to use is 1-p_PROPORTION_TAXED
+					p_PROPORTION_TAXED := 1-p_PROPORTION_TAXED;
+
+					IF v_JURISDICTION = MM_SEM_UTIL.c_SEM_JURIDICTION_ROI THEN
+						v_TAX_ATTRIBUTE := GET_TAX_ATTRIBUTE(MM_SEM_UTIL.c_SEM_JURIDICTION_NI, v_IS_MARKET_OPERATOR, v_PSE_UNIT_TYPE, v_USE_CB_RATE);
+					ELSE
+						v_TAX_ATTRIBUTE := GET_TAX_ATTRIBUTE(MM_SEM_UTIL.c_SEM_JURIDICTION_ROI, v_IS_MARKET_OPERATOR, v_PSE_UNIT_TYPE, v_USE_CB_RATE);
+					END IF;
+					p_TAX_RATE := TO_NUMBER(RO.GET_ENTITY_ATTRIBUTE(v_TAX_ATTRIBUTE, EC.ED_SC, MM_SEM_UTIL.SEM_SC_ID, p_STATEMENT_DATE));
+				END IF;
+			END IF;
+		END IF;
+    ELSE
+        -- GET THE TAX ATTRIBUTE and rate based on the unit jurisdiction
+        v_TAX_ATTRIBUTE := GET_TAX_ATTRIBUTE(v_JURISDICTION, v_IS_MARKET_OPERATOR, v_PSE_UNIT_TYPE, v_USE_CB_RATE);
+        p_TAX_RATE := TO_NUMBER(RO.GET_ENTITY_ATTRIBUTE(v_TAX_ATTRIBUTE, EC.ED_SC, MM_SEM_UTIL.SEM_SC_ID, p_STATEMENT_DATE));
+    END IF;
+
+END GET_CROSS_BORDER_DATA;
+-------------------------------------------------------------------------------------------------------------
+FUNCTION GET_INSTRUCTION_INTER
+    (
+    p_PART_PSE_ID IN NUMBER,
+    p_GEN_UNIT_ID IN NUMBER,
+    p_INSTRUCTION_TIMESTAMP IN DATE,
+    p_INSTRUCTION_CODE IN VARCHAR2,
+    p_COMBINATION_CODE IN VARCHAR2,
+    p_DISPATCH_VALUE IN NUMBER
+    ) RETURN VARCHAR2 IS
+
+    v_IS_PUMP_STORAGE NUMBER;
+    v_CAP_IC SEM_DISPATCH_INSTR.INSTRUCTION_CODE%TYPE := UPPER(p_INSTRUCTION_CODE);
+    v_CAP_CC SEM_DISPATCH_INSTR.INSTRUCTION_COMBINATION_CODE%TYPE := UPPER(p_COMBINATION_CODE);
+
+    v_PREV_MWOF_DI SEM_DISPATCH_INSTR.DISPATCH_INSTRUCTION%TYPE;
+    v_PREV_SYNC DATE;
+    v_NEXT_FAIL DATE;
+
+    v_RESULT VARCHAR2(10);
+
+	v_REPORT_TYPE SEM_DISPATCH_INSTR.REPORT_TYPE%TYPE := 'D+1';
+
+BEGIN
+
+    IF v_CAP_IC IN ('TRIP','FAIL') OR (v_CAP_IC = 'GOOP' AND v_CAP_CC IN ('SCT', 'SCP'))
+                                OR (v_CAP_IC = 'WIND' AND v_CAP_CC IN ('LOCL', 'LCLO', 'CURL', 'CRLO')) THEN
+        -- ALL OF THESE IC / CC COMBOS INDICATE AN IGNORE
+        v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_IGNORE;
+    ELSIF v_CAP_IC = 'MWOF' THEN
+        IF p_DISPATCH_VALUE > 0 THEN
+            v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_NON_ZERO;
+        ELSE
+            v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_ZERO;
+        END IF;
+    ELSIF v_CAP_IC = 'MXON' THEN
+        v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_NON_ZERO;
+    ELSIF v_CAP_IC = 'MXOF' THEN
+        -- FIND PREVIOUS MWOF TO DETERMINE IF THIS IS NON-ZERO OR NOT
+        SELECT MAX(T.DISPATCH_INSTRUCTION)
+        INTO v_PREV_MWOF_DI
+        FROM (SELECT SDI.DISPATCH_INSTRUCTION
+                FROM SEM_DISPATCH_INSTR SDI
+                WHERE SDI.PSE_ID = p_PART_PSE_ID
+                    AND SDI.POD_ID = p_GEN_UNIT_ID
+                    AND SDI.INSTRUCTION_TIME_STAMP < p_INSTRUCTION_TIMESTAMP
+                    AND UPPER(SDI.INSTRUCTION_CODE) = 'MWOF'
+					AND SDI.REPORT_TYPE = v_REPORT_TYPE
+                ORDER BY SDI.INSTRUCTION_TIME_STAMP DESC, SDI.INSTRUCTION_ISSUE_TIME DESC) T
+       WHERE ROWNUM = 1;
+
+       IF v_PREV_MWOF_DI IS NULL THEN
+            v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_IGNORE;
+
+            LOGS.LOG_WARN('Encountered a MXOF without preceeding MWOF instruction for '
+                || TEXT_UTIL.TO_CHAR_ENTITY(p_PART_PSE_ID, EC.ED_PSE, TRUE) || ' and '
+                || TEXT_UTIL.TO_CHAR_ENTITY(p_GEN_UNIT_ID, EC.ED_SERVICE_POINT, TRUE)
+                || ' for instruction time stamp ' || TEXT_UTIL.TO_CHAR_TIME(p_INSTRUCTION_TIMESTAMP));
+
+       ELSIF v_PREV_MWOF_DI > 0 THEN
+            v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_NON_ZERO;
+       ELSE
+            v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_ZERO;
+       END IF;
+    ELSIF v_CAP_IC IN ('SYNC', 'DESY') OR (v_CAP_IC = 'GOOP' AND v_CAP_CC IN ('PGEN', 'PUMP')) THEN
+        -- IT NOW MATTERS WHETHER THE GEN UNIT IS A PUMP STORAGE UNIT, LOOK IT UP
+        v_IS_PUMP_STORAGE := TO_NUMBER(RO.GET_ENTITY_ATTRIBUTE(MM_SEM_UTIL.g_EA_IS_PUMPED_STORAGE,
+                                      EC.ED_SERVICE_POINT, p_GEN_UNIT_ID, p_INSTRUCTION_TIMESTAMP));
+
+       IF NVL(v_IS_PUMP_STORAGE,0) = 0 THEN
+           IF v_CAP_IC = 'SYNC' THEN
+            v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_NON_ZERO;
+           ELSIF v_CAP_IC = 'DESY' THEN
+            v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_ZERO;
+           ELSE -- MUST BE GOOD, PGEN OR PUMP
+            v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_IGNORE;
+           END IF;
+       ELSE
+           IF v_CAP_IC IN ('SYNC','DESY') THEN
+            v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_IGNORE;
+           ELSE -- GOOP, PGEN OR PUMP
+            v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_NON_ZERO;
+           END IF;
+       END IF;
+    ELSE
+        LOGS.LOG_WARN('Unknown Instruction Code / Combination Code (' || NVL(p_INSTRUCTION_CODE,'NULL')
+            || '/' || NVL(p_COMBINATION_CODE,'NULL')  || ') combination in the Sem Dispatch Instructions '
+            || 'for ' || TEXT_UTIL.TO_CHAR_ENTITY(p_PART_PSE_ID, EC.ED_PSE, TRUE) || ' and '
+            || TEXT_UTIL.TO_CHAR_ENTITY(p_GEN_UNIT_ID, EC.ED_SERVICE_POINT, TRUE) || ' for instruction time stamp '
+            || TEXT_UTIL.TO_CHAR_TIME(p_INSTRUCTION_TIMESTAMP));
+
+       v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_IGNORE;
+    END IF;
+
+    -- NON ZERO INSTRUCTIONCS CAN BE CHANGED TO IGNORE IF THEY ARE PRECEDED BY A SYNC AND
+    -- FOLLOWED BY A FAIL WHICH ARE <= AN HOUR APART
+    IF v_RESULT = MM_SEM_SHADOW_BILL.c_INSTR_INTER_NON_ZERO THEN
+        SELECT NVL(MAX(SDI.INSTRUCTION_TIME_STAMP), CONSTANTS.LOW_DATE)
+        INTO v_PREV_SYNC
+        FROM SEM_DISPATCH_INSTR SDI
+        WHERE SDI.PSE_ID = p_PART_PSE_ID
+            AND SDI.POD_ID = p_GEN_UNIT_ID
+			   AND SDI.REPORT_TYPE = v_REPORT_TYPE
+            AND SDI.INSTRUCTION_CODE = 'SYNC'
+            AND SDI.INSTRUCTION_TIME_STAMP <= p_INSTRUCTION_TIMESTAMP
+            AND SDI.INSTRUCTION_TIME_STAMP > (p_INSTRUCTION_TIMESTAMP - (1/24));
+
+        SELECT NVL(MIN(SDI.INSTRUCTION_TIME_STAMP), CONSTANTS.HIGH_DATE)
+        INTO v_NEXT_FAIL
+        FROM SEM_DISPATCH_INSTR SDI
+        WHERE SDI.PSE_ID = p_PART_PSE_ID
+            AND SDI.POD_ID = p_GEN_UNIT_ID
+			   AND SDI.REPORT_TYPE = v_REPORT_TYPE
+            AND SDI.INSTRUCTION_CODE = 'FAIL'
+            AND SDI.INSTRUCTION_TIME_STAMP >= p_INSTRUCTION_TIMESTAMP
+            AND SDI.INSTRUCTION_TIME_STAMP < (p_INSTRUCTION_TIMESTAMP + (1/24));
+
+       IF (v_NEXT_FAIL - v_PREV_SYNC) <= (1/24) THEN
+        v_RESULT := MM_SEM_SHADOW_BILL.c_INSTR_INTER_IGNORE;
+       END IF;
+    END IF;
+
+    RETURN v_RESULT;
+
+END GET_INSTRUCTION_INTER;
+-------------------------------------------------------------------------------------------------------------
+FUNCTION GET_EXCHANGE_RATE(
+  p_BILL_ENTITY_ID  IN NUMBER,
+  p_DATE            IN DATE,
+  p_MARKET_PRICE_ID IN NUMBER
+  ) RETURN NUMBER IS
+
+  v_EXCHANGE_RATE     NUMBER := 0;
+  v_USE_EURO          NUMBER := NULL;
+  v_STATEMENT_DATE    DATE   := NULL;
+BEGIN
+  v_STATEMENT_DATE := GET_TRADING_DAY_DATE(p_DATE);
+
+  v_USE_EURO := GET_CURRENCY(p_BILL_ENTITY_ID,
+                             v_STATEMENT_DATE);
+
+  CASE
+     WHEN v_USE_EURO = 0 THEN
+          -- NO CONVERSION
+         v_EXCHANGE_RATE := 1;
+
+     ELSE
+        BEGIN
+          --Currency Rate Today
+          WITH MPV2 AS
+            (SELECT MAX(T.MARKET_PRICE_ID) AS MARKET_PRICE_ID,
+                    MAX(T.PRICE_DATE)      AS PRICE_DATE,
+                    DECODE(MAX(DECODE(T.PRICE_CODE,'F',1,'P',2,'A',3)),1,'F',2,'P',3,'A') AS PRICE_CODE
+              FROM MARKET_PRICE_VALUE T
+             WHERE T.MARKET_PRICE_ID = p_MARKET_PRICE_ID
+               AND T.PRICE_DATE      = v_STATEMENT_DATE
+               AND T.PRICE_CODE IN ('A','F','P'))
+          SELECT MPV.PRICE
+            INTO v_EXCHANGE_RATE
+            FROM MARKET_PRICE_VALUE MPV,
+                 MPV2
+           WHERE MPV.MARKET_PRICE_ID = MPV2.MARKET_PRICE_ID
+             AND MPV.PRICE_DATE      = MPV2.PRICE_DATE
+             AND MPV.PRICE_CODE      = MPV2.PRICE_CODE;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+               v_EXCHANGE_RATE := 0;
+        END;
+  END CASE;
+
+  RETURN v_EXCHANGE_RATE;
+
+END GET_EXCHANGE_RATE;
+------------------------------------------------------------------------------------------------------------
+FUNCTION GET_MSQ
+    (
+	p_IS_INTERCONNECT IN NUMBER,
+	p_SERVICE_POINT IN VARCHAR2,
+	p_STATEMENT_TYPE_ID IN NUMBER,
+    p_SCHEDULE_DATE IN DATE,
+	p_STATEMENT_DATE IN DATE,
+	p_AGREEMENT_TYPE IN VARCHAR2 DEFAULT NULL
+    ) RETURN NUMBER IS
+v_MSQ					   	NUMBER;
+v_TRANSACTION_ID		   	INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_TXN_TYPE					INTERCHANGE_TRANSACTION.TRANSACTION_TYPE%TYPE;
+v_CAPACITY_TXN_TYPE			INTERCHANGE_TRANSACTION.TRANSACTION_TYPE%TYPE;
+v_ENERGY_TRANSACTION_ID	   	INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+v_ENERGY_STATEMENT_TYPE_ID 	STATEMENT_TYPE.STATEMENT_TYPE_ID%TYPE;
+b_IS_INTERCONNECT			BOOLEAN := SYS.DIUTIL.INT_TO_BOOL(p_IS_INTERCONNECT);
+BEGIN
+	LOGS.LOG_DEBUG_MORE_DETAIL('GET_MSQ called with IS_INTERCONNECT=' || p_IS_INTERCONNECT
+		|| ', SERVICE_POINT=' || p_SERVICE_POINT
+		|| ', STATEMENT_TYPE_ID=' || p_STATEMENT_TYPE_ID
+		|| ', AGREEMENT_TYPE='|| p_AGREEMENT_TYPE
+		|| ', SCHEDULE_DATE=' || TEXT_UTIL.TO_CHAR_TIME(p_SCHEDULE_DATE)
+		|| ', STATEMENT_DATE=' || TEXT_UTIL.TO_CHAR_TIME(p_STATEMENT_DATE));
+
+	-- First, try to get the MSQ value for the SERVICE_POINT, STATEMENT_TYPE, DATE using the
+	-- market specific MSQ transaction
+	IF b_IS_INTERCONNECT THEN
+		v_TXN_TYPE := MM_SEM_UTIL.c_TXN_TYPE_NOMINATION;
+	ELSE
+		v_TXN_TYPE := MM_SEM_UTIL.c_TXN_TYPE_GENERATION;
+	END IF;
+
+	v_CAPACITY_TXN_TYPE := v_TXN_TYPE || ' ' || MM_SEM_SETTLEMENT.g_CAPACITY_MARKET_NAME;
+
+	-- First lookup the Capacity Transaction
+	v_TRANSACTION_ID := MM_SEM_UTIL.GET_TRANSACTION_ID( p_TRANSACTION_TYPE =>v_CAPACITY_TXN_TYPE,
+														p_RESOURCE_NAME => p_SERVICE_POINT,
+														p_COMMODITY_NAME => MM_SEM_UTIL.c_COMMODITY_ENERGY,
+														p_AGREEMENT_TYPE => p_AGREEMENT_TYPE
+													  );
+
+	IF v_TRANSACTION_ID IS NOT NULL THEN
+		LOGS.LOG_DEBUG_MORE_DETAIL('TRANSACTION_ID = ' || v_TRANSACTION_ID);
+    	SELECT SUM(S.AMOUNT)
+    	INTO v_MSQ
+    	FROM IT_SCHEDULE S
+    	WHERE S.TRANSACTION_ID = v_TRANSACTION_ID
+    		AND S.SCHEDULE_TYPE = p_STATEMENT_TYPE_ID
+			AND S.SCHEDULE_STATE = CONSTANTS.INTERNAL_STATE
+    		AND S.SCHEDULE_DATE = p_SCHEDULE_DATE;
+	ELSE
+		LOGS.LOG_DEBUG_MORE_DETAIL('TRANSACTION_ID was not found');
+	END IF;
+
+	IF v_MSQ IS NULL THEN
+
+		LOGS.LOG_DEBUG_MORE_DETAIL('MSQ is null. Checking Energy TXN...');
+
+		-- Fall back to querying the values from the Energy MSQ transaction.
+		-- First, translate the current STATEMENT_TYPE to a corresponding Energy STATEMENT_TYPE
+		v_ENERGY_STATEMENT_TYPE_ID := GET_ENERGY_STATEMENT_TYPE(MM_SEM_SETTLEMENT.g_CAPACITY_MARKET_NAME, p_STATEMENT_TYPE_ID, p_STATEMENT_DATE);
+
+		LOGS.LOG_DEBUG_MORE_DETAIL('ENERGY_STATEMENT_TYPE_ID = ' || v_ENERGY_STATEMENT_TYPE_ID);
+
+		v_ENERGY_TRANSACTION_ID := MM_SEM_UTIL.GET_TRANSACTION_ID(
+																	p_TRANSACTION_TYPE => v_TXN_TYPE,
+																	p_RESOURCE_NAME =>  p_SERVICE_POINT,
+																	p_COMMODITY_NAME => 'Energy',
+																	p_AGREEMENT_TYPE => p_AGREEMENT_TYPE);
+
+		LOGS.LOG_DEBUG_MORE_DETAIL('ENERGY_TRANSACTION_ID = ' || v_ENERGY_TRANSACTION_ID);
+
+		SELECT SUM(S.AMOUNT)
+		INTO v_MSQ
+		FROM IT_SCHEDULE S
+		WHERE S.TRANSACTION_ID = v_ENERGY_TRANSACTION_ID
+		 AND S.SCHEDULE_TYPE = v_ENERGY_STATEMENT_TYPE_ID
+		 AND S.SCHEDULE_STATE = CONSTANTS.INTERNAL_STATE
+		 AND S.SCHEDULE_DATE = p_SCHEDULE_DATE;
+
+		LOGS.LOG_DEBUG_MORE_DETAIL('MSQ = ' || v_MSQ);
+
+	END IF;
+
+    RETURN v_MSQ;
+
+EXCEPTION
+	WHEN OTHERS THEN
+		ERRS.LOG_AND_CONTINUE();
+		RETURN v_MSQ;
+END GET_MSQ;
+------------------------------------------------------------------------------------------------------------
+FUNCTION GET_PIR_VALUE
+    (
+	p_VARIABLE_TYPE IN VARCHAR2,
+	p_BILLING_ENTITY_ID IN NUMBER,
+	p_STATEMENT_TYPE_ID IN NUMBER,
+	p_CHARGE_DATE IN DATE,
+	p_VARIABLE_NAME IN VARCHAR2 := NULL,
+	p_SERVICE_POINT IN VARCHAR2 := NULL
+    ) RETURN NUMBER AS
+v_PIR_VALUE SEM_MP_INFO.VALUE%TYPE;
+v_RUN_IDENTIFIER VARCHAR2(64);
+v_CATEGORY PLS_INTEGER;
+v_STATEMENT_TYPE_ID STATEMENT_TYPE.STATEMENT_TYPE_ID%TYPE;
+v_STATEMENT_DATE DATE;
+BEGIN
+
+	BEGIN
+		-- The incoming Statement Type could be an SMO or TDIE type.
+		-- Convert the incoming Statement Type to it's Internal counterpart.
+		MM_SEM_UTIL.GET_STATEMENT_TYPE_INFO(p_STATEMENT_TYPE_ID, v_RUN_IDENTIFIER, v_CATEGORY);
+		v_STATEMENT_TYPE_ID := MM_SEM_UTIL.GET_STATEMENT_TYPE_FROM_INFO(v_RUN_IDENTIFIER, MM_SEM_UTIL.c_STATEMENT_CATEGORY_INTERNAL);
+	EXCEPTION
+		WHEN MSGCODES.e_ERR_NO_SUCH_ENTRY THEN
+			-- If we can't find any info for the incoming Statement Type then just use the one passed in.
+			v_STATEMENT_TYPE_ID := p_STATEMENT_TYPE_ID;
+	END;
+
+	v_STATEMENT_DATE := TRUNC(FROM_CUT(p_CHARGE_DATE, MM_SEM_UTIL.g_TZ) - 1/86400);
+
+	SELECT I.VALUE
+	INTO v_PIR_VALUE
+	FROM SEM_MP_INFO I, SEM_MP_STATEMENT S
+	WHERE I.STATEMENT_ID = S.STATEMENT_ID
+	  AND S.STATEMENT_TYPE = v_STATEMENT_TYPE_ID
+	  AND S.STATEMENT_DATE = v_STATEMENT_DATE
+	  AND S.ENTITY_ID = p_BILLING_ENTITY_ID
+	  AND I.CHARGE_DATE = p_CHARGE_DATE
+	  AND I.VARIABLE_TYPE = p_VARIABLE_TYPE
+	  AND (p_VARIABLE_NAME IS NULL OR p_VARIABLE_NAME = I.VARIABLE_NAME)
+	  AND NVL(p_SERVICE_POINT, '?') = I.RESOURCE_NAME;
+
+	RETURN v_PIR_VALUE;
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		RETURN NULL;
+END GET_PIR_VALUE;
+------------------------------------------------------------------------------------------------------------
+FUNCTION GET_RMVIP
+    (
+	p_SERVICE_POINT IN VARCHAR2,
+	p_STATEMENT_DATE IN DATE
+    ) RETURN NUMBER AS
+v_RMVIP NUMBER;
+v_ATTRIBUTE_NAME ENTITY_ATTRIBUTE.ATTRIBUTE_NAME%TYPE;
+v_SEM_SC_ID SCHEDULE_COORDINATOR.SC_ID%TYPE;
+BEGIN
+	-- ROI
+	IF REGEXP_LIKE(p_SERVICE_POINT, '^[[:upper:]].+_4') THEN
+		v_ATTRIBUTE_NAME := MM_SEM_UTIL.g_EA_ROI_RMVIP;
+	-- NI
+	ELSIF REGEXP_LIKE(p_SERVICE_POINT, '^[[:upper:]].+_5') THEN
+		v_ATTRIBUTE_NAME := MM_SEM_UTIL.g_EA_NI_RMVIP;
+	ELSE
+		ERRS.RAISE(MSGCODES.c_ERR_NO_SUCH_ENTRY, 'Cannot retreive RMVIP variable. Unable to determine Jurisdiction for Service Point, '
+			|| p_SERVICE_POINT	|| ', on ' || TEXT_UTIL.TO_CHAR_DATE(p_STATEMENT_DATE) || '.');
+	END IF;
+
+	v_SEM_SC_ID := EI.GET_ID_FROM_NAME('SEM', EC.ED_SC);
+
+	v_RMVIP := RO.GET_ENTITY_ATTRIBUTE(v_ATTRIBUTE_NAME, EC.ED_SC, v_SEM_SC_ID, p_STATEMENT_DATE);
+
+	RETURN v_RMVIP;
+END GET_RMVIP;
+------------------------------------------------------------------------------------------------------------
+FUNCTION GET_NDA
+    (
+	p_STATEMENT_TYPE_ID IN NUMBER,
+	p_CHARGE_DATE IN DATE,
+	p_SERVICE_POINT IN VARCHAR2
+    ) RETURN NUMBER AS
+v_NDA NUMBER := NULL;
+v_TXN_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+BEGIN
+	-- Get the Forecasted NDA transaction. Do not create if
+	v_TXN_ID := MM_SEM_UTIL.GET_TRANSACTION_ID(
+												p_TRANSACTION_TYPE 	=> 'Net Demand Adjustment',
+												p_RESOURCE_NAME		=> p_SERVICE_POINT,
+												p_COMMODITY_NAME	=> 'Energy'
+											   );
+
+	IF v_TXN_ID IS NOT NULL THEN
+		SELECT MAX(S.AMOUNT)
+		INTO v_NDA
+		FROM IT_SCHEDULE S
+		WHERE S.TRANSACTION_ID = v_TXN_ID
+		AND S.SCHEDULE_STATE = GA.INTERNAL_STATE
+		AND S.SCHEDULE_TYPE = p_STATEMENT_TYPE_ID
+		AND S.SCHEDULE_DATE = p_CHARGE_DATE;
+	END IF;
+
+	RETURN v_NDA;
+END GET_NDA;
+------------------------------------------------------------------------------------------------------------
+FUNCTION GET_JURISDICTION(p_BILLING_ENTITY_ID IN NUMBER, p_STATEMENT_DATE IN DATE) RETURN VARCHAR2 AS
+v_JURISDICTION VARCHAR2(16);
+BEGIN
+	v_JURISDICTION := RO.GET_ENTITY_ATTRIBUTE(MM_SEM_UTIL.g_EA_PSE_JURISDICTION, EC.ED_PSE, p_BILLING_ENTITY_ID, p_STATEMENT_DATE);
+
+	IF v_JURISDICTION IS NULL THEN
+		ERRS.RAISE(MSGCODES.c_ERR_NO_SUCH_ENTRY, 'The Settlement PSE, ' || TEXT_UTIL.TO_CHAR_ENTITY(p_BILLING_ENTITY_ID,EC.ED_PSE) || ', is missing the Jurisdiction attribute.');
+	END IF;
+
+	RETURN v_JURISDICTION;
+
+END GET_JURISDICTION;
+------------------------------------------------------------------------------------------------------------
+FUNCTION GET_MONTHLY_AVG_MAX_IMPORT_CAP(
+    p_PSE_ID         IN NUMBER,
+    p_STATEMENT_DATE IN DATE )
+  RETURN NUMBER
+IS
+  v_RESULT NUMBER;
+BEGIN
+  SELECT NVL(AVG(S.IC_IMPORT_CAPACITY), 0)
+    INTO v_RESULT
+    FROM SEM_IC_CAP_HOLDINGS S
+    WHERE S.PSE_ID =
+      (SELECT PARTICIPANT_PSE_ID
+      FROM SEM_SETTLEMENT_ENTITY S
+      WHERE SETTLEMENT_PSE_ID = p_PSE_ID
+      )
+    AND PERIODICITY = c_DAILY_AVG
+    AND (S.SCHEDULE_DATE >= TO_CUT(TRUNC(p_STATEMENT_DATE, 'MONTH'), 'EDT')  AND S.SCHEDULE_DATE <= TO_CUT(LAST_DAY(p_STATEMENT_DATE) + 1, 'EDT'));
+    RETURN v_RESULT;
+END GET_MONTHLY_AVG_MAX_IMPORT_CAP;
+------------------------------------------------------------------------------------------------------------------
+END MM_SEM_SHADOW_BILL;
+/

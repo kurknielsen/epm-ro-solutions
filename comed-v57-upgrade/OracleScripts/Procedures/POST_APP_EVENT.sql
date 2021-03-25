@@ -1,0 +1,29 @@
+CREATE OR REPLACE PROCEDURE POST_APP_EVENT
+	(
+	p_APP_NAME IN VARCHAR,
+	p_EVENT_NAME IN VARCHAR,
+	p_EVENT_TYPE IN VARCHAR,
+	p_EVENT_CODE IN NUMBER,
+	p_EVENT_TEXT IN VARCHAR
+	)
+	AS
+	
+-- Revision: $Revision: 1.17 $
+
+-- Drepricated Procedure - Replaced by POST_TO_APP_EVENT_LOG.
+-- Post an application event to the database log table
+
+v_EVENT_TYPE VARCHAR(16);
+
+BEGIN
+
+	v_EVENT_TYPE := UPPER(LTRIM(RTRIM(p_EVENT_TYPE)));
+	IF v_EVENT_TYPE = 'SUCCESS' THEN
+		v_EVENT_TYPE := 'NORMAL';
+	END IF;
+
+	POST_TO_APP_EVENT_LOG ('Metering', p_APP_NAME, p_EVENT_NAME, v_EVENT_TYPE, 'PROCESS', NULL, NULL, p_EVENT_TEXT);
+
+END POST_APP_EVENT;
+/
+

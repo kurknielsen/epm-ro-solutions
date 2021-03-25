@@ -1,0 +1,14 @@
+prompt TSIN_ACTIONS
+@@TSIN_ACTIONS.sql
+
+prompt TSIN_LABEL
+@@TSIN_LABEL.sql
+
+prompt Enabling SEM external system...
+BEGIN
+UPDATE EXTERNAL_SYSTEM SET IS_ENABLED=1 WHERE EXTERNAL_SYSTEM_ID=EC.ES_TSIN;
+END;
+/
+
+commit;
+

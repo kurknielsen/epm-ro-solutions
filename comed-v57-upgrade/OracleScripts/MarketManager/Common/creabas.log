@@ -1,0 +1,2142 @@
+CREATE TABLE MARKET_CLOSINGS
+             *
+ERROR at line 1:
+ORA-00955: name is already used by an existing object 
+
+
+***************************************************
+MEX\PJM
+***************************************************
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+***************************************************
+MEX\MISO
+***************************************************
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table created.
+
+***************************************************
+MEX\NY-ISO
+***************************************************
+
+Table created.
+
+
+Table altered.
+
+***************************************************
+MEX\OASIS
+***************************************************
+
+Table created.
+
+
+Table altered.
+
+***************************************************
+MEX\ERCOT
+***************************************************
+
+Table created.
+
+
+Index created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Index created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+***************************************************
+MINT\SEM
+***************************************************
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Index created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Table altered.
+
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+  1* COMMENT ON COLUMN SEM_CANCELLED_SRA_HEADER.TRANSACTION_CID IS 'Unique Transaction ID for the credit risk run under which the reallocation agreement were cancelled.'
+
+Table created.
+
+
+Table altered.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+
+Comment created.
+
+***************************************************
+MINT\TDIE
+***************************************************
+Create table TDIE_300_EXCEPTION...
+
+Table created.
+
+Create table TDIE_300_METER...
+
+Table created.
+
+Create table TDIE_300_MPRN...
+
+Table created.
+
+Create table TDIE_300_REGISTER...
+
+Table created.
+
+Create table TDIE_300_USAGE_FACTOR...
+
+Table created.
+
+Create table TDIE_AGG_CONSUMPTION...
+
+Table created.
+
+Create table TDIE_AGG_CONSUMPTION_DLF...
+
+Table created.
+
+Create table TDIE_AGG_CONSUMPTION_DLF_DTL...
+
+Table created.
+
+Create table TDIE_AGG_GENERATION...
+
+Table created.
+
+Create table TDIE_MESSAGE...
+
+Table created.
+
+Create table TDIE_NIETD...
+
+Table created.
+
+Create table TDIE_NIETD_DETAIL...
+
+Table created.
+
+Create table TDIE_NIETD_UNDER_REVIEW...
+
+Table created.
+
+Create table TDIE_SMO_CONSUMPTION...
+
+Table created.
+
+Creating foreign key FK_TDIE_300_EXCEPTION_TDIE_MSG...
+
+Table altered.
+
+Creating foreign key FK_TDIE_300_EXCEPTION_EVENT...
+
+Table altered.
+
+Creating foreign key FK_TDIE_300_METER_TDIE_MSG...
+
+Table altered.
+
+Creating foreign key FK_TDIE_300_MPRN_TDIE_MSG...
+
+Table altered.
+
+Creating foreign key FK_TDIE_300_REGISTER_TDIE_MSG...
+
+Table altered.
+
+Creating foreign key FK_TDIE_300_USG_FCTR_TDIE_MSG...
+
+Table altered.
+
+Creating unique key AK_TDIE_MESSAGE...
+
+Table altered.
+
+Creating indexes on TDIE_MESSAGE...
+
+Index created.
+
+
+Index created.
+
+Creating foreign key FK_TDIE_MSG_PROC_LOG...
+
+Table altered.
+
+Creating check constraint CK_TDIE_MESSAGE_MSG_TYPE_CODE...
+
+Table altered.
+
+Creating foreign key FK_AGG_CONSUMPTION_TDIE_MSG...
+
+Table altered.
+
+Creating unique key AK_TDIE_AGG_CONSUMPTION_DLF...
+
+Table altered.
+
+Creating foreign key FK_AGG_CONSUMPT_DLF_TDIE_MSG...
+
+Table altered.
+
+Creating foreign key FK_AGG_CON_DLF_DTL_AGG_CON_DLF...
+
+Table altered.
+
+Creating foreign key FK_SMO_CONSUMPTION_TDIE_MSG...
+
+Table altered.
+
+Creating foreign key FK_AGG_GENERATION_TDIE_MSG...
+
+Table altered.
+
+Creating foreign key FK_NIETD_UNDER_REVIEW_TDIE_MSG...
+
+Table altered.
+
+Creating foreign key FK_TDIE_NIETD_TDIE_MSG...
+
+Table altered.
+
+Creating foreign key FK_TDIE_NIETD_DTL_TDIE_NIETD...
+
+Table altered.
+
+Create table TDIE_34X_MPRN...
+
+Table created.
+
+Creating unique key AK_TDIE_34X_MPRN...
+
+Table altered.
+
+Creating foreign key FK_34X_MPRN_PROC_LOG...
+
+Table altered.
+
+Creating check constraint CK_TDIE_34X_MPRN_MSG_TYPE_CODE...
+
+Table altered.
+
+Create table TDIE_34X_MPRN_CHANNEL...
+
+Table created.
+
+Creating unique key AK_TDIE_34X_MPRN_CHANNEL...
+
+Table altered.
+
+Creating foreign key FK_34X_CHANNEL_34X_MPRN...
+
+Table altered.
+
+Create table TDIE_34X_INTERVAL...
+
+Table created.
+
+Creating foreign key FK_34X_INTERVAL_34X_CHANNEL...
+
+Table altered.
+
+Create table TDIE_34X_EXCEPTION...
+
+Table created.
+
+Creating foreign key FK_34X_EXCEPTION_34X_MPRN...
+
+Table altered.
+
+Creating foreign key FK_34X_EXCEPTION_PROC_LOG...
+
+Table altered.
+
+Create table TDIE_DUOS_INVOICE...
+
+Table created.
+
+Creating foreign key FK_TDIE_DUOS_INVOICE_PROC_LOG...
+
+Table altered.
+
+Create table TDIE_DUOS_INVOICE_DETAIL...
+
+Table created.
+
+Creating foreign key FK_TDIE_DUOS_INV_DTL_DUOS_INV...
+
+Table altered.
+
+Create table TDIE_DUOS_NI_INVOICE...
+
+Table created.
+
+Creating foreign key FK_TDIE_DUOS_NI_INV_PROC_LOG...
+
+Table altered.
+
+Create table TDIE_DUOS_NI_INVOICE_DETAIL...
+
+Table created.
+
+Creating foreign key FK_TDIE_DUOS_NI_INV_DTL_DUOS...
+
+Table altered.
+
+Create table TDIE_UOS_INVOICE...
+
+Table created.
+
+Creating foreign key FK_TDIE_UOS_INVOICE_PROC_LOG...
+
+Table altered.
+
+Create table TDIE_UOS_INVOICE_DETAIL...
+
+Table created.
+
+Creating index TDIE_UOS_INVOICE_DETAIL_IX01...
+
+Index created.
+
+Creating foreign key FK_TDIE_UOS_INV_DTL_UOS_INV...
+
+Table altered.
+
+Create table TDIE_TUOS_INVOICE...
+
+Table created.
+
+Creating foreign key FK_TDIE_TUOS_INVOICE_PROC_LOG...
+
+Table altered.
+
+Create table TDIE_TUOS_INVOICE_DETAIL...
+
+Table created.
+
+Creating foreign key FK_TDIE_UOS_INV_DTL_UOS_INV...
+
+Table altered.
+
+Creating check constraint CHK_TUOS_INV_DTL_MPRN_SUPPLY...
+
+Table altered.
+
+Create table TDIE_TUOS_INV_CHARGE_DTL...
+
+Table created.
+
+Creating foreign key FK_TDIE_TUOS_INV_CHARGE_DTL...
+
+Table altered.
+
+Create table TDIE_INVOICE_LINE_VALIDATION...
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+Create table TDIE_INVOICE_COMP_VALIDATION
+
+Table created.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+
+Table altered.
+
+Create table TDIE_TUOS_INVOICE_DET_CODE_MAP
+
+Table created.
+
+Create table TDIE_TUOS_SUPPLY_UNIT_MAP...
+
+Table created.
+
+Create table TDIE_TUOS_CODES...
+
+Table created.
+
+Create table TDIE_ACCOUNT...
+
+Table created.
+
+
+Table altered.
+
+Creating index on TDIE_ACCOUNT...
+
+Index created.
+
+Creating temporary table TDIE_EARN_ID_MPRN_SU_MAPPING...
+
+Table created.
+
+Adding constraint EARN_MPRN_SU_MAP_AK...
+
+Table altered.
+

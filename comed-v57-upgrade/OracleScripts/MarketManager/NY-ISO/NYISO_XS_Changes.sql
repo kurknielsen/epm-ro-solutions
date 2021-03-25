@@ -1,0 +1,171 @@
+PROCEDURE DATA_EXCHANGE(p_REQUEST_TYPE          IN CHAR,
+p_BEGIN_DATE            IN DATE,
+p_END_DATE              IN DATE,
+p_AS_OF_DATE            IN DATE,
+p_EXCHANGE_TYPE         IN VARCHAR,
+p_MODULE_NAME           IN VARCHAR,
+p_ENTITY_LIST           IN VARCHAR2,
+p_ENTITY_LIST_DELIMITER IN CHAR,
+p_STATUS                OUT NUMBER,
+p_MESSAGE               OUT VARCHAR) AS
+
+	-- p_ENTITY_LIST IS A LIST OF IDS OR NAMES DELIMITED BY p_ENTITY_LIST_DELIMITER.
+	-- AN ENTITY LIST CAN BE SHOWN ON THE DATA EXCHANGE DIALOG BY IMPLEMENTING THE
+	-- DATA_EXCHANGE_ENTITY_LIST PROCEDURE IN THIS PACKAGE FOR THE GIVEN EXCHANGE TYPE.
+	-- IF THE CURSOR FROM DATA_EXCHANGE_ENTITY_LIST IS NAME, ID, THEN THE SELECTED IDS WILL BE RETURNED.
+	-- IF THE CURSOR FROM DATA_EXCHANGE_ENTITY_LIST IS JUST NAME, THEN THE SELECTED NAMES WILL BE RETURNED.
+	l_BEGIN_DATE DATE;
+	l_END_DATE   DATE;
+	l_DATE       DATE;
+
+	TYPE t_ARRAY IS VARRAY(20) OF VARCHAR2(64);
+	l_ACTION_LIST t_ARRAY := t_ARRAY();
+	l_ALL_ACTIONS t_ARRAY := t_ARRAY('NYISO: Day-ahead LBMP (Zones)',
+					 'NYISO: Real-time LBMP (Zones)');
+BEGIN
+
+	p_STATUS := GA.SUCCESS;
+
+	IF p_EXCHANGE_TYPE LIKE 'NYISO%' THEN
+		IF p_EXCHANGE_TYPE LIKE 'NYISO: All%' THEN
+			l_ACTION_LIST := l_ALL_ACTIONS;
+		ELSE
+			l_ACTION_LIST.EXTEND();
+			l_ACTION_LIST(1) := p_EXCHANGE_TYPE;
+		END IF;
+	
+		-- loop over all the actions needed
+		FOR i IN 1 .. l_ACTION_LIST.COUNT LOOP
+			-- start date can be no earlier than 10 days from now
+			IF p_BEGIN_DATE < SYSDATE - 10 THEN
+				l_BEGIN_DATE := SYSDATE - 10;
+			ELSE
+				l_BEGIN_DATE := p_BEGIN_DATE;
+			END IF;
+		
+			-- end date can be no later than tomorrow (for day-ahead exchange types) or
+			-- today (for ancillary services and real-time exchange types)
+			l_END_DATE := p_END_DATE;
+			IF UPPER(l_ACTION_LIST(i)) LIKE '%DAY-AHEAD%' THEN
+				IF p_END_DATE > SYSDATE + 1 THEN
+					l_END_DATE := SYSDATE;
+				END IF;
+			ELSE
+				IF p_END_DATE > SYSDATE THEN
+					l_END_DATE := SYSDATE;
+				END IF;
+			END IF;
+		
+			-- loop over each day in the date range, and suck in the file
+			l_DATE := l_BEGIN_DATE;
+			LOOP
+				NYISO_EXCHANGE.DATA_EXCHANGE(l_ACTION_LIST(i), l_DATE, p_STATUS,
+						 p_MESSAGE);
+				IF p_STATUS != GA.SUCCESS THEN
+					-- RETURN;
+					NULL;
+				END IF;
+				l_DATE := l_DATE + 1;
+				EXIT WHEN l_DATE > p_END_DATE;
+			END LOOP;
+		END LOOP;
+	END IF;
+
+END DATA_EXCHANGE;
+
+-------------------------------------------------------------------------------
+PROCEDURE DATA_IMPORT
+	(
+	p_REQUEST_TYPE IN CHAR,
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_AS_OF_DATE IN DATE,
+	p_EXCHANGE_TYPE IN VARCHAR,
+	p_MODULE_NAME IN VARCHAR,
+	p_RECORD_DELIMITER IN CHAR,
+	p_RECORDS IN VARCHAR,
+	p_FILE_PATH IN VARCHAR,
+	p_LAST_TIME IN NUMBER,
+	p_STATUS OUT NUMBER,
+	p_MESSAGE OUT VARCHAR
+	) AS
+
+BEGIN
+
+    p_STATUS := GA.SUCCESS;
+     NYISO_EXCHANGE.DATA_IMPORT(
+              p_EXCHANGE_TYPE,
+              p_RECORD_DELIMITER,
+              p_RECORDS,
+              p_STATUS,
+              p_MESSAGE);
+    
+END DATA_IMPORT;
+----------------------------------------------------------------------------------------------------
+/*
+	11-jun-2004, jbc: Because we don't have separate schedule coordinators for each type of bid 
+  anymore (we added TRAIT_CATEGORY to handle this grouping), these queries all needed to be
+  updated to specifically work with a schedule coordinator of NYISO. So each query has to also
+  use the SCHEDULE_COORDINATOR table, joined to INTERCHANGE_TRANSACTION via SC_ID, and
+  filtered by SC_NAME='NYISO'.
+*/
+PROCEDURE BID_OFFER_TRANSACTION_LIST
+	(
+	p_BEGIN_DATE IN DATE,
+	p_END_DATE IN DATE,
+	p_ACTION IN VARCHAR2,
+	p_SHOW_HOURS OUT NUMBER,
+	p_STATUS OUT NUMBER,
+	p_CURSOR IN OUT REF_CURSOR
+    ) AS
+BEGIN
+--This procedure should be overridden to send specific
+--Transactions for specific Transactions to the
+--Bid Offer Action dialog.
+
+	p_SHOW_HOURS := 1;
+
+  IF p_ACTION='NYISO: Generator Bid' THEN
+  	OPEN p_CURSOR FOR
+  		  SELECT TRANSACTION_NAME, A.TRANSACTION_ID
+  		  FROM INTERCHANGE_TRANSACTION A, IT_COMMODITY B, SCHEDULE_COORDINATOR C
+  		  WHERE IS_BID_OFFER = 1
+  		  		AND A.COMMODITY_ID = B.COMMODITY_ID
+            AND A.TRANSACTION_TYPE='Generation'
+            AND A.SC_ID = C.SC_ID
+	    			AND C.SC_NAME='NYISO'
+  		  ORDER BY B.COMMODITY_NAME, A.TRANSACTION_NAME;
+  ELSIF p_ACTION='NYISO: Load Bid' THEN
+  	OPEN p_CURSOR FOR
+  		  SELECT TRANSACTION_NAME, A.TRANSACTION_ID
+  		  FROM INTERCHANGE_TRANSACTION A, IT_COMMODITY B, SCHEDULE_COORDINATOR C
+  		  WHERE IS_BID_OFFER = 1
+  		  		AND A.COMMODITY_ID = B.COMMODITY_ID
+            AND A.TRANSACTION_TYPE='Load'
+            AND A.SC_ID = C.SC_ID
+	    			AND C.SC_NAME='NYISO'
+  		  ORDER BY B.COMMODITY_NAME, A.TRANSACTION_NAME;
+  ELSIF p_ACTION='NYISO: Transaction Bid' THEN
+  	OPEN p_CURSOR FOR
+  		  SELECT TRANSACTION_NAME, A.TRANSACTION_ID
+  		  FROM INTERCHANGE_TRANSACTION A, IT_COMMODITY B, SCHEDULE_COORDINATOR C
+  		  WHERE IS_BID_OFFER = 1
+  		  		AND A.COMMODITY_ID = B.COMMODITY_ID
+            AND A.TRANSACTION_TYPE!='Load'
+            AND A.TRANSACTION_TYPE!='Generation'
+            AND A.SC_ID = C.SC_ID
+	    			AND C.SC_NAME='NYISO'
+  		  ORDER BY B.COMMODITY_NAME, A.TRANSACTION_NAME;
+  ELSE
+	-- get all transactions
+  	OPEN p_CURSOR FOR
+  		  SELECT TRANSACTION_NAME, A.TRANSACTION_ID
+  		  FROM INTERCHANGE_TRANSACTION A, IT_COMMODITY B
+  		  WHERE IS_BID_OFFER = 1
+  		  		AND A.COMMODITY_ID = B.COMMODITY_ID       
+  		  ORDER BY B.COMMODITY_NAME, A.TRANSACTION_NAME;
+	END IF;
+  
+END BID_OFFER_TRANSACTION_LIST;
+
+

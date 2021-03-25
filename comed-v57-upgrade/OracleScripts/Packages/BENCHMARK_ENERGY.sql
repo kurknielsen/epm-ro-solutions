@@ -1,0 +1,626 @@
+CREATE OR REPLACE PACKAGE BENCHMARK_ENERGY IS
+
+-- Author  : Rex S. Arul
+-- Created : 2012-04-06
+-- Purpose : Get Benchmark Energy from an External Process and store it to IT_SCHEDULE
+
+c_PREFIX_COMMIFIED_STRING	CONSTANT VARCHAR2(30) := 'benchmarkEnergyData';
+c_PR_RUN_BENCHMARK_ENERGY	CONSTANT VARCHAR2(64) := 'Run Benchmark Energy';
+c_CPR_RUN_BENCHMARK_ENERGY	CONSTANT VARCHAR2(64) := 'Run Benchmark Energy for Account';
+
+c_TXN_TYPE_BENCHMARK_ENERGY 	CONSTANT INTERCHANGE_TRANSACTION.TRANSACTION_TYPE%TYPE := 'WPDRS - Benchmark Energy';
+c_COMMODITY_BENCHMARK_ENERGY	CONSTANT IT_COMMODITY.COMMODITY_NAME%TYPE := 'Energy';
+
+c_MEX_MARKET_NAME					CONSTANT VARCHAR2(30) := 'csb';
+c_MEX_MARKET_ACTION					CONSTANT VARCHAR2(30) := 'benchmarkEnergy';
+
+c_1_SEC							CONSTANT NUMBER := (1/86400);
+
+FUNCTION WHAT_VERSION RETURN VARCHAR2;
+
+$IF $$UNIT_TEST_MODE = 1 $THEN
+	PROCEDURE GET_SERVICE_CODE_SCENARIO_ID
+	(
+		p_SETTLEMENT_TYPE_ID	IN SETTLEMENT_TYPE.SETTLEMENT_TYPE_ID%TYPE,
+		p_SERVICE_CODE			OUT SETTLEMENT_TYPE.SERVICE_CODE%TYPE,
+		p_SCENARIO_ID			OUT SETTLEMENT_TYPE.SCENARIO_ID%TYPE
+	);
+
+	FUNCTION GET_BENCHMARK_SCHEME_ACCOUNTS
+	(
+		p_BENCHMARK_SCHEME_NAME 	IN VARCHAR2,
+		p_BEGIN_DATE				IN DATE,
+		p_END_DATE					IN DATE
+	)
+	RETURN NUMBER_COLLECTION;
+
+	FUNCTION GET_BENCHMARK_ENERGY
+	(
+		p_COMMIFIED_STRING IN VARCHAR2
+	)RETURN NUMBER;
+
+	FUNCTION GET_SERVICE_LOAD_DATA
+	(
+		p_ACCOUNT_ID	IN ACCOUNT.ACCOUNT_ID%TYPE,
+		p_SERVICE_IDS	IN NUMBER_COLLECTION, -- These SERVICE_IDs are already filtered by the apposite SCENARIO_ID by the ACCESSOR
+		p_SERVICE_CODE	IN SERVICE_LOAD.SERVICE_CODE%TYPE,
+		p_SCENARIO_ID	IN SERVICE.SCENARIO_ID%TYPE,
+		p_LOAD_DATE		IN DATE
+	)RETURN NUMBER_COLLECTION;
+$END
+
+FUNCTION GET_BENCHMARK_TRANSACTION_ID
+(
+	p_ACCOUNT_ID		IN ACCOUNT.ACCOUNT_ID%TYPE,
+	p_BEGIN_DATE		IN DATE,
+	p_END_DATE			IN DATE
+)RETURN NUMBER;
+
+-- Procedure to return the Settlement Type with a label name for the Data Entity List in the Data Exchange
+PROCEDURE SETTLEMENT_TYPE_LIST
+(
+	p_SEARCH_STRING IN VARCHAR,
+	p_SEARCH_OPTION IN VARCHAR,
+	p_SEARCH_TYPE	IN NUMBER,
+	p_FIND_VALUE 	IN VARCHAR2,
+	p_INCLUDE_INACTIVE IN NUMBER,
+	p_HIDE_NOT_ASSIGNED IN NUMBER,
+	p_LABEL	 OUT VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_CURSOR OUT GA.REFCURSOR
+);
+
+-- Procedure to get benchmark energy value for an account for a given date-range. Procedure will loop
+-- through the dates within the date-range for each Account ID passed.
+
+-- %param p_ACCOUNT_ID IN ACCOUNT.ACCOUNT_ID%TYPE
+-- %param p_BEGIN_DATE IN DATE
+-- %param p_END_DATE IN DATE
+-- %param p_STATEMENT_TYPE IN STATEMENT_TYPE.STATEMENT_TYPE_ID%TYPE
+-- %param p_SERVICE_CODE IN SERVICE_LOAD.SERVICE_CODE%TYPE
+-- %param p_SCENARIO_ID IN SETTLEMENT_TYPE.SCENARIO_ID%TYPE
+-- %param p_PROCESS_STATUS IN OUT NUMBER
+-- %param p_MESSAGE IN OUT VARCHAR2
+PROCEDURE RUN_BENCHMARK_ENERGY_FOR_ACCT
+(
+	p_ACCOUNT_ID			IN ACCOUNT.ACCOUNT_ID%TYPE,
+	p_BEGIN_DATE			IN DATE,
+	p_END_DATE				IN DATE,
+	p_STATEMENT_TYPE		IN STATEMENT_TYPE.STATEMENT_TYPE_ID%TYPE,
+	p_SERVICE_CODE			IN SERVICE_LOAD.SERVICE_CODE%TYPE,
+	p_SCENARIO_ID			IN SETTLEMENT_TYPE.SCENARIO_ID%TYPE,
+	p_PROCESS_STATUS		IN OUT NUMBER,
+	p_MESSAGE				IN OUT VARCHAR2
+);
+
+-- Procedure that will be invoked by the Data Exchange. This will be run as a scheduled job. For the accounts that are part
+-- of the Benchmark Energy scheme, energy values are fetched from SERVICE_LOAD table for each day in the date-range
+-- and external calls to MEX will be issued with a commified string. External process will send back 1 value, which is
+-- Benchmark Energy Value. This will be stored in IT_SCHEDULE. Currently, "External Process" is envisaged as a standalone
+-- external R-Script process. It can be anything.
+--
+-- %param p_BEGIN_DATE IN DATE Begin Date from the toolbar.
+-- %param p_END_DATE IN DATE End Date from the toolbar.
+-- %param p_STATEMENT_TYPE_ID IN NUMBER Statement Type from the toolbar.
+-- %param p_SETTLEMENT_TYPE_ID IN NUMBER Settlement Type from the Data Exchange Entity List.
+-- %param p_BENCHMARK_SCHEME_NAME IN VARCHAR2 DEFAULT 'WPDRS' Scheme name for fetching the accounts in the Scheme. Default is 'WPDRS'.
+-- %param p_STATUS OUT NUMBER Exit-status for process handling.
+-- %param p_MESSAGE OUT VARCHAR2 Exit-message for process handling.
+-- %param p_TRACE_ON IN NUMBER To support trace ON/OFF feature.
+PROCEDURE RUN_BENCHMARK_ENERGY
+(
+	p_BEGIN_DATE			IN DATE,
+	p_END_DATE				IN DATE,
+	p_STATEMENT_TYPE_ID		IN NUMBER,
+	p_SETTLEMENT_TYPE_ID	IN NUMBER,
+	p_BENCHMARK_SCHEME_NAME	IN VARCHAR2,
+	p_PROCESS_STATUS		OUT NUMBER,
+	p_MESSAGE				OUT VARCHAR2,
+	p_TRACE_ON				IN NUMBER := 0
+);
+
+$IF $$UNIT_TEST_MODE = 1 $THEN
+FUNCTION VALIDATE_INPUTS
+(
+	p_BEGIN_DATE			IN DATE,
+	p_END_DATE				IN DATE,
+	p_STATEMENT_TYPE_ID		IN NUMBER,
+	p_SETTLEMENT_TYPE_ID	IN NUMBER,
+	p_BENCHMARK_SCHEME_NAME	IN VARCHAR2
+)
+RETURN BOOLEAN;
+$END
+
+END BENCHMARK_ENERGY;
+/
+CREATE OR REPLACE PACKAGE BODY BENCHMARK_ENERGY
+AS
+
+g_STEP_NAME				VARCHAR2(128) := 'Begin';
+g_TRACE_ON				NUMBER(1) := 0;
+-------------------------------------------------------------------------
+FUNCTION WHAT_VERSION
+RETURN VARCHAR2
+IS
+BEGIN
+	RETURN '$Revision: 1.7 $';
+END WHAT_VERSION;
+-------------------------------------------------------------------------
+PROCEDURE SETTLEMENT_TYPE_LIST
+(
+	p_SEARCH_STRING IN VARCHAR,
+	p_SEARCH_OPTION IN VARCHAR,
+	p_SEARCH_TYPE	IN NUMBER,
+	p_FIND_VALUE 	IN VARCHAR2,
+	p_INCLUDE_INACTIVE IN NUMBER,
+	p_HIDE_NOT_ASSIGNED IN NUMBER,
+	p_LABEL	 OUT VARCHAR2,
+	p_STATUS OUT NUMBER,
+	p_CURSOR OUT GA.REFCURSOR
+)IS
+BEGIN
+	p_LABEL := 'Settlement Type';
+
+	ENTITY_LIST.SETTLEMENT_TYPE(p_SEARCH_STRING, p_SEARCH_OPTION, p_SEARCH_TYPE, p_FIND_VALUE, p_INCLUDE_INACTIVE,
+								p_HIDE_NOT_ASSIGNED, p_STATUS, p_CURSOR);
+END SETTLEMENT_TYPE_LIST;
+-------------------------------------------------------------------------
+FUNCTION GET_BENCHMARK_ENERGY
+(
+	p_COMMIFIED_STRING IN VARCHAR2
+)RETURN NUMBER
+IS
+	v_PARAMS MEX_UTIL.PARAMETER_MAP;
+	v_LOGGER MM_LOGGER_ADAPTER;
+	v_VAL NUMBER;
+	v_RESULT MEX_RESULT;
+	v_CRED MEX_CREDENTIALS;
+	$IF $$UNIT_TEST_MODE = 1 $THEN
+		p_NUMBER_TABLE GA.NUMBER_TABLE;
+  		v_IDX NUMBER;
+  		v_SUM NUMBER := 0;
+	$END
+BEGIN
+	-- For unit test purposes, it suffices to just calculate a "mean" without having to go through MEX layers
+	$IF $$UNIT_TEST_MODE = 1 $THEN
+		 UT.TOKENS_FROM_STRING_TO_NUMBERS(p_STRING => p_COMMIFIED_STRING,
+                                   		  p_DELIMITER => ',',
+                                   		  p_NUMBER_TABLE => p_NUMBER_TABLE);
+		  v_IDX := p_NUMBER_TABLE.FIRST;
+		  WHILE(p_NUMBER_TABLE.EXISTS(v_IDX)) LOOP
+			v_SUM := v_SUM + p_NUMBER_TABLE(v_IDX);
+			v_IDX := p_NUMBER_TABLE.NEXT(v_IDX);
+		  END LOOP;
+		  v_VAL :=  v_SUM / NVL(p_NUMBER_TABLE.COUNT, 1);
+		  RETURN v_VAL;
+	$END
+	-- Set the MEX credentials, etc.
+	g_STEP_NAME := 'Benchmark Energy: Initializing and Invoking MEX';
+	MEX_SWITCHBOARD.INIT_MEX(
+					 p_EXTERNAL_SYSTEM_ID => EC.ES_MEX_SWITCHBOARD,
+				     p_EXTERNAL_ACCOUNT_NAME => NULL,
+				     p_PROCESS_NAME => 'CSB: Benchmark Energy',
+				     p_EXCHANGE_NAME => 'Get Benchmark Energy Data',
+				     p_LOG_TYPE => 3,
+				     p_TRACE_ON => g_TRACE_ON,
+				     p_CREDENTIALS => v_CRED,
+				     p_LOGGER => v_LOGGER,
+				     p_IS_PUBLIC => TRUE);
+
+	g_STEP_NAME := 'Benchmark Energy: Setting RequestString Parameter and Value for MEX';
+	v_PARAMS := MEX_SWITCHBOARD.C_EMPTY_PARAMETER_MAP;
+	v_PARAMS(c_PREFIX_COMMIFIED_STRING) := p_COMMIFIED_STRING;
+
+	-- Prepare the call -- Execute/Invoke it
+	g_STEP_NAME := 'Benchmark Energy: Invoking MEX';
+	v_RESULT := MEX_SWITCHBOARD.INVOKE(
+										p_MARKET => c_MEX_MARKET_NAME,
+										p_ACTION => c_MEX_MARKET_ACTION,
+										p_LOGGER => v_LOGGER,
+										p_PARMS => v_PARAMS
+										);
+
+
+	-- Handle the returned value/exception
+	g_STEP_NAME := 'Benchmark Energy: After invoking MEX analyzing response';
+    IF v_RESULT.STATUS_CODE <> MEX_SWITCHBOARD.c_STATUS_SUCCESS THEN
+		LOGS.LOG_ERROR_CLOB('Benchmark Energy: MEX Response Error.', v_RESULT.RESPONSE);
+    ELSE
+		g_STEP_NAME := 'Benchmark Energy: MEX Response conversion';
+		BEGIN
+	    	v_VAL := TO_NUMBER(TRIM(REPLACE(v_RESULT.RESPONSE, UTL_TCP.CRLF, '')));
+		EXCEPTION
+			WHEN VALUE_ERROR THEN
+				ERRS.RAISE(MSGCODES.c_ERR_RETURN_VALUE, 'Benchmark Energy value from external-source is not a valid number. ' ||
+						   'Received value = ' || v_RESULT.RESPONSE);
+		END;
+		-- If all is well, capture that in DEBUG
+		LOGS.LOG_DEBUG(g_STEP_NAME || ': Returning Value from MEX = ' || v_VAL);
+    END IF;
+
+	-- Return the value
+	RETURN v_VAL;
+EXCEPTION
+	WHEN OTHERS THEN
+		ERRS.LOG_AND_RAISE(p_EXTRA_MESSAGE => g_STEP_NAME || ': Fatal errors occured while invoking MEX to execute external process.');
+END GET_BENCHMARK_ENERGY;
+-------------------------------------------------------------------------
+FUNCTION GET_SERVICE_LOAD_DATA
+(
+	p_ACCOUNT_ID	IN ACCOUNT.ACCOUNT_ID%TYPE,
+	p_SERVICE_IDS	IN NUMBER_COLLECTION, -- These SERVICE_IDs are already filtered by the apposite SCENARIO_ID by the ACCESSOR
+	p_SERVICE_CODE	IN SERVICE_LOAD.SERVICE_CODE%TYPE,
+	p_SCENARIO_ID	IN SERVICE.SCENARIO_ID%TYPE,
+	p_LOAD_DATE		IN DATE
+)RETURN NUMBER_COLLECTION
+IS
+	v_SERVICE_LOAD_VALS	NUMBER_COLLECTION;
+	v_CUT_BEGIN_DATE DATE;
+	v_CUT_END_DATE	 DATE;
+BEGIN
+	-- Get the CUT_DATE_RANGE
+	UT.CUT_DATE_RANGE(GA.ELECTRIC_MODEL, p_LOAD_DATE, p_LOAD_DATE, GA.LOCAL_TIME_ZONE, v_CUT_BEGIN_DATE, v_CUT_END_DATE);
+
+	-- Get the Loss Adjusted Values from SERVICE_LOAD
+	SELECT SUM(NVL(SL.LOAD_VAL, 0) + NVL(SL.TX_LOSS_VAL, 0) + NVL(SL.DX_LOSS_VAL, 0) + NVL(SL.UE_LOSS_VAL, 0))
+	BULK COLLECT INTO v_SERVICE_LOAD_VALS
+	FROM SERVICE_LOAD SL, SERVICE S, ACCOUNT_SERVICE ASE, ACCOUNT A
+	WHERE S.SERVICE_ID IN (SELECT B.COLUMN_VALUE FROM TABLE(CAST(p_SERVICE_IDS AS NUMBER_COLLECTION)) B)
+	AND S.SCENARIO_ID = p_SCENARIO_ID
+	AND SL.SERVICE_ID = S.SERVICE_ID
+	AND SL.SERVICE_CODE = p_SERVICE_CODE
+	AND SL.LOAD_DATE BETWEEN  v_CUT_BEGIN_DATE AND v_CUT_END_DATE
+	AND SL.LOAD_CODE = GA.ELECTRIC_MODEL
+	AND ASE.ACCOUNT_SERVICE_ID = S.ACCOUNT_SERVICE_ID
+	AND ASE.ACCOUNT_ID = p_ACCOUNT_ID
+	AND ASE.ACCOUNT_ID = A.ACCOUNT_ID
+	GROUP BY SL.LOAD_DATE
+	ORDER BY SL.LOAD_DATE;
+
+	RETURN v_SERVICE_LOAD_VALS;
+
+END GET_SERVICE_LOAD_DATA;
+-------------------------------------------------------------------------
+PROCEDURE RUN_BENCHMARK_ENERGY_FOR_ACCT
+(
+	p_ACCOUNT_ID			IN ACCOUNT.ACCOUNT_ID%TYPE,
+	p_BEGIN_DATE			IN DATE,
+	p_END_DATE				IN DATE,
+	p_STATEMENT_TYPE		IN STATEMENT_TYPE.STATEMENT_TYPE_ID%TYPE,
+	p_SERVICE_CODE			IN SERVICE_LOAD.SERVICE_CODE%TYPE,
+	p_SCENARIO_ID			IN SETTLEMENT_TYPE.SCENARIO_ID%TYPE,
+	p_PROCESS_STATUS		IN OUT NUMBER,
+	p_MESSAGE				IN OUT VARCHAR2
+)
+IS
+	v_SERVICE_IDS		NUMBER_COLLECTION;
+	v_SERVICE_LOAD_VALS NUMBER_COLLECTION;
+	v_COMMIFIED_STRING	VARCHAR2(4000);
+	v_SCHEDULE_VAL		IT_SCHEDULE.AMOUNT%TYPE := 0;
+	v_STATUS			NUMBER;
+	v_ACCESSOR			ACCOUNT_DETERMINANT_ACCESSOR;
+	v_TRANSACTION_ID	INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+	v_CURRENT_DATE		DATE;
+	v_DATES				DATE_COLLECTION;
+BEGIN
+	-- Start the CHILD process
+	LOGS.START_PROCESS(p_PROCESS_NAME 		=> c_CPR_RUN_BENCHMARK_ENERGY,
+					   p_TARGET_BEGIN_DATE 	=> p_BEGIN_DATE,
+					   p_TARGET_END_DATE 	=> p_END_DATE,
+					   p_TRACE_ON 			=> g_TRACE_ON);
+	LOGS.SET_PROCESS_TARGET_PARAMETER('Account', TEXT_UTIL.TO_CHAR_ENTITY(p_ACCOUNT_ID, EC.ED_ACCOUNT));
+	LOGS.SET_PROCESS_TARGET_PARAMETER('Statement Type', TEXT_UTIL.TO_CHAR_ENTITY(p_STATEMENT_TYPE, EC.ED_STATEMENT_TYPE));
+	LOGS.SET_PROCESS_TARGET_PARAMETER('Service Code', p_SERVICE_CODE);
+	LOGS.SET_PROCESS_TARGET_PARAMETER('Scenario', TEXT_UTIL.TO_CHAR_ENTITY(p_SCENARIO_ID, EC.ED_SCENARIO));
+	LOGS.LOG_INFO('Account: Running for Account: ' || TEXT_UTIL.TO_CHAR_ENTITY(p_ACCOUNT_ID, EC.ED_ACCOUNT));
+
+	-- Get the Dates
+	g_STEP_NAME	:= 'Benchmark Energy: Get Dates';
+	SELECT P.COLUMN_VALUE
+	BULK COLLECT INTO v_DATES
+	FROM TABLE(DATE_UTIL.DATES_IN_INTERVAL_RANGE(p_BEGIN_DATE, p_END_DATE,	DATE_UTIL.c_ABBR_DAY)) P;
+	LOGS.LOG_DEBUG(g_STEP_NAME || ': Dates for date-range obtained.');
+
+	-- Initialize process progress
+	LOGS.INIT_PROCESS_PROGRESS(p_TOTAL_WORK => v_DATES.COUNT,  p_WORK_UNITS => 'Days', p_CAN_TERMINATE => TRUE);
+
+	-- Validate if the Interchange Transaction exists for this account for this date. Else, Raise an error
+	g_STEP_NAME := 'Benchmark Energy: Get Transaction for Account';
+	-- This will raise an error and if it does, process for this account MUST stop
+	v_TRANSACTION_ID := GET_BENCHMARK_TRANSACTION_ID(p_ACCOUNT_ID, p_BEGIN_DATE, p_END_DATE);
+
+	-- Get the Account Accessor
+	g_STEP_NAME	  := 'Benchmark Energy: Getting Account Accessor';
+	v_ACCESSOR 	  := RETAIL_DETERMINANTS.GET_ACCT_DETERMINANT_ACCESSOR(p_ACCOUNT_ID, NULL, NULL, NULL, p_SERVICE_CODE,
+					 p_SCENARIO_ID, GA.LOCAL_TIME_ZONE);
+	LOGS.LOG_DEBUG(g_STEP_NAME || ': Account Accessor got succesfully');
+
+	-- Loop through the entire date range, one-by-one
+	FOR I IN 1..v_DATES.COUNT LOOP
+		v_CURRENT_DATE := v_DATES(I);
+		LOGS.LOG_INFO('Running for Date: ' || TEXT_UTIL.TO_CHAR_DATE(v_DATES(I)));
+		-- Get SERVICE_IDs from RETAIL_DETERMINANTS.GET_ACTIVE_SERVICES
+		g_STEP_NAME	  := 'Benchmark Energy: Getting Service IDs:';
+		v_SERVICE_IDS := RETAIL_DETERMINANTS.GET_ACTIVE_SERVICES(v_ACCESSOR, v_CURRENT_DATE, v_CURRENT_DATE, FALSE, GA.LOCAL_TIME_ZONE);
+		LOGS.LOG_DEBUG(g_STEP_NAME || ': Got ' || v_SERVICE_IDS.COUNT || ' SERVICE_IDs for Date: ' || TEXT_UTIL.TO_CHAR_DATE(v_CURRENT_DATE));
+
+		-- Fetch the load values from SERVICE_LOAD with the SERVICE_CODE and DATE and SERVICE_ID
+		g_STEP_NAME := 'Benchmark Energy: Get Service Load Data';
+		v_SERVICE_LOAD_VALS := GET_SERVICE_LOAD_DATA(p_ACCOUNT_ID, v_SERVICE_IDS, p_SERVICE_CODE, p_SCENARIO_ID, v_CURRENT_DATE);
+		LOGS.LOG_DEBUG(g_STEP_NAME || 'Got ' || v_SERVICE_LOAD_VALS.COUNT || ' Energy Values from SERVICE_LOAD for Date: ' ||
+					  TEXT_UTIL.TO_CHAR_DATE(v_CURRENT_DATE));
+
+		-- Do the following only if SERVICE_LOAD values exist
+		IF v_SERVICE_LOAD_VALS.COUNT > 0 THEN
+			-- Assemble the load values as a  commified string
+			-- benchmarkEnegyData=1,2,3,4,,,,,,......,96
+			g_STEP_NAME := 'Benchmark Energy: Get Commified String';
+			FOR I IN 1..v_SERVICE_LOAD_VALS.COUNT LOOP
+				v_COMMIFIED_STRING := v_COMMIFIED_STRING || TO_CHAR(v_SERVICE_LOAD_VALS(I)) || ',';
+			END LOOP;
+			v_COMMIFIED_STRING := SUBSTR(v_COMMIFIED_STRING, 1, INSTR(v_COMMIFIED_STRING, ',', -1) - 1);
+			LOGS.LOG_DEBUG(g_STEP_NAME || ': Commified String to MEX = ' || v_COMMIFIED_STRING);
+
+			BEGIN
+				-- Call MEX and handover the commified string
+				g_STEP_NAME := 'Benchmark Energy: Get Benchmark Energy via MEX';
+				v_SCHEDULE_VAL := GET_BENCHMARK_ENERGY(v_COMMIFIED_STRING);
+				LOGS.LOG_DEBUG(g_STEP_NAME || ': Got Schedule Value from MEX = ' || v_SCHEDULE_VAL);
+			EXCEPTION
+				WHEN OTHERS THEN
+					ERRS.LOG_AND_CONTINUE; -- 'Benchmark Energy: Fatal error while converting MEX Response to Number'
+			END;
+		ELSE
+			v_SCHEDULE_VAL := NULL;
+			LOGS.LOG_WARN(g_STEP_NAME || ': No Service Load data found for ' || TEXT_UTIL.TO_CHAR_DATE(v_DATES(I)) ||
+					      ' and hence bypassed MEX with Schedule value set to NULL');
+		END IF;
+
+		-- Verify the returned value. If all is well then...
+		-- Store Schedule Values to IT_SCHEDULE
+		g_STEP_NAME := 'Benchmark Energy: Store to IT Schedule';
+		ITJ.PUT_IT_SCHEDULE(v_TRANSACTION_ID, p_STATEMENT_TYPE, (v_CURRENT_DATE + c_1_SEC), CONSTANTS.LOW_DATE, v_SCHEDULE_VAL, 0, v_STATUS);
+		LOGS.LOG_DEBUG(g_STEP_NAME || ': Value stored to IT Schedule = ' || v_SCHEDULE_VAL || '. Return Status = ' || v_STATUS ||
+					   ' for Transaction_Id = ' || v_TRANSACTION_ID || ' and Statement_Type_Id = ' || p_STATEMENT_TYPE ||
+					   ' for Date = ' || TEXT_UTIL.TO_CHAR_TIME(v_CURRENT_DATE + c_1_SEC));
+
+		-- Update process progress
+		LOGS.INCREMENT_PROCESS_PROGRESS(p_PROGRESS_DESCRIPTION => 'Completed Get Benchmark Energy for Date: ' || TEXT_UTIL.TO_CHAR_DATE(v_CURRENT_DATE));
+
+		-- Restore to original status for every loop completion
+		v_SERVICE_IDS.DELETE;
+		v_SERVICE_LOAD_VALS.DELETE;
+		v_COMMIFIED_STRING := '';
+		v_SCHEDULE_VAL := NULL;
+	END LOOP; -- for each date in the date-range
+
+	-- commit
+	COMMIT;
+	-- terminate the CHILD process
+	LOGS.STOP_PROCESS(p_MESSAGE, p_PROCESS_STATUS);
+EXCEPTION
+	WHEN OTHERS THEN
+		ERRS.ABORT_PROCESS(p_EXTRA_MESSAGE => g_STEP_NAME || ': Fatal errors occurred while running Benchmark Energy for Account = ' ||
+											  TEXT_UTIL.TO_CHAR_ENTITY(p_ACCOUNT_ID, EC.ED_ACCOUNT),
+						   p_PROCEDURE_NAME => 'RUN_BENCHMARK_ENERGY_FOR_ACCT',
+						   p_SOURCE_NAME    => TEXT_UTIL.TO_CHAR_ENTITY(p_ACCOUNT_ID, EC.ED_ACCOUNT),
+						   p_SOURCE_DATE	=> v_CURRENT_DATE);
+END RUN_BENCHMARK_ENERGY_FOR_ACCT;
+-------------------------------------------------------------------------
+FUNCTION GET_BENCHMARK_TRANSACTION_ID
+(
+	p_ACCOUNT_ID		IN ACCOUNT.ACCOUNT_ID%TYPE,
+	p_BEGIN_DATE		IN DATE,
+	p_END_DATE			IN DATE
+)
+RETURN NUMBER
+IS
+	v_TRANSACTION_ID INTERCHANGE_TRANSACTION.TRANSACTION_ID%TYPE;
+	v_COMMODITY_ID IT_COMMODITY.COMMODITY_ID%TYPE;
+BEGIN
+	g_STEP_NAME := 'Benchmark Energy: Query Commodity ID';
+	SELECT IC.COMMODITY_ID
+	INTO v_COMMODITY_ID
+	FROM IT_COMMODITY IC
+	WHERE IC.COMMODITY_NAME = c_COMMODITY_BENCHMARK_ENERGY;
+	LOGS.LOG_DEBUG(g_STEP_NAME || ': Got Commodity_Id = ' || v_COMMODITY_ID);
+
+	g_STEP_NAME := 'Benchmark Energy: Query Transaction ID';
+	SELECT IT.TRANSACTION_ID
+	INTO v_TRANSACTION_ID
+	FROM INTERCHANGE_TRANSACTION IT, ACCOUNT A
+	WHERE A.ACCOUNT_ID = p_ACCOUNT_ID
+	AND   A.ACCOUNT_EXTERNAL_IDENTIFIER = IT.TRANSACTION_IDENTIFIER
+	AND   IT.TRANSACTION_TYPE = c_TXN_TYPE_BENCHMARK_ENERGY
+	AND	  IT.COMMODITY_ID = v_COMMODITY_ID
+	AND	  IT.TRANSACTION_INTERVAL = DATE_UTIL.c_NAME_DAY
+	AND	  p_BEGIN_DATE <= NVL(IT.END_DATE, CONSTANTS.HIGH_DATE)
+	AND   NVL(p_END_DATE, CONSTANTS.HIGH_DATE) >= IT.BEGIN_DATE;
+
+	LOGS.LOG_DEBUG(g_STEP_NAME || ': Got Transaction_Id = ' || v_TRANSACTION_ID);
+
+
+	RETURN v_TRANSACTION_ID;
+EXCEPTION
+	WHEN NO_DATA_FOUND THEN
+		ERRS.RAISE(MSGCODES.c_ERR_NO_SUCH_ENTRY, 'Benchmark Energy Transaction not found for account external identifier: ' ||
+				   TEXT_UTIL.TO_CHAR_ENTITY(p_ACCOUNT_ID, EC.ED_ACCOUNT));
+END GET_BENCHMARK_TRANSACTION_ID;
+-------------------------------------------------------------------------
+FUNCTION GET_BENCHMARK_SCHEME_ACCOUNTS
+(
+	p_BENCHMARK_SCHEME_NAME 	IN VARCHAR2,
+	p_BEGIN_DATE				IN DATE,
+	p_END_DATE					IN DATE
+)
+RETURN NUMBER_COLLECTION
+IS
+	v_ACCOUNT_IDS NUMBER_COLLECTION;
+BEGIN
+	SELECT EGA.ENTITY_ID
+	BULK COLLECT INTO v_ACCOUNT_IDS
+	FROM ENTITY_GROUP_ASSIGNMENT EGA, ENTITY_GROUP EG
+	WHERE EG.ENTITY_GROUP_ALIAS = p_BENCHMARK_SCHEME_NAME
+	AND   EG.ENTITY_DOMAIN_ID = EC.ED_ACCOUNT
+	AND   EG.ENTITY_GROUP_ID = EGA.ENTITY_GROUP_ID
+	AND   (EGA.BEGIN_DATE <= NVL(p_END_DATE, CONSTANTS.HIGH_DATE) OR NVL(EGA.END_DATE, CONSTANTS.HIGH_DATE) > p_BEGIN_DATE);
+
+	RETURN v_ACCOUNT_IDS;
+
+END GET_BENCHMARK_SCHEME_ACCOUNTS;
+-------------------------------------------------------------------------
+FUNCTION VALIDATE_INPUTS
+(
+	p_BEGIN_DATE			IN DATE,
+	p_END_DATE				IN DATE,
+	p_STATEMENT_TYPE_ID		IN NUMBER,
+	p_SETTLEMENT_TYPE_ID	IN NUMBER,
+	p_BENCHMARK_SCHEME_NAME	IN VARCHAR2
+)
+RETURN BOOLEAN
+IS
+  v_COUNT NUMBER;
+BEGIN
+  -- date range
+  IF p_BEGIN_DATE > p_END_DATE THEN
+    ERRS.RAISE_BAD_DATE_RANGE(p_BEGIN_DATE, p_END_DATE);
+  END IF;
+
+  -- statement type id
+  SELECT COUNT(*)
+  INTO v_COUNT
+  FROM STATEMENT_TYPE
+  WHERE STATEMENT_TYPE_ID = p_STATEMENT_TYPE_ID;
+  IF v_COUNT = 0 THEN
+    ERRS.RAISE_BAD_ARGUMENT('p_STATEMENT_TYPE_ID', p_STATEMENT_TYPE_ID, 'Statement Type does not exist.');
+  END IF;
+
+  -- settlement type id
+  SELECT COUNT(*)
+  INTO v_COUNT
+  FROM SETTLEMENT_TYPE
+  WHERE SETTLEMENT_TYPE_ID = p_SETTLEMENT_TYPE_ID;
+  IF v_COUNT = 0 THEN
+    ERRS.RAISE_BAD_ARGUMENT('p_SETTLEMENT_TYPE_ID', p_SETTLEMENT_TYPE_ID, 'Settlement Type does not exist.');
+  END IF;
+
+  -- benchmark scheme name (entity group alias)
+  SELECT COUNT(*)
+  INTO v_COUNT
+  FROM ENTITY_GROUP
+  WHERE ENTITY_GROUP_ALIAS = p_BENCHMARK_SCHEME_NAME;
+  IF v_COUNT = 0 THEN
+    ERRS.RAISE_BAD_ARGUMENT('p_BENCHMARK_SCHEME_NAME', p_BENCHMARK_SCHEME_NAME, 'Benchmark Energy Scheme (Entity Group Alias) does not exist.');
+  END IF;
+
+  -- validations pass
+  RETURN TRUE;
+END VALIDATE_INPUTS;
+-------------------------------------------------------------------------
+PROCEDURE GET_SERVICE_CODE_SCENARIO_ID
+(
+	p_SETTLEMENT_TYPE_ID	IN SETTLEMENT_TYPE.SETTLEMENT_TYPE_ID%TYPE,
+	p_SERVICE_CODE			OUT SETTLEMENT_TYPE.SERVICE_CODE%TYPE,
+	p_SCENARIO_ID			OUT SETTLEMENT_TYPE.SCENARIO_ID%TYPE
+)
+IS
+BEGIN
+	SELECT A.SERVICE_CODE, A.SCENARIO_ID
+	INTO p_SERVICE_CODE, p_SCENARIO_ID
+	FROM SETTLEMENT_TYPE A
+	WHERE A.SETTLEMENT_TYPE_ID = p_SETTLEMENT_TYPE_ID;
+END GET_SERVICE_CODE_SCENARIO_ID;
+-------------------------------------------------------------------------
+PROCEDURE RUN_BENCHMARK_ENERGY
+(
+	p_BEGIN_DATE			IN DATE,
+	p_END_DATE				IN DATE,
+	p_STATEMENT_TYPE_ID		IN NUMBER,
+	p_SETTLEMENT_TYPE_ID	IN NUMBER,
+	p_BENCHMARK_SCHEME_NAME	IN VARCHAR2,
+	p_PROCESS_STATUS		OUT NUMBER,
+	p_MESSAGE				OUT VARCHAR2,
+	p_TRACE_ON				IN NUMBER := 0
+)IS
+	v_ACCOUNT_IDS 			NUMBER_COLLECTION;
+	v_SERVICE_CODE 			VARCHAR2(1);
+	v_SCENARIO_ID			NUMBER(9);
+	b_VALIDATIONS_PASSED	BOOLEAN := FALSE;
+	v_ERROR_ACCOUNT_IDS		NUMBER_COLLECTION := NUMBER_COLLECTION();
+	v_CHILD_PROCESS_STATUS		NUMBER := NULL;
+	v_CHILD_MESSAGE				VARCHAR2(4000);
+BEGIN
+	g_TRACE_ON := p_TRACE_ON;
+	p_PROCESS_STATUS := LOGS.c_LEVEL_SUCCESS;
+
+	-- Start the process
+	LOGS.START_PROCESS(	p_PROCESS_NAME => c_PR_RUN_BENCHMARK_ENERGY, p_TARGET_BEGIN_DATE => p_BEGIN_DATE,
+						p_TARGET_END_DATE => p_END_DATE, p_TRACE_ON => g_TRACE_ON);
+	LOGS.SET_PROCESS_TARGET_PARAMETER('Statement Type', TEXT_UTIL.TO_CHAR_ENTITY(p_STATEMENT_TYPE_ID, EC.ED_STATEMENT_TYPE));
+	LOGS.SET_PROCESS_TARGET_PARAMETER('Settlement Type', TEXT_UTIL.TO_CHAR_ENTITY(p_SETTLEMENT_TYPE_ID, EC.ED_SETTLEMENT_TYPE));
+	LOGS.SET_PROCESS_TARGET_PARAMETER('Benchmark Scheme Name', p_BENCHMARK_SCHEME_NAME);
+
+	-- Validate all the inputs
+	g_STEP_NAME	:= 'Benchmark Energy: Validate Inputs';
+	b_VALIDATIONS_PASSED := VALIDATE_INPUTS(p_BEGIN_DATE, p_END_DATE, p_STATEMENT_TYPE_ID, p_SETTLEMENT_TYPE_ID, p_BENCHMARK_SCHEME_NAME);
+	LOGS.LOG_DEBUG(g_STEP_NAME || ': All validations successfully passed.');
+
+	-- If success, this should have list of accounts for WPDRS scheme
+	g_STEP_NAME := 'Benchmark Energy: Get Scheme Accounts';
+	v_ACCOUNT_IDS := GET_BENCHMARK_SCHEME_ACCOUNTS(p_BENCHMARK_SCHEME_NAME, p_BEGIN_DATE, p_END_DATE);
+
+	IF v_ACCOUNT_IDS.COUNT = 0 THEN
+		LOGS.LOG_WARN(p_EVENT_TEXT => 'Scheme '''|| p_BENCHMARK_SCHEME_NAME || ''' does not have accounts assigned to it.');
+	ELSE
+		LOGS.LOG_INFO(p_EVENT_TEXT => 'Scheme '''|| p_BENCHMARK_SCHEME_NAME || ''' had accounts. See Attachment for details.');
+		LOGS.POST_EVENT_DETAILS('Details', CONSTANTS.MIME_TYPE_TEXT, TEXT_UTIL.TO_CHAR_ENTITY_LIST(v_ACCOUNT_IDS, EC.ED_ACCOUNT, TRUE, FALSE));
+	END IF;
+
+	-- Set the appropriate SERVICE_CODE from the SETTLEMENT_TYPE_ID
+	g_STEP_NAME := 'Benchmark Energy: Get Service Code and Scenario';
+	GET_SERVICE_CODE_SCENARIO_ID(p_SETTLEMENT_TYPE_ID, v_SERVICE_CODE, v_SCENARIO_ID);
+	LOGS.LOG_DEBUG(g_STEP_NAME || ': Service Code = ' || v_SERVICE_CODE || ' and Scenario ID = ' || v_SCENARIO_ID);
+
+	-- Loop through the WPDRS Scheme accounts
+	FOR I IN 1..v_ACCOUNT_IDS.COUNT LOOP
+		BEGIN
+			-- Run the Benchmark Energy Calc per account per day
+			g_STEP_NAME := 'Benchmark Energy: Call RUN_BENCHMARK_ENERGY_FOR_ACCT';
+			v_CHILD_PROCESS_STATUS := NULL;
+			v_CHILD_MESSAGE := NULL;
+			RUN_BENCHMARK_ENERGY_FOR_ACCT(v_ACCOUNT_IDS(I), p_BEGIN_DATE, p_END_DATE, p_STATEMENT_TYPE_ID, v_SERVICE_CODE, v_SCENARIO_ID,
+										  v_CHILD_PROCESS_STATUS, v_CHILD_MESSAGE);
+			-- If WARN, ERROR, NOTICE etc.
+			IF v_CHILD_PROCESS_STATUS > p_PROCESS_STATUS THEN
+				p_PROCESS_STATUS := v_CHILD_PROCESS_STATUS;
+				p_MESSAGE		 := v_CHILD_MESSAGE;
+			END IF;
+		EXCEPTION
+			WHEN OTHERS THEN
+				p_PROCESS_STATUS := LOGS.c_LEVEL_FATAL;
+				p_MESSAGE		 := 'Process encountered errors';
+
+				v_ERROR_ACCOUNT_IDS.EXTEND(1);
+				v_ERROR_ACCOUNT_IDS(v_ERROR_ACCOUNT_IDS.COUNT) := v_ACCOUNT_IDS(I);
+		END;
+	END LOOP;
+
+	-- Log the errors ONCE for the whole PROCESS
+	IF v_ERROR_ACCOUNT_IDS.COUNT > 0 THEN
+		LOGS.LOG_ERROR('The Benchmark Energy could not be found for the following Accounts: ' ||
+					   TEXT_UTIL.TO_CHAR_ENTITY_LIST(v_ERROR_ACCOUNT_IDS, EC.ED_ACCOUNT, FALSE, FALSE));
+
+	END IF;
+
+	-- terminate the PARENT process
+	LOGS.STOP_PROCESS(p_MESSAGE, p_PROCESS_STATUS);
+
+	-- final commit
+	COMMIT;
+EXCEPTION
+	WHEN OTHERS THEN
+		ERRS.ABORT_PROCESS(p_EXTRA_MESSAGE => 'Process failed with fatal errors after step: ' || g_STEP_NAME);
+END RUN_BENCHMARK_ENERGY;
+-------------------------------------------------------------------------
+END BENCHMARK_ENERGY;
+/

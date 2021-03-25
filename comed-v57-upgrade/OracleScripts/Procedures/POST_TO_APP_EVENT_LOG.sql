@@ -1,0 +1,53 @@
+CREATE OR REPLACE PROCEDURE POST_TO_APP_EVENT_LOG
+	(
+	p_DOMAIN_NAME IN VARCHAR,
+	p_APP_NAME IN VARCHAR,
+	p_EVENT_NAME IN VARCHAR,
+	p_EVENT_STATUS IN VARCHAR,
+	p_EVENT_TYPE IN VARCHAR,
+	p_EVENT_OBJECT_NAME IN VARCHAR,
+	p_EVENT_OBJECT_REF IN VARCHAR,
+	p_EVENT_TEXT IN VARCHAR,
+	p_EVENT_USER_NAME IN VARCHAR := 'Unknown'
+	)
+	AS
+
+-- Revision: $Revision: 1.26 $
+
+-- DEPRECATED!!! (as of 3/1/2008)
+
+-- See the new LOGS package for all your Processes and Logging needs.
+-- You should use LOGS.LOG_FATAL(), LOGS.LOG_ERROR(), LOGS.LOG_WARN(), etc.
+-- This procedure is available for backward compatibility in the VB GUI. 
+-- This procedure posts a message to the Process_LOG table using the LOGS package.
+-- This method ignores p_DOMAIN_NAME, p_APP_NAME, p_EVENT_NAME, p_EVENT_USER_NAME, p_EVENT_OBJECT_NAME, p_EVENT_OBJECT_REF
+
+v_EVENT_LEVEL PROCESS_LOG_EVENT.EVENT_LEVEL%TYPE;
+v_EVENT_TEXT PROCESS_LOG_EVENT.EVENT_TEXT%TYPE;
+v_PROC PROCESS_LOG_EVENT.PROCEDURE_NAME%TYPE;
+v_STEP PROCESS_LOG_EVENT.STEP_NAME%TYPE;
+
+BEGIN
+	-- HANDLE: p_EVENT_STATUS, p_EVENT_TYPE, p_EVENT_TEXT, p_EVENT_OBJECT_NAME, p_EVENT_OBJECT_REF
+	-- IGNORE: p_DOMAIN_NAME, p_APP_NAME, p_EVENT_NAME, p_EVENT_USER_NAME
+
+	-- Use EVENT_STATUS to determine the Log Level
+	CASE UPPER(LTRIM(RTRIM(p_EVENT_STATUS)))
+		WHEN 'ERROR' THEN
+			v_EVENT_LEVEL := LOGS.c_Level_Error;
+		WHEN 'WARNING' THEN
+			v_EVENT_LEVEL := LOGS.c_Level_Warn;
+		WHEN 'NOTICE' THEN
+			v_EVENT_LEVEL := LOGS.c_Level_Notice;
+		ELSE
+			v_EVENT_LEVEL := LOGS.c_Level_Info;
+	END CASE;
+	
+	-- Concatenate p_EVENT_TYPE to the front of the Event Text when it is non-null
+	v_EVENT_TEXT := CASE WHEN p_EVENT_TYPE IS NULL THEN '' ELSE p_EVENT_TYPE || ': ' END || p_EVENT_TEXT;
+	
+	LOGS.GET_CALLER(v_PROC, v_STEP);	
+	LOGS.LOG_EVENT(v_EVENT_LEVEL, v_EVENT_TEXT, v_PROC, v_STEP);
+
+END POST_TO_APP_EVENT_LOG;
+/
