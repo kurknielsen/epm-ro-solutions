@@ -1,0 +1,814 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<con:soapui-project id="0b7f61d2-4ddf-4619-bf5f-98e0a9d63d61" activeEnvironment="Default" name="nMarketImportAPITest-PJM" resourceRoot="" soapui-version="5.6.0" abortOnError="false" runType="SEQUENTIAL" xmlns:con="http://eviware.com/soapui/config"><con:settings/><con:interface xsi:type="con:WsdlInterface" id="2df1149f-464b-44f9-9e94-88f31ca65037" wsaVersion="NONE" name="ImportWSSoapBinding" type="wsdl" bindingName="{http://webservices.nm.scgo.com}ImportWSSoapBinding" soapVersion="1_1" anonymous="optional" definition="http://10.0.0.207:8480/servlet/ImportWS?wsdl" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><con:settings/><con:definitionCache type="TEXT" rootPart="http://10.0.0.207:8480/servlet/ImportWS?wsdl"><con:part><con:url>http://10.0.0.207:8480/servlet/ImportWS?wsdl</con:url><con:content><![CDATA[<wsdl:definitions targetNamespace="http://webservices.nm.scgo.com" xmlns:apachesoap="http://xml.apache.org/xml-soap" xmlns:impl="http://webservices.nm.scgo.com" xmlns:intf="http://webservices.nm.scgo.com" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:wsdlsoap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <!--WSDL created by Apache Axis version: 1.3
+Built on Oct 05, 2005 (05:23:37 EDT)-->
+  <wsdl:message name="importFileRequest">
+    <wsdl:part name="cluster" type="xsd:string"/>
+    <wsdl:part name="participant" type="xsd:string"/>
+    <wsdl:part name="fileName" type="xsd:string"/>
+    <wsdl:part name="fileData" type="xsd:string"/>
+    <wsdl:part name="processName" type="xsd:string"/>
+    <wsdl:part name="optionalParams" type="xsd:string"/>
+  </wsdl:message>
+  <wsdl:message name="importFileResponse">
+    <wsdl:part name="importFileReturn" type="xsd:string"/>
+  </wsdl:message>
+  <wsdl:portType name="Import">
+    <wsdl:operation name="importFile" parameterOrder="cluster participant fileName fileData processName optionalParams">
+      <wsdl:input message="impl:importFileRequest" name="importFileRequest"/>
+      <wsdl:output message="impl:importFileResponse" name="importFileResponse"/>
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="ImportWSSoapBinding" type="impl:Import">
+    <wsdlsoap:binding style="rpc" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="importFile">
+      <wsdlsoap:operation soapAction=""/>
+      <wsdl:input name="importFileRequest">
+        <wsdlsoap:body encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" namespace="http://webservices.nm.scgo.com" use="encoded"/>
+      </wsdl:input>
+      <wsdl:output name="importFileResponse">
+        <wsdlsoap:body encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" namespace="http://webservices.nm.scgo.com" use="encoded"/>
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="ImportService">
+    <wsdl:port binding="impl:ImportWSSoapBinding" name="ImportWS">
+      <wsdlsoap:address location="http://10.0.0.207:8480/servlet/ImportWS"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>]]></con:content><con:type>http://schemas.xmlsoap.org/wsdl/</con:type></con:part></con:definitionCache><con:endpoints><con:endpoint>http://10.0.0.207:8480/servlet/ImportWS</con:endpoint></con:endpoints><con:operation id="1c1f9812-5e17-4040-95ad-3df8c91d23d9" isOneWay="false" action="" name="importFile" bindingOperationName="importFile" type="Request-Response" outputName="importFileResponse" inputName="importFileRequest" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="a9ee0b85-456c-49e7-bade-6bb411000bc1" name="LoadFromMarket"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.0.0.207:8480/servlet/ImportWS</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="http://webservices.nm.scgo.com">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <web:importFile soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\r
+         <cluster xsi:type="xsd:string">PJM</cluster>\r
+         <participant xsi:type="xsd:string">CESLP</participant>\r
+         <fileName xsi:type="xsd:string"></fileName>\r
+         <fileData xsi:type="xsd:string"></fileData>\r
+         <processName xsi:type="xsd:string">LFARXA</processName>\r
+         <optionalParams xsi:type="xsd:string">$clrg_cd$=RT&amp;$xp_id$=-1&amp;returnType=xml&amp;$startDateTime$=09/15/2011 4:00:00 GMT&amp;$endDateTime$=09/16/2011 4:00:00 GMT</optionalParams>\r
+      </web:importFile>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/Import/importFileRequest"/><con:wsrmConfig version="1.2"/></con:call><con:call id="5fb61a9e-d341-4b59-b6e5-f99f7621aae1" name="LoadFromFile"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.67.95.20:8480/servlet/Import?ptcpt=CESLP&amp;processName=LGOAPI&amp;cluster=PJM&amp;fileName=offers.xml</con:endpoint><con:request><![CDATA[ <INFO>
+	<GENOFFERS>
+		<PTCPT_CD>CESLP</PTCPT_CD>
+		<MKT_CD>PJM</MKT_CD>
+		<EXT_ID>ENEOFFER01</EXT_ID>
+		<ROW_ID>1</ROW_ID>
+		<START_DT>20200711</START_DT>
+		<START_TIME>000000</START_TIME>
+		<END_DT>20200712</END_DT>
+		<END_TIME>000000</END_TIME>
+		<TIME_ZONE>EST</TIME_ZONE>
+		<TX_PT>86342101</TX_PT>
+		<CLRG_CD>DA</CLRG_CD>
+		<COM_CD>ENE</COM_CD>
+		<COM_SUB_TYPE>01</COM_SUB_TYPE>
+		<BID_SLOPE>1</BID_SLOPE>
+		<SELECTION_FLG>1</SELECTION_FLG>
+		<USE_MAX_GEN>0</USE_MAX_GEN>
+		<ACTION>INSERT</ACTION>
+		<OFFER>
+			<MW>11</MW>
+			<PRICE>16.50</PRICE>
+			<SEGMENT_NUMBER>1</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>13</MW>
+			<PRICE>21.60</PRICE>
+			<SEGMENT_NUMBER>2</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>15</MW>
+			<PRICE>21.90</PRICE>
+			<SEGMENT_NUMBER>3</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>21</MW>
+			<PRICE>29.00</PRICE>
+			<SEGMENT_NUMBER>4</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>24</MW>
+			<PRICE>31.44</PRICE>
+			<SEGMENT_NUMBER>5</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>30</MW>
+			<PRICE>34.56</PRICE>
+			<SEGMENT_NUMBER>6</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>44</MW>
+			<PRICE>36.49</PRICE>
+			<SEGMENT_NUMBER>7</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>51</MW>
+			<PRICE>40.15</PRICE>
+			<SEGMENT_NUMBER>8</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>69</MW>
+			<PRICE>42.6</PRICE>
+			<SEGMENT_NUMBER>9</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>78</MW>
+			<PRICE>45</PRICE>
+			<SEGMENT_NUMBER>10</SEGMENT_NUMBER>
+		</OFFER>
+	</GENOFFERS>
+	<GENOFFERS>
+		<PTCPT_CD>CESLP</PTCPT_CD>
+		<MKT_CD>PJM</MKT_CD>
+		<EXT_ID>ENEOFFER02</EXT_ID>
+		<ROW_ID>2</ROW_ID>
+		<START_DT>20200711</START_DT>
+		<START_TIME>000000</START_TIME>
+		<END_DT>20200712</END_DT>
+		<END_TIME>000000</END_TIME>
+		<TIME_ZONE>EST</TIME_ZONE>
+		<TX_PT>86342101</TX_PT>
+		<CLRG_CD>RT</CLRG_CD>
+		<COM_CD>ENE</COM_CD>
+		<COM_SUB_TYPE>02</COM_SUB_TYPE>
+		<BID_SLOPE>1</BID_SLOPE>
+		<SELECTION_FLG>1</SELECTION_FLG>
+		<USE_MAX_GEN>0</USE_MAX_GEN>
+		<ACTION>INSERT</ACTION>
+		<OFFER>
+			<MW>11</MW>
+			<PRICE>16.50</PRICE>
+			<SEGMENT_NUMBER>1</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>13</MW>
+			<PRICE>21.60</PRICE>
+			<SEGMENT_NUMBER>2</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>15</MW>
+			<PRICE>21.90</PRICE>
+			<SEGMENT_NUMBER>3</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>21</MW>
+			<PRICE>29.00</PRICE>
+			<SEGMENT_NUMBER>4</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>24</MW>
+			<PRICE>31.44</PRICE>
+			<SEGMENT_NUMBER>5</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>30</MW>
+			<PRICE>34.56</PRICE>
+			<SEGMENT_NUMBER>6</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>44</MW>
+			<PRICE>36.49</PRICE>
+			<SEGMENT_NUMBER>7</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>51</MW>
+			<PRICE>40.15</PRICE>
+			<SEGMENT_NUMBER>8</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>69</MW>
+			<PRICE>42.6</PRICE>
+			<SEGMENT_NUMBER>9</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>78</MW>
+			<PRICE>45</PRICE>
+			<SEGMENT_NUMBER>10</SEGMENT_NUMBER>
+		</OFFER>
+	</GENOFFERS>
+	<GENOFFERS>
+		<PTCPT_CD>CESLP</PTCPT_CD>
+		<MKT_CD>PJM</MKT_CD>
+		<EXT_ID>ENEOFFER03</EXT_ID>
+		<ROW_ID>3</ROW_ID>
+		<START_DT>20200711</START_DT>
+		<START_TIME>000000</START_TIME>
+		<END_DT>20200712</END_DT>
+		<END_TIME>000000</END_TIME>
+		<TIME_ZONE>EST</TIME_ZONE>
+		<TX_PT>86342101</TX_PT>
+		<CLRG_CD>BOTH</CLRG_CD>
+		<COM_CD>ENE</COM_CD>
+		<COM_SUB_TYPE>03</COM_SUB_TYPE>
+		<BID_SLOPE>1</BID_SLOPE>
+		<SELECTION_FLG>1</SELECTION_FLG>
+		<USE_MAX_GEN>0</USE_MAX_GEN>
+		<ACTION>INSERT</ACTION>
+		<OFFER>
+			<MW>11</MW>
+			<PRICE>16.50</PRICE>
+			<SEGMENT_NUMBER>1</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>13</MW>
+			<PRICE>21.60</PRICE>
+			<SEGMENT_NUMBER>2</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>15</MW>
+			<PRICE>21.90</PRICE>
+			<SEGMENT_NUMBER>3</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>21</MW>
+			<PRICE>29.00</PRICE>
+			<SEGMENT_NUMBER>4</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>24</MW>
+			<PRICE>31.44</PRICE>
+			<SEGMENT_NUMBER>5</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>30</MW>
+			<PRICE>34.56</PRICE>
+			<SEGMENT_NUMBER>6</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>44</MW>
+			<PRICE>36.49</PRICE>
+			<SEGMENT_NUMBER>7</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>51</MW>
+			<PRICE>40.15</PRICE>
+			<SEGMENT_NUMBER>8</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>69</MW>
+			<PRICE>42.6</PRICE>
+			<SEGMENT_NUMBER>9</SEGMENT_NUMBER>
+		</OFFER>
+		<OFFER>
+			<MW>78</MW>
+			<PRICE>45</PRICE>
+			<SEGMENT_NUMBER>10</SEGMENT_NUMBER>
+		</OFFER>
+	</GENOFFERS>
+	<GENOFFERS>
+		<PTCPT_CD>CESLP</PTCPT_CD>
+		<MKT_CD>PJM</MKT_CD>
+		<EXT_ID>REGOFFER01</EXT_ID>
+		<ROW_ID>4</ROW_ID>
+		<START_DT>20200711</START_DT>
+		<START_TIME>000000</START_TIME>
+		<END_DT>20200712</END_DT>
+		<END_TIME>000000</END_TIME>
+		<TIME_ZONE>EST</TIME_ZONE>
+		<TX_PT>86342101</TX_PT>
+		<CLRG_CD>RT</CLRG_CD>
+		<COM_CD>REG</COM_CD>
+		<COM_SUB_TYPE>TRAREG</COM_SUB_TYPE>
+		<ACTION>INSERT</ACTION>
+		<OFFER>
+			<MW>10</MW>
+			<PRICE>100.11</PRICE>
+		</OFFER>
+		<OFFERPARMS>
+			<PARM_TYPE>REGOFFERCOST</PARM_TYPE>
+			<PARM_VALUE>1500</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGAVAILABLE</PARM_TYPE>
+			<PARM_VALUE>1</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGSELFSCHED</PARM_TYPE>
+			<PARM_VALUE>0</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGMINMW</PARM_TYPE>
+			<PARM_VALUE>15</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGECOMAXHEATRATE</PARM_TYPE>
+			<PARM_VALUE>10</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGMINHEATRATE</PARM_TYPE>
+			<PARM_VALUE>5</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGVOMRATE</PARM_TYPE>
+			<PARM_VALUE>1</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGFUELCOST</PARM_TYPE>
+			<PARM_VALUE>500</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+	</GENOFFERS>
+	<GENOFFERS>
+		<PTCPT_CD>CESLP</PTCPT_CD>
+		<MKT_CD>PJM</MKT_CD>
+		<EXT_ID>REGOFFER01</EXT_ID>
+		<ROW_ID>4</ROW_ID>
+		<START_DT>20200711</START_DT>
+		<START_TIME>000000</START_TIME>
+		<END_DT>20200712</END_DT>
+		<END_TIME>000000</END_TIME>
+		<TIME_ZONE>EST</TIME_ZONE>
+		<TX_PT>86342101</TX_PT>
+		<CLRG_CD>RT</CLRG_CD>
+		<COM_CD>REG</COM_CD>
+		<COM_SUB_TYPE>DYNREG</COM_SUB_TYPE>
+		<ACTION>INSERT</ACTION>
+		<OFFER>
+			<MW>10</MW>
+			<PRICE>100.11</PRICE>
+		</OFFER>
+		<OFFERPARMS>
+			<PARM_TYPE>REGOFFERCOST</PARM_TYPE>
+			<PARM_VALUE>1500</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGAVAILABLE</PARM_TYPE>
+			<PARM_VALUE>1</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGSELFSCHED</PARM_TYPE>
+			<PARM_VALUE>0</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGMINMW</PARM_TYPE>
+			<PARM_VALUE>15</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGECOMAXHEATRATE</PARM_TYPE>
+			<PARM_VALUE>10</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGMINHEATRATE</PARM_TYPE>
+			<PARM_VALUE>5</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGVOMRATE</PARM_TYPE>
+			<PARM_VALUE>1</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REGFUELCOST</PARM_TYPE>
+			<PARM_VALUE>500</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+	</GENOFFERS>
+	<GENOFFERS>
+		<PTCPT_CD>CESLP</PTCPT_CD>
+		<MKT_CD>PJM</MKT_CD>
+		<EXT_ID>SROFFER01</EXT_ID>
+		<ROW_ID>5</ROW_ID>
+		<START_DT>20200711</START_DT>
+		<START_TIME>000000</START_TIME>
+		<END_DT>20200712</END_DT>
+		<END_TIME>000000</END_TIME>
+		<TIME_ZONE>EST</TIME_ZONE>
+		<TX_PT>86342101</TX_PT>
+		<CLRG_CD>RT</CLRG_CD>
+		<COM_CD>SPIN</COM_CD>
+		<COM_SUB_TYPE>N/A</COM_SUB_TYPE>
+		<ACTION>INSERT</ACTION>
+		<OFFER>
+			<MW>20</MW>
+			<PRICE>200.22</PRICE>
+		</OFFER>
+		<OFFERPARMS>
+			<PARM_TYPE>SRCONDENSEAVAIL</PARM_TYPE>
+			<PARM_VALUE>1</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>SRCONDENSESTTCT</PARM_TYPE>
+			<PARM_VALUE>501</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>SRCONDENSEPWR</PARM_TYPE>
+			<PARM_VALUE>16</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>SRCONDENSEGENCOST</PARM_TYPE>
+			<PARM_VALUE>1501</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>SRCONDENSER</PARM_TYPE>
+			<PARM_VALUE>1</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>FULLLOADHEATRATE</PARM_TYPE>
+			<PARM_VALUE>6</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>REDUCEDHEATRATE</PARM_TYPE>
+			<PARM_VALUE>7</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+		<OFFERPARMS>
+			<PARM_TYPE>VOMRATE</PARM_TYPE>
+			<PARM_VALUE>1</PARM_VALUE>
+			<TIMEFRAME>DAILY</TIMEFRAME>
+		</OFFERPARMS>
+	</GENOFFERS>
+	<GENOFFERS>
+		<PTCPT_CD>CESLP</PTCPT_CD>
+		<MKT_CD>PJM</MKT_CD>
+		<EXT_ID>DASROFFER01</EXT_ID>
+		<ROW_ID>6</ROW_ID>
+		<START_DT>20200711</START_DT>
+		<START_TIME>000000</START_TIME>
+		<END_DT>20200712</END_DT>
+		<END_TIME>000000</END_TIME>
+		<TIME_ZONE>EST</TIME_ZONE>
+		<TX_PT>86342101</TX_PT>
+		<CLRG_CD>DA</CLRG_CD>
+		<COM_CD>DASR</COM_CD>
+		<COM_SUB_TYPE>N/A</COM_SUB_TYPE>
+		<ACTION>INSERT</ACTION>
+		<OFFER>
+			<MW>30</MW>
+			<PRICE>300.33</PRICE>
+		</OFFER>
+	</GENOFFERS>
+</INFO>
+]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/Import/importFileRequest"/><con:wsrmConfig version="1.2"/></con:call><con:call id="fc7fa80f-589d-4fe2-8279-cd688c275c80" name="LoadFromFile-MtrData"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.67.95.20:8480/servlet/ImportWS</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="http://webservices.nm.scgo.com">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <web:importFile soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\r
+         <cluster xsi:type="xsd:string">PJM</cluster>\r
+         <participant xsi:type="xsd:string">AEPGR</participant>\r
+         <fileName xsi:type="xsd:string">samplefile.xml</fileName>\r
+         <fileData xsi:type="xsd:string"><![CDATA[
+   <CROSS_MARKET xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<METER_DATA>
+		<PTCPT_CD>AEPGR</PTCPT_CD>
+		<MKT_CD>PJM</MKT_CD>
+		<METER_ID>4799</METER_ID>
+		<METER_RD_TYP>GEN</METER_RD_TYP>
+		<DATA_SRC_TYP>INTRNL</DATA_SRC_TYP>
+		<READING>
+			<START_DT>20200401</START_DT>
+			<START_TIME>000000</START_TIME>
+			<END_DT>20200401</END_DT>
+			<END_TIME>030000</END_TIME>
+			<TIME_ZONE>EST</TIME_ZONE>
+			<QUANTITY>118.6</QUANTITY>
+			<ACTION>INSERT</ACTION>
+			<EXT_ID>2</EXT_ID>
+			<ROW_ID>A</ROW_ID>
+		</READING>
+	</METER_DATA>
+</CROSS_MARKET>
+
+]]]]>><![CDATA[</fileData>\r
+         <processName xsi:type="xsd:string">LIMAPI</processName>\r
+         <optionalParams xsi:type="xsd:string">returnType=xml</optionalParams>\r
+      </web:importFile>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/Import/importFileRequest"/><con:wsrmConfig version="1.2"/></con:call></con:operation></con:interface><con:interface xsi:type="con:WsdlInterface" id="9f63f1a7-b898-4dc0-bf94-d25ccdd8a529" wsaVersion="NONE" name="ExportWSSoapBinding" type="wsdl" bindingName="{http://webservices.nm.scgo.com}ExportWSSoapBinding" soapVersion="1_1" anonymous="optional" definition="http://10.0.0.207:8480/servlet/ExportWS?wsdl" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><con:settings/><con:definitionCache type="TEXT" rootPart="http://10.0.0.207:8480/servlet/ExportWS?wsdl"><con:part><con:url>http://10.0.0.207:8480/servlet/ExportWS?wsdl</con:url><con:content><![CDATA[<wsdl:definitions targetNamespace="http://webservices.nm.scgo.com" xmlns:apachesoap="http://xml.apache.org/xml-soap" xmlns:impl="http://webservices.nm.scgo.com" xmlns:intf="http://webservices.nm.scgo.com" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:wsdlsoap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <!--WSDL created by Apache Axis version: 1.3
+Built on Oct 05, 2005 (05:23:37 EDT)-->
+  <wsdl:message name="exportDataRequest">
+    <wsdl:part name="cluster" type="xsd:string"/>
+    <wsdl:part name="participant" type="xsd:string"/>
+    <wsdl:part name="fileName" type="xsd:string"/>
+    <wsdl:part name="fileData" type="xsd:string"/>
+    <wsdl:part name="processName" type="xsd:string"/>
+    <wsdl:part name="optionalParams" type="xsd:string"/>
+  </wsdl:message>
+  <wsdl:message name="exportDataResponse">
+    <wsdl:part name="exportDataReturn" type="xsd:string"/>
+  </wsdl:message>
+  <wsdl:portType name="Export">
+    <wsdl:operation name="exportData" parameterOrder="cluster participant fileName fileData processName optionalParams">
+      <wsdl:input message="impl:exportDataRequest" name="exportDataRequest"/>
+      <wsdl:output message="impl:exportDataResponse" name="exportDataResponse"/>
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="ExportWSSoapBinding" type="impl:Export">
+    <wsdlsoap:binding style="rpc" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="exportData">
+      <wsdlsoap:operation soapAction=""/>
+      <wsdl:input name="exportDataRequest">
+        <wsdlsoap:body encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" namespace="http://webservices.nm.scgo.com" use="encoded"/>
+      </wsdl:input>
+      <wsdl:output name="exportDataResponse">
+        <wsdlsoap:body encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" namespace="http://webservices.nm.scgo.com" use="encoded"/>
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="ExportService">
+    <wsdl:port binding="impl:ExportWSSoapBinding" name="ExportWS">
+      <wsdlsoap:address location="http://10.0.0.207:8480/servlet/ExportWS"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>]]></con:content><con:type>http://schemas.xmlsoap.org/wsdl/</con:type></con:part></con:definitionCache><con:endpoints><con:endpoint>http://10.0.0.207:8480/servlet/ExportWS</con:endpoint></con:endpoints><con:operation id="0331cbdc-7c45-4597-bd1a-ffe0015311c3" isOneWay="false" action="" name="exportData" bindingOperationName="exportData" type="Request-Response" outputName="exportDataResponse" inputName="exportDataRequest" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="ac9303e0-b75b-4ca4-869e-3163a763bc82" name="SubmitFromFile"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.60.160.4:8480/servlet/ExportWS</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="http://webservices.nm.scgo.com">
+<soapenv:Header/>
+<soapenv:Body>
+<web:exportData soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+<cluster xsi:type="xsd:string">PJM</cluster>
+<participant xsi:type="xsd:string">CESLP</participant>
+<fileName xsi:type="xsd:string">sample.xml</fileName>
+<fileData xsi:type="xsd:string"><![CDATA[
+<env:Envelope xmlns:env="http://schemas.xmlsoap.org/soap/envelope/">
+  <env:Body>
+    <SubmitRequest xmlns="http://emkt.pjm.com/emkt/xml">
+      <DemandBid location="49717" day="2021-04-06" xmlns="">
+        <DemandBidHourly hour="1">
+          <PriceSensitiveDemand>
+            <BidSegment id="1">
+              <MW>0</MW>
+              <Price>0</Price>
+            </BidSegment>
+          </PriceSensitiveDemand>
+        </DemandBidHourly>
+      </DemandBid>
+    </SubmitRequest>
+  </env:Body>
+</env:Envelope>
+]]]]>><![CDATA[</fileData>
+<processName xsi:type="xsd:string">SDBID</processName>
+<optionalParams xsi:type="xsd:string"></optionalParams>
+</web:exportData>
+</soapenv:Body>
+</soapenv:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/Export/exportDataRequest" addDefaultAction="true"/><con:wsrmConfig version="1.2"/></con:call><con:call id="293808da-bf0a-41d6-a0c8-9af21b6abf10" name="SubmitFromDB"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.0.0.207:8480/servlet/ExportWS</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="http://webservices.nm.scgo.com">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <web:exportData soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\r
+         <cluster xsi:type="xsd:string">PJM</cluster>\r
+         <participant xsi:type="xsd:string">CESLP</participant>\r
+         <fileName xsi:type="xsd:string"></fileName>\r
+         <fileData xsi:type="xsd:string"></fileData>\r
+         <processName xsi:type="xsd:string">SUNIT</processName>\r
+         <optionalParams xsi:type="xsd:string">$clrg_cd$=RT&amp;$xp_id$=-1&amp;returnType=xml&amp;$startDateTime$=09/15/2011 4:00:00 GMT&amp;$endDateTime$=09/16/2011 4:00:00 GMT</optionalParams>
+      </web:exportData>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/Export/exportDataRequest"/><con:wsrmConfig version="1.2"/></con:call></con:operation></con:interface><con:interface xsi:type="con:WsdlInterface" id="19781715-d7cc-4da8-b66e-2d3e26d4d2d9" wsaVersion="NONE" name="OutboundAPIWSSoapBinding" type="wsdl" bindingName="{http://webservices.nm.scgo.com}OutboundAPIWSSoapBinding" soapVersion="1_1" anonymous="optional" definition="http://localhost:8480/servlet/OutboundAPIWS?wsdl" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><con:settings/><con:definitionCache type="TEXT" rootPart="http://localhost:8480/servlet/OutboundAPIWS?wsdl"><con:part><con:url>http://localhost:8480/servlet/OutboundAPIWS?wsdl</con:url><con:content><![CDATA[<wsdl:definitions targetNamespace="http://webservices.nm.scgo.com" xmlns:apachesoap="http://xml.apache.org/xml-soap" xmlns:impl="http://webservices.nm.scgo.com" xmlns:intf="http://webservices.nm.scgo.com" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:wsdlsoap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <!--WSDL created by Apache Axis version: 1.4
+Built on Apr 22, 2006 (06:55:48 PDT)-->
+  <wsdl:message name="getDataRequest">
+    <wsdl:part name="cluster" type="xsd:string"/>
+    <wsdl:part name="participant" type="xsd:string"/>
+    <wsdl:part name="api" type="xsd:string"/>
+    <wsdl:part name="query" type="xsd:string"/>
+    <wsdl:part name="maxRows" type="xsd:int"/>
+    <wsdl:part name="fields" type="xsd:string"/>
+    <wsdl:part name="splitBy" type="xsd:string"/>
+    <wsdl:part name="startDate" type="xsd:dateTime"/>
+    <wsdl:part name="endDate" type="xsd:dateTime"/>
+    <wsdl:part name="xpGroupID" type="xsd:string"/>
+    <wsdl:part name="timeZone" type="xsd:string"/>
+  </wsdl:message>
+  <wsdl:message name="getDataResponse">
+    <wsdl:part name="getDataReturn" type="xsd:string"/>
+  </wsdl:message>
+  <wsdl:portType name="OutboundAPI">
+    <wsdl:operation name="getData" parameterOrder="cluster participant api query maxRows fields splitBy startDate endDate xpGroupID timeZone">
+      <wsdl:input message="impl:getDataRequest" name="getDataRequest"/>
+      <wsdl:output message="impl:getDataResponse" name="getDataResponse"/>
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="OutboundAPIWSSoapBinding" type="impl:OutboundAPI">
+    <wsdlsoap:binding style="rpc" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="getData">
+      <wsdlsoap:operation soapAction=""/>
+      <wsdl:input name="getDataRequest">
+        <wsdlsoap:body encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" namespace="http://webservices.nm.scgo.com" use="encoded"/>
+      </wsdl:input>
+      <wsdl:output name="getDataResponse">
+        <wsdlsoap:body encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" namespace="http://webservices.nm.scgo.com" use="encoded"/>
+      </wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="OutboundAPIService">
+    <wsdl:port binding="impl:OutboundAPIWSSoapBinding" name="OutboundAPIWS">
+      <wsdlsoap:address location="http://localhost:8480/servlet/OutboundAPIWS"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>]]></con:content><con:type>http://schemas.xmlsoap.org/wsdl/</con:type></con:part></con:definitionCache><con:endpoints><con:endpoint>http://10.67.95.20:4003/servlet/OutboundAPIWS</con:endpoint><con:endpoint>http://localhost:8480/servlet/OutboundAPIWS</con:endpoint></con:endpoints><con:operation id="ff127a82-4681-4941-a75a-b4ec1cae2c1d" isOneWay="false" action="" name="getData" bindingOperationName="getData" type="Request-Response" outputName="getDataResponse" inputName="getDataRequest" receivesAttachments="false" sendsAttachments="false" anonymous="optional"><con:settings/><con:call id="76615da8-3b81-4f7e-972d-a015340a8c32" name="Request 1"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://localhost:8480/servlet/OutboundAPIWS</con:endpoint><con:request><![CDATA[<?xml version="1.0" encoding="UTF-8"?>
+<n2:Envelope xmlns:impl="http://webservices.nm.scgo.com" xmlns:n2="http://schemas.xmlsoap.org/soap/envelope/"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/">
+    <n2:Body n2:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+        <impl:getData>
+            <in0 xsi:type="xsd:string">PJM_DEVA</in0>
+            <in1 xsi:type="xsd:string">PARENT</in1>
+            <in2 xsi:type="xsd:string">CUS004</in2>
+            <in4 xsi:type="xsd:int">-1</in4>
+            <in7 xsi:type="xsd:dateTime">2019-11-10T08:00:00.000000000</in7>
+            <in8 xsi:type="xsd:dateTime">2019-12-12T08:00:00.000000000</in8>
+        </impl:getData>
+    </n2:Body>
+</n2:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/OutboundAPI/getDataRequest"/><con:wsrmConfig version="1.2"/></con:call><con:call id="1a561926-6ca0-40cb-973d-cf623550e1f2" name="FromBP"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.67.95.20:4003/servlet/OutboundAPIWS</con:endpoint><con:request><![CDATA[<?xml version="1.0" encoding="UTF-8"?>
+<n2:Envelope xmlns:impl="http://webservices.nm.scgo.com" xmlns:n2="http://schemas.xmlsoap.org/soap/envelope/"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/">
+    <n2:Body n2:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+        <impl:getData>
+            <in0 xsi:type="xsd:string">PJM_DEVA</in0>
+            <in1 xsi:type="xsd:string">PARENT</in1>
+            <in2 xsi:type="xsd:string">CUS004</in2>
+            <in4 xsi:type="xsd:int">-1</in4>
+            <in7 xsi:type="xsd:dateTime">2019-11-10T08:00:00.000000000</in7>
+            <in8 xsi:type="xsd:dateTime">2019-12-12T08:00:00.000000000</in8>
+        </impl:getData>
+    </n2:Body>
+</n2:Envelope>
+
+<!-- <in3 xsi:type="xsd:string"/> 
+           -->
+
+            <!--
+            <in5 xsi:type="xsd:string"/>
+            <in6 xsi:type="xsd:string"/> 
+            -->]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/OutboundAPI/getDataRequest"/><con:wsrmConfig version="1.2"/></con:call><con:call id="7513a7be-b720-4eb0-a368-a175cce52496" name="pjm-oracle"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.67.95.20:4454/servlet/OutboundAPIWS</con:endpoint><con:request><![CDATA[<?xml version="1.0" encoding="UTF-8"?>
+<n2:Envelope xmlns:impl="http://webservices.nm.scgo.com" xmlns:n2="http://schemas.xmlsoap.org/soap/envelope/"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/">
+    <n2:Body n2:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+        <impl:getData>
+            <in0 xsi:type="xsd:string">PJM_DEVA</in0>
+            <in1 xsi:type="xsd:string">PARENT</in1>
+            <in2 xsi:type="xsd:string">CUS004</in2>
+            <in4 xsi:type="xsd:int">-1</in4>
+            <in7 xsi:type="xsd:dateTime">2019-11-10T08:00:00.000000000</in7>
+            <in8 xsi:type="xsd:dateTime">2019-12-12T08:00:00.000000000</in8>
+        </impl:getData>
+    </n2:Body>
+</n2:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/OutboundAPI/getDataRequest"/><con:wsrmConfig version="1.2"/></con:call><con:call id="f782fe84-8d97-4396-b053-79970f999e24" name="MTRDAT"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.60.160.4:8480/servlet/OutboundAPIWS</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="http://webservices.nm.scgo.com">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <web:getData soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\r
+         <cluster xsi:type="xsd:string">PJM</cluster>\r
+         <participant xsi:type="xsd:string">AEPAPD</participant>\r
+         <api xsi:type="xsd:string">MTRDAT</api>\r
+         <query xsi:type="xsd:string"  xsi:nil="true" />\r
+         <maxRows xsi:type="xsd:int">-1</maxRows>\r
+         <fields xsi:type="xsd:string"  xsi:nil="true" />\r
+         <splitBy xsi:type="xsd:string"  xsi:nil="true" />\r
+         <startDate xsi:type="xsd:dateTime">2019-01-01T00:00:00</startDate>
+         <endDate xsi:type="xsd:dateTime">2019-01-02T00:00:00</endDate>
+         <xpGroupID xsi:type="xsd:string" xsi:nil="true" />\r
+         <timeZone xsi:type="xsd:string">CST</timeZone>\r
+      </web:getData>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/OutboundAPI/getDataRequest"/><con:wsrmConfig version="1.2"/></con:call><con:call id="515e2c0e-187b-4bc2-a1b6-3d711ce0cd96" name="PTCPT"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.67.95.20:4003/servlet/OutboundAPIWS</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="http://webservices.nm.scgo.com">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <web:getData soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\r
+         <cluster xsi:type="xsd:string">CAM</cluster>\r
+         <participant xsi:type="xsd:string">PARENT</participant>\r
+         <api xsi:type="xsd:string">PTCPTS</api>\r
+         <query xsi:type="xsd:string"></query>\r
+         <maxRows xsi:type="xsd:int">-1</maxRows>\r
+         <!-- <fields xsi:type="xsd:string"></fields>\r -->
+         <!-- <splitBy xsi:type="xsd:string"></splitBy>\r -->
+         <!--
+         <startDate xsi:type="xsd:dateTime"></startDate>\r
+         <endDate xsi:type="xsd:dateTime"></endDate>\r
+         -->
+         <!--<xpGroupID xsi:type="xsd:string"></xpGroupID>\r -->
+         <!-- <timeZone xsi:type="xsd:string"></timeZone>\r -->
+      </web:getData>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>fish101</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/OutboundAPI/getDataRequest"/><con:wsrmConfig version="1.2"/></con:call><con:call id="111f600e-0290-40c3-89fe-ead20d2a7a57" name="STCHRG"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.67.95.20:8480/servlet/OutboundAPIWS</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="http://webservices.nm.scgo.com">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <web:getData soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\r
+         <cluster xsi:type="xsd:string">PJM</cluster>\r
+         <participant xsi:type="xsd:string">AEPGR</participant>\r
+         <api xsi:type="xsd:string">STCHRG</api>\r
+         <query xsi:type="xsd:string">ACTIVE_FLG='Y' and SOURCE_CD='ISO'</query>\r
+         <maxRows xsi:type="xsd:int">-1</maxRows>\r
+         <fields xsi:type="xsd:string"  xsi:nil="true"></fields>\r
+         <splitBy xsi:type="xsd:string"  xsi:nil="true"></splitBy>\r
+         <startDate xsi:type="xsd:dateTime">2020-12-17T00:00:00</startDate>
+         <endDate xsi:type="xsd:dateTime">2020-12-19T00:00:00</endDate>
+         <xpGroupID xsi:type="xsd:string"  xsi:nil="true"></xpGroupID>\r 
+         <timeZone xsi:type="xsd:string">CST</timeZone>\r
+      </web:getData>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/OutboundAPI/getDataRequest"/><con:wsrmConfig version="1.2"/></con:call><con:call id="8279a5a8-78b3-4314-be1e-f67ab707b062" name="STDTLO"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://localhost:4454/servlet/OutboundAPIWS</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="http://webservices.nm.scgo.com">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <web:getData soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\r
+         <cluster xsi:type="xsd:string">CAM</cluster>\r
+         <participant xsi:type="xsd:string">ANHM</participant>\r
+         <api xsi:type="xsd:string">STDTLO</api>\r
+         <query xsi:type="xsd:string"></query>\r
+         <maxRows xsi:type="xsd:int">-1</maxRows>\r
+         <!--<fields xsi:type="xsd:string"></fields>\r
+         -->
+         <splitBy xsi:type="xsd:string"></splitBy>\r
+         
+         <startDate xsi:type="xsd:dateTime">2020-09-25T00:00:00</startDate>\r
+         <endDate xsi:type="xsd:dateTime">2020-09-27T00:00:00</endDate>\r
+         
+         <!--<xpGroupID xsi:type="xsd:string">1234567</xpGroupID>\r -->
+        
+         <timeZone xsi:type="xsd:string">CST</timeZone>\r
+      </web:getData>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/OutboundAPI/getDataRequest"/><con:wsrmConfig version="1.2"/></con:call><con:call id="f8953f45-3526-40ea-aa77-9f97966d20f1" name="STCOMP"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.67.95.20:4003/servlet/OutboundAPIWS</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="http://webservices.nm.scgo.com">\r
+   <soapenv:Header/>\r
+   <soapenv:Body>\r
+      <web:getData soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\r
+         <cluster xsi:type="xsd:string">CAM</cluster>\r
+         <participant xsi:type="xsd:string">ANHM</participant>\r
+         <api xsi:type="xsd:string">STCOMP</api>\r
+         <query xsi:type="xsd:string"></query>\r
+         <maxRows xsi:type="xsd:int">-1</maxRows>\r
+         <!--<fields xsi:type="xsd:string"></fields>\r
+         -->
+         <splitBy xsi:type="xsd:string"></splitBy>\r
+         
+         <startDate xsi:type="xsd:dateTime">2020-09-25T00:00:00</startDate>
+         <endDate xsi:type="xsd:dateTime">2020-09-25T08:00:00</endDate>
+         
+         
+         <!--<xpGroupID xsi:type="xsd:string">1234567</xpGroupID>\r -->
+        
+         <timeZone xsi:type="xsd:string">CST</timeZone>\r
+      </web:getData>\r
+   </soapenv:Body>\r
+</soapenv:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/OutboundAPI/getDataRequest"/><con:wsrmConfig version="1.2"/></con:call><con:call id="5b8c0daa-956f-4cf8-9f42-6e1f39b7427b" name="PRICES"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.67.95.20:8480/servlet/OutboundAPIWS</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="http://webservices.nm.scgo.com">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <web:getData soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+         <cluster xsi:type="xsd:string">PJM</cluster>
+         <participant xsi:type="xsd:string">AEPAPD</participant>
+         <api xsi:type="xsd:string">PRICES</api>
+         <query xsi:type="xsd:string"  xsi:nil="true" />
+         <maxRows xsi:type="xsd:int">-1</maxRows>
+        <!-- <fields xsi:type="xsd:string"  xsi:nil="true" /> -->
+         <fields xsi:type="xsd:string"> START_DATE, TX_PT, ENERGY_AMT </fields> 
+         <splitBy xsi:type="xsd:string"  xsi:nil="true" />
+         <startDate xsi:type="xsd:dateTime">2019-01-01T00:00:00</startDate>
+         <endDate xsi:type="xsd:dateTime">2019-01-02T00:00:00</endDate>
+         <xpGroupID xsi:type="xsd:string" xsi:nil="true" />
+         <timeZone xsi:type="xsd:string">GMT</timeZone>
+      </web:getData>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/OutboundAPI/getDataRequest"/><con:wsrmConfig version="1.2"/></con:call><con:call id="f519f018-7564-401a-b64e-e6fd42064d0a" name="TXPTS"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://localhost:4454/servlet/OutboundAPIWS</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="http://webservices.nm.scgo.com">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <web:getData soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+         <cluster xsi:type="xsd:string">CAM</cluster>
+         <participant xsi:type="xsd:string">PARENT</participant>
+         <api xsi:type="xsd:string">TXPTS</api>
+         <query xsi:type="xsd:string"></query>
+         <maxRows xsi:type="xsd:int">-1</maxRows>
+         <!-- <fields xsi:type="xsd:string"></fields>
+ -->
+         <!-- <splitBy xsi:type="xsd:string"></splitBy>
+ -->
+         
+         <startDate xsi:type="xsd:dateTime">2020-10-12T00:00:00</startDate>
+         <endDate xsi:type="xsd:dateTime">2020-10-13T00:00:00</endDate>
+         
+         <!--<xpGroupID xsi:type="xsd:string"></xpGroupID>
+ -->
+         <!-- <timeZone xsi:type="xsd:string"></timeZone>
+ -->
+      </web:getData>
+   </soapenv:Body>
+</soapenv:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/OutboundAPI/getDataRequest"/><con:wsrmConfig version="1.2"/></con:call><con:call id="b43f5426-0db8-4825-bcfa-93a30895c96b" name="AWDSCH"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:encoding>UTF-8</con:encoding><con:endpoint>http://10.60.160.4:8480/servlet/ExportWS</con:endpoint><con:request><![CDATA[<soapenv:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:web="http://webservices.nm.scgo.com">
+            <soapenv:Header/>
+            <soapenv:Body>
+            <web:exportData soapenv:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+            <cluster xsi:type="xsd:string">PJM</cluster>
+            <participant xsi:type="xsd:string">CESLP</participant>
+            <fileName xsi:type="xsd:string">sample.xml</fileName>
+            <fileData xsi:type="xsd:string"></fileData>
+            <processName xsi:type="xsd:string">SDBID</processName>
+            <optionalParams xsi:type="xsd:string"></optionalParams>
+            </web:exportData>
+            </soapenv:Body>
+            </soapenv:Envelope>]]></con:request><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:wsaConfig mustUnderstand="NONE" version="200508" action="http://webservices.nm.scgo.com/OutboundAPI/getDataRequest"/><con:wsrmConfig version="1.2"/></con:call></con:operation></con:interface><con:interface xsi:type="con:RestService" id="739bd190-5e44-4c76-bd9a-0498c2fcf0a0" wadlVersion="http://wadl.dev.java.net/2009/02" name="http://localhost:8480" type="rest" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><con:settings/><con:definitionCache type="TEXT" rootPart=""/><con:endpoints><con:endpoint>http://localhost:8480</con:endpoint></con:endpoints><con:resource name="Import" path="/servlet/Import" id="9c19d02c-96c3-4863-a79d-16db499f17ae"><con:settings/><con:parameters><con:parameter><con:name>processName</con:name><con:value>XJBSCH</con:value><con:style>QUERY</con:style><con:default>XJBSCH</con:default><con:path xsi:nil="true"/><con:description xsi:nil="true"/></con:parameter><con:parameter><con:name>ptcpt</con:name><con:value>BPEC</con:value><con:style>QUERY</con:style><con:default>BPEC</con:default><con:path xsi:nil="true"/><con:description xsi:nil="true"/></con:parameter><con:parameter><con:name>cluster</con:name><con:value>PJM_DEVA</con:value><con:style>QUERY</con:style><con:default>PJM_DEVA</con:default><con:path xsi:nil="true"/><con:description xsi:nil="true"/></con:parameter><con:parameter><con:name>fileName</con:name><con:value>File</con:value><con:style>QUERY</con:style><con:default>File</con:default><con:path xsi:nil="true"/><con:description xsi:nil="true"/></con:parameter></con:parameters><con:method name="Import 1" id="c0202f37-70d7-48e2-ac7b-1dd8d1d70f25" method="POST"><con:settings/><con:parameters/><con:representation type="RESPONSE"><con:mediaType>text/xml</con:mediaType><con:status>200</con:status><con:params/><con:element>ERROR</con:element></con:representation><con:representation type="REQUEST"><con:mediaType>application/json</con:mediaType><con:params/><con:element>JOB_SCHEDULER</con:element></con:representation><con:representation type="REQUEST"><con:mediaType>application/xml</con:mediaType><con:params/><con:element>JOB_SCHEDULER</con:element></con:representation><con:representation type="FAULT"><con:mediaType>text/html</con:mediaType><con:status>401</con:status><con:params/><con:element>HTML</con:element></con:representation><con:representation type="REQUEST"><con:mediaType>text/xml</con:mediaType><con:params/><con:element>JOB_SCHEDULER</con:element></con:representation><con:request name="Request 1" id="69854f6f-17a7-4c87-b089-2bae2806b35c" mediaType="text/xml" postQueryString="false"><con:settings><con:setting id="com.eviware.soapui.impl.wsdl.WsdlRequest@request-headers">&lt;xml-fragment/></con:setting></con:settings><con:endpoint>http://localhost:8480</con:endpoint><con:request><![CDATA[<JOB_SCHEDULER><MKT_CD>PJM</MKT_CD><JOB><JOB_NUM>4802</JOB_NUM></JOB></JOB_SCHEDULER>]]></con:request><con:originalUri>http://localhost/servlet/Import</con:originalUri><con:credentials><con:username>nmarket</con:username><con:password>nmarket</con:password><con:selectedAuthProfile>Basic</con:selectedAuthProfile><con:addedBasicAuthenticationTypes>Basic</con:addedBasicAuthenticationTypes><con:authType>Global HTTP Settings</con:authType></con:credentials><con:jmsConfig JMSDeliveryMode="PERSISTENT"/><con:jmsPropertyConfig/><con:parameters>
+  <con:entry key="cluster" value="PJM"/>
+  <con:entry key="fileName" value="File"/>
+  <con:entry key="ptcpt" value="AEPGR"/>
+</con:parameters><con:parameterOrder><con:entry>processName</con:entry><con:entry>ptcpt</con:entry><con:entry>cluster</con:entry><con:entry>fileName</con:entry></con:parameterOrder></con:request></con:method></con:resource></con:interface><con:properties/><con:wssContainer/><con:oAuth2ProfileContainer/><con:oAuth1ProfileContainer/><con:sensitiveInformation/></con:soapui-project>
